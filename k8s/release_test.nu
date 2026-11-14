@@ -37,6 +37,8 @@ use release.nu [
 	auth-provider-secret
 	runtime-services
 	airlock-sinks
+	airlock-peers
+	airlock-peer-secrets
 	airlock-secrets
 	airlock-stand-ins
 	airlock-shared-secrets
@@ -1706,19 +1708,22 @@ def in-cluster-sinks-checks [dir: string] {
 	}
 	let named = (do $render {charge: $ledger, mail: $notify} {networkPolicy: {meshControlPlane: {namespace: mesh-system, ports: [15012 15017]}}} | where kind == "NetworkPolicy" and metadata.name == "effects-airlock" | first | get spec.egress | last)
 	assert equal $named {to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": mesh-system}}}], ports: [{port: 15012, protocol: TCP} {port: 15017, protocol: TCP}]}
-	let portless = (do $render {charge: $ledger, mail: $notify} {networkPolicy: {meshControlPlane: {ports: []}}})
-	assert (($portless | describe) == "string") "a control plane on no port is refused"
+	let portless = (do $render {charge: $ledger, mail: $notify} {networkPolicy: {meshControlPlane: {ports: []}}, airlock: {plaintext: true}})
+	assert ($portless | str contains "networkPolicy.meshControlPlane.ports") $"a control plane on no port is refused: ($portless)"
 	# Plain HTTP carries the credential and the body in cleartext: a mesh encrypts it, or the release says it knows.
 	let clear = (do $render {charge: $ledger, mail: $notify} {})
 	assert ($clear | str contains "airlock.plaintext: true") $clear
 	let stated = (do $render {charge: $ledger, mail: $notify} {airlock: {plaintext: true}})
 	assert (($stated | describe) != "string") $"($stated)"
 	assert (($stated | where kind == "NetworkPolicy" and metadata.name == "effects-airlock" | first | get spec.egress | length) == 3) "no control plane unless named"
-	# Neither the app's own namespace nor kube-system is a sink's to open whole.
-	for ns in [effects kube-system] {
+	# Neither kube-system, the mesh's control plane nor, without a podSelector, the app's own namespace
+	# is a sink's to open whole.
+	for ns in [effects kube-system istio-system] {
 		let inside = (do $render {charge: ($ledger | upsert service.namespace $ns), mail: $notify} $meshed)
 		assert ($inside | str contains $"charge \(($ns)\)") $inside
 	}
+	let own = (do $render {charge: ($ledger | upsert service.namespace effects | upsert service.podSelector {app: ledger}), mail: $notify} $meshed)
+	assert (($own | describe) != "string") $"the app's own namespace through a podSelector: ($own)"
 	# What the target cannot deploy, or a cluster.json written before k8sSinks, fails the release.
 	let none = (do $render {charge: null, mail: $notify} $meshed)
 	assert ($none | str contains "effect charge names no sink for target k8s") $none
@@ -1729,6 +1734,25 @@ def in-cluster-sinks-checks [dir: string] {
 	open $facts | reject k8sSinks | to json | save -f $facts
 	let stale = (try { with-env $shared { render-manifests ($dir | path join release.cue) gke }; "" } catch {|e| $e.msg })
 	assert ($stale | str contains "generate the app again") $stale
+	# A bridge's container and the AI gateway run beside the airlock in compose and in no pod here: a
+	# variable either requires takes a stand-in, so the operator exports neither's.
+	let compose = ($dir | path join compose.yaml)
+	open $compose
+		| upsert services.smtp {image: "smtp:test", environment: {SMTP_USER: "${SMTP_USER:?u}", SMTP_PASSWORD: "${SMTP_PASSWORD:?p}"}}
+		| upsert services.tsbifrost {image: "tsbifrost:test", environment: {OPENAI_API_KEY: "${OPENAI_API_KEY:?k}"}}
+		| upsert services.billing.environment.SMTP_USER "${SMTP_USER}"
+		| upsert services.airlock-mesh.environment.AIRLOCK_BRIDGES "mail tsbifrost"
+		| upsert services.airlock-mesh.environment.BRIDGE_MAIL_URL "http://smtp:8080"
+		| to yaml | save -f $compose
+	let raw = (compose-raw $dir)
+	assert equal (airlock-peers $raw | sort) [smtp tsbifrost]
+	assert equal (airlock-peer-secrets $raw | sort) [OPENAI_API_KEY SMTP_PASSWORD] "SMTP_USER is billing's too, from the environment"
+	let bridged_here = (with-env {SMTP_USER: "operator-user", SMTP_PASSWORD: null, OPENAI_API_KEY: null} { do $render {charge: $ledger, mail: $notify} $meshed })
+	assert (($bridged_here | describe) != "string") $"a simulator's bridge in compose beside a service here: ($bridged_here)"
+	assert equal ($bridged_here | where kind == "Deployment" | get metadata.name | where {|n| $n =~ "smtp|tsbifrost" }) []
+	rm $facts
+	let ungenerated = (try { with-env ($shared | insert SMTP_USER "operator-user") { release-runtime $dir gke }; "" } catch {|e| $e.msg })
+	assert ($ungenerated | str contains "cluster.json is missing: generate the app") $ungenerated
 }
 
 def test_airlock_compose_reads [] {

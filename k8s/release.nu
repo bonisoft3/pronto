@@ -1195,7 +1195,8 @@ export def airlock-secrets [raw: record]: nothing -> list<string> {
 # which may hold any of them. That service takes the variable's value from the environment, so the
 # name gets no stand-in.
 export def airlock-shared-secrets [raw: record]: nothing -> record {
-	let others = ($raw.services | transpose name svc | where name != "airlock")
+	let peers = (airlock-peers $raw)
+	let others = ($raw.services | transpose name svc | where {|o| $o.name != "airlock" and $o.name not-in $peers })
 	airlock-secrets $raw | reduce -f {} {|k, acc|
 		let readers = ($others | where {|o|
 			($o.svc.env_file? | default [] | is-not-empty) or ($k in (env-entries $o.svc | get key)) or (reads-variable ($o.svc | to json --raw) $k)
@@ -1222,6 +1223,28 @@ export def compose-raw [app_dir: string]: nothing -> record {
 	do { cd $app_dir; ^docker compose --profile "*" config --no-interpolate --no-normalize --format json } | from json
 }
 
+# The services compose runs past the airlock's daprd, which no pod here runs: each bridge's container
+# (the host of airlock-mesh's BRIDGE_<NAME>_URL) and the AI gateway. The effects' k8s sinks reach
+# neither (airlock-sinks).
+export def airlock-peers [raw: record]: nothing -> list<string> {
+	let services = ($raw.services | columns)
+	let bridges = (env-entries ($raw.services."airlock-mesh"? | default {}) | where {|e| $e.key =~ '^BRIDGE_.*_URL$' and $e.value != null }
+		| each {|e| $e.value | into string | parse -r '^https?://(?<host>[^:/]+)' | get -o 0.host } | compact)
+	$bridges | append (if "tsbifrost" in $services { ["tsbifrost"] } else { [] }) | where {|s| $s in $services } | uniq
+}
+
+# Each variable an airlock peer requires (`${K:?…}`: a bridge's SMTP password, the gateway's provider
+# key) that no other service reads but the airlock, whose own are airlock-secrets': this target runs
+# no peer, so compose's reads take a stand-in for it and the operator need not export it.
+export def airlock-peer-secrets [raw: record]: nothing -> list<string> {
+	let peers = (airlock-peers $raw)
+	if ($peers | is-empty) { return [] }
+	let own = (airlock-secrets $raw)
+	let kept = ($raw.services | transpose name svc | where {|o| $o.name != "airlock" and $o.name not-in $peers })
+	$peers | each {|p| $raw.services | get $p | to json --raw | str replace -a '$$' '' | parse -r '\$\{(?<k>[A-Za-z_][A-Za-z0-9_]*):\?' | get k } | flatten | uniq
+		| where {|k| $k not-in $own and not ($kept | any {|o| ($o.svc.env_file? | default [] | is-not-empty) or ($k in (env-entries $o.svc | get key)) or (reads-variable ($o.svc | to json --raw) $k) }) }
+}
+
 # Each airlock secret no other service reads, as a stand-in for every compose read of the project:
 # compose then neither refuses one unset nor reads the operator's, which the release never needs
 # (its pods read them from Secrets).
@@ -1229,7 +1252,7 @@ export def airlock-stand-ins [app_dir: string]: nothing -> record {
 	if not ($app_dir | path join compose.yaml | path exists) { return {} }
 	let raw = (compose-raw $app_dir)
 	let shared = (airlock-shared-secrets $raw | columns)
-	airlock-secrets $raw | where {|k| $k not-in $shared } | reduce -f {} {|k, acc| $acc | insert $k "secretKeyRef" }
+	airlock-secrets $raw | where {|k| $k not-in $shared } | append (airlock-peer-secrets $raw) | reduce -f {} {|k, acc| $acc | insert $k "secretKeyRef" }
 }
 
 # The app's compose project: as text, as JSON (--json) or its services' names (--services), each
@@ -1318,7 +1341,9 @@ export def release-plan [runtime: record, services: list<string>, blob_svcs: lis
 export def release-runtime [app_dir: string, env_name: string]: nothing -> record {
 	if $env_name == "metal" or not ($app_dir | path join compose.yaml | path exists) { return {} }
 	let compose = (compose-config $app_dir --json)
-	let sinks = if "airlock" in $compose.services { airlock-sinks (open ($app_dir | path join .pronto cluster.json)) } else { {} }
+	let facts = ($app_dir | path join .pronto cluster.json)
+	if ("airlock" in $compose.services) and not ($facts | path exists) { error make { msg: $"($facts) is missing: generate the app before releasing it" } }
+	let sinks = if "airlock" in $compose.services { airlock-sinks (open $facts) } else { {} }
 	runtime-services $compose --secrets (airlock-secrets (compose-raw $app_dir)) --sinks $sinks
 }
 
@@ -1446,8 +1471,9 @@ export def cloud-build-images [app_dir: string, name: string, services: list<str
 	let override = (compose-config $app_dir | release-override)
 	let plan = {project: $target_env.build.project, registry: $target_env.registry, preview: $tag}
 	# Cloud Build's compose reads every airlock secret as a stand-in, a shared one too: no build reads
-	# one (airlock-build-refusals), and the operator's values stay on this machine.
-	let build_env = (airlock-secrets (compose-raw $app_dir) | each {|k| $"($k)=secretKeyRef" })
+	# one (airlock-build-refusals), and the operator's values stay on this machine. So do its peers'.
+	let raw = (compose-raw $app_dir)
+	let build_env = (airlock-secrets $raw | append (airlock-peer-secrets $raw) | each {|k| $"($k)=secretKeyRef" })
 	let built = (push-images $app_dir $plan $name $services --platform ($target_env.platform? | default "linux/amd64") --override $override --build-env $build_env)
 	$built | items {|svc, ref|
 		let ref = ($ref | reject -o key)

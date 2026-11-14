@@ -267,12 +267,16 @@ import (
 		if len(_inCluster) == 0 || networkPolicy.meshControlPlane != _|_ || airlock.plaintext {true},
 		"effects \(strings.Join(_inCluster, ", ")) reach in-cluster services over plain HTTP, their credential and body in cleartext: set networkPolicy.meshControlPlane where a service mesh's sidecars encrypt them, or airlock.plaintext: true",
 	][0] & true
-	// The egress to an in-cluster sink admits its whole namespace (or its podSelector there), which
-	// must not be the app's own nor kube-system's.
-	_insiders: [for n, s in airlock.sinks if s.service != _|_ if s.service.namespace == ns || s.service.namespace == "kube-system" {"\(n) (\(s.service.namespace))"}]
+	// The egress to an in-cluster sink admits its namespace, or its podSelector's pods there. Never
+	// kube-system's nor the service mesh's control plane's; the app's own only through a podSelector.
+	_insiders: [for n, s in airlock.sinks if s.service != _|_
+		let pods = *s.service.podSelector | {}
+		if s.service.namespace == "kube-system" ||
+			(networkPolicy.meshControlPlane != _|_ && s.service.namespace == networkPolicy.meshControlPlane.namespace) ||
+			(s.service.namespace == ns && len(pods) == 0) {"\(n) (\(s.service.namespace))"}]
 	_outside: [
 		if len(_insiders) == 0 {true},
-		"effects \(strings.Join(_insiders, ", ")) reach a service in the app's own namespace or kube-system, which the airlock's daprd may not reach whole",
+		"effects \(strings.Join(_insiders, ", ")) reach a service in kube-system, the service mesh's control plane or, without a podSelector, the app's own namespace, which the airlock's daprd may not reach whole",
 	][0] & true
 	_unsecured: [for _, r in runtime for k in r.secrets if airlock.secrets[k] == _|_ {k}]
 	_secured: [
@@ -463,8 +467,8 @@ import (
 		internet: *"open" | "airlock"
 		// A service mesh whose sidecars run in the airlock's two pods (Istio's, say) needs its control
 		// plane, which the airlock's walls otherwise shut: each pod then also reaches `ports` in
-		// `namespace`. Absent, they reach no mesh. Sidecar mode: an ambient mesh's node proxies would
-		// need other rules.
+		// `namespace`. Absent, they reach no mesh. Sidecar mode with STRICT mTLS: an ambient mesh's node
+		// proxies would need other rules, and PERMISSIVE leaves an in-cluster sink's traffic in cleartext.
 		meshControlPlane?: {
 			namespace: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"istio-system"
 			ports: [int & >=1 & <=65535, ...int & >=1 & <=65535] | *[15012]
