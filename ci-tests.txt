@@ -16,12 +16,15 @@ cortex-machine.test.ts
 cue-budget/cue_test.ts
 derive_effects_test.ts
 duckstream/compiler_test.ts
+identity/bearer_test.ts
 identity/broker/broker_test.ts
 identity/broker/core_test.ts
 identity/hydra/fake_test.ts
+identity/issuer_test.ts
 identity/oidc_test.ts
 idioms/tests/handlers.test.ts
 installed_test.ts
+integrate-local.test.ts
 ir-md_test.ts
 ir-render_test.ts
 k8s/service-token_test.ts

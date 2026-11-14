@@ -74,9 +74,13 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c=false ./identity"
-          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
-          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue identity/issuer_test.ts"
+          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/bearer_test.ts identity/broker identity/hydra/fake_test.ts"
           - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
+          # Last: its fixtures import the monorepo's bonisoft.org/plugins/pronto,
+          # which only the monorepo resolves, and a rule stops at its first
+          # failing step.
+          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
       outcome-obligations:
         priority: -1
         cmds:

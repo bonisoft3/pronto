@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
@@ -584,8 +584,69 @@ Deno.test("an effect's cluster keeps the wake's names, and the service role the 
 // migration that set one would overwrite it whenever it ran.
 Deno.test("the roles migration leaves electric's password to the deployment", async () => {
   const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
-  assertStringIncludes(roles, "ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;");
+  for (const a of ["BYPASSRLS", "REPLICATION", "LOGIN"]) assertStringIncludes(roles, `ALTER ROLE electric ${a};`);
   assertEquals(/PASSWORD/i.test(roles), false);
+});
+
+// Roles managed outside (a DBA, an operator) are already as the migration
+// would make them, and the login that migrates holds no CREATEROLE: every role
+// change is guarded, so that login runs it, and a role short of an attribute
+// still fails on the privilege it lacks. Timeouts compare as durations.
+Deno.test("the roles migration changes a role only where it lacks what it sets", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  const db = new PGlite();
+  try {
+    await db.exec(roles);
+    await db.exec("ALTER ROLE anon SET lock_timeout = 2000; CREATE ROLE migrator NOCREATEROLE; GRANT CREATE ON SCHEMA public TO migrator; SET ROLE migrator");
+    await db.exec(roles);
+    await db.exec("RESET ROLE; ALTER ROLE electric NOLOGIN; SET ROLE migrator");
+    await assertRejects(() => db.exec(roles), Error, "permission denied to alter role");
+    const members = await db.query("SELECT inherit_option, set_option, admin_option FROM pg_auth_members WHERE member = 'authenticator'::regrole");
+    assertEquals(members.rows, [{ inherit_option: false, set_option: true, admin_option: false }, { inherit_option: false, set_option: true, admin_option: false }]);
+  } finally { await db.close(); }
+});
+
+// The unguarded roles file earlier releases applied, which a deployment's
+// database already holds when it takes the guarded one.
+const LEGACY_ROLES = `
+CREATE ROLE anon NOLOGIN; CREATE ROLE service NOLOGIN; CREATE ROLE electric NOLOGIN;
+CREATE ROLE authenticator NOINHERIT;
+ALTER ROLE authenticator LOGIN;
+GRANT anon, service TO authenticator;
+ALTER ROLE service BYPASSRLS;
+ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;
+ALTER ROLE anon SET statement_timeout = '5s'; ALTER ROLE anon SET lock_timeout = '2s'; ALTER ROLE anon SET idle_in_transaction_session_timeout = '10s';
+ALTER ROLE service SET statement_timeout = '30s'; ALTER ROLE service SET lock_timeout = '5s'; ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';
+`;
+
+// Memberships made outside, by several grantors, are repaired grant by grant;
+// an ADMIN authenticator has already used to grant the role onward is kept with
+// a notice, since revoking it would need CASCADE and drop the deployment's grant.
+Deno.test("the roles migration repairs memberships made before it and outside it", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  const members = (db: PGlite, role: string) =>
+    db.query(`SELECT pg_get_userbyid(grantor) AS grantor, inherit_option, set_option, admin_option FROM pg_auth_members WHERE roleid = '${role}'::regrole AND member = 'authenticator'::regrole ORDER BY 1`);
+  const legacy = new PGlite();
+  try {
+    await legacy.exec(LEGACY_ROLES + "CREATE ROLE migrator NOCREATEROLE; GRANT CREATE ON SCHEMA public TO migrator; SET ROLE migrator");
+    await legacy.exec(roles);
+  } finally { await legacy.close(); }
+  const db = new PGlite();
+  try {
+    await db.exec(LEGACY_ROLES + `
+      CREATE ROLE dba CREATEROLE; GRANT anon TO dba WITH ADMIN TRUE;
+      GRANT anon TO authenticator WITH INHERIT TRUE, ADMIN TRUE GRANTED BY dba;
+      GRANT service TO authenticator WITH ADMIN TRUE;
+      CREATE ROLE downstream; SET ROLE authenticator; GRANT service TO downstream; RESET ROLE;`);
+    await db.exec(roles);
+    await db.exec(roles);
+    assertEquals((await members(db, "anon")).rows, [
+      { grantor: "dba", inherit_option: false, set_option: true, admin_option: false },
+      { grantor: "postgres", inherit_option: false, set_option: true, admin_option: false },
+    ]);
+    assertEquals((await members(db, "service")).rows, [{ grantor: "postgres", inherit_option: false, set_option: true, admin_option: true }]);
+    assertEquals((await db.query("SELECT 1 FROM pg_auth_members WHERE member = 'downstream'::regrole")).rows.length, 1);
+  } finally { await db.close(); }
 });
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {

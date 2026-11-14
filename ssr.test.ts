@@ -93,6 +93,9 @@ Deno.test("every upstream the door dials is its own variable's when set, naming 
   if (!one) throw new Error(`the one Electric's snippet dials past its variable:\n${out}`);
   for (const m of proxies) {
     if (m[2] === " {" && out.slice(m.index! + m[0].length).split("\n")[1]?.trim().startsWith("import electric-upstream-")) continue;
+    // A site's brand files come from an assets host outside the cluster (BRAND_ASSETS_ORIGIN, an
+    // origin, not a service), dialed straight, never through the mesh.
+    if (m[2] === " {$BRAND_ASSETS_ORIGIN:http://brand-assets.invalid} {") continue;
     const spelled = m[2].match(/^ \{\$PRONTO_UPSTREAM_([A-Z0-9_]+):([a-z0-9-]+):\d+\} \{$/);
     if (!spelled) throw new Error(`${m[0].trim()} dials past its variable`);
     if (spelled[1] !== spelled[2].toUpperCase().replaceAll("-", "_")) throw new Error(`${m[0].trim()} names another service's variable`);

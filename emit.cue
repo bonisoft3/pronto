@@ -3088,6 +3088,238 @@ _pgrollDir: "services/database/pgroll"
 	_terminal:         list.Contains([for s in D.statics {s.target}], "/srv/shell/index.html")
 }
 
+// The design block as CSS: design.css's text for one #Design, the rung block
+// and the app's roles over it. #emit's shell/design.css is this, for the
+// program's design; a plugin that needs the same stylesheet for another
+// design (one identity among several) asks this rather than restating the
+// emitter, so the design-scale lint holds for every one alike.
+#DesignCss: D={
+	design: #Design
+	// The scale block, read straight off #scale — platform data with no app
+	// seam, so this text is the same in every app. :where(html) is specificity
+	// (0,0,0) against :root's (0,1,0), which is what makes a role beat a rung
+	// by construction: an app naming --sp-md wins over --size-3 without an
+	// ordering argument, and a screen may shadow a step from its own :root
+	// without a specificity war. It is also the selector Open Props ships with.
+	//
+	// One comprehension over the buckets, so a bucket added to the vocabulary is
+	// emitted with no edit here and the emitted name is prefix + key by
+	// construction. The order is #scale.buckets' declaration order, which is
+	// where that decision is stated.
+	_scaleCss: """
+		/* The value vocabulary, composed from several sources, each bucket under
+		   its own source's upstream names. #scale says which sources those are;
+		   naming them here too would make this sentence false at the next
+		   registration. A rung, unlike a role, means only
+		   "the Nth one": it is what an author reaches for when no role fits,
+		   which is exactly the case that otherwise produces a number. Nothing
+		   here has an appearance, so nothing here has a dark twin — what
+		   changes with the appearance is which rung a role points at, one
+		   namespace up, where the twin is closed. */
+		:where(html) {
+		\(strings.Join(list.Concat([
+			for _, b in #scale.buckets {[for k, v in b.steps {"  \(b.prefix)\(k): \(v);"}]},
+	]), "\n"))
+		}
+		"""
+	text: """
+
+		\(D._scaleCss)
+
+		/* Design system values, from DESIGN.md's frontmatter, which the program
+		   reads as its design block: the roles the preset publishes, each colour
+		   carrying both appearances. A screen that redeclares one of these has
+		   forked the system — the shared layer is the only declaration. */
+		:root {
+		\(strings.Join(list.Concat([
+			// One declaration per colour, both appearances inside it. The dark
+			// palette is not a second :root to keep in step — it is the other
+			// half of this value, resolved against whatever colour-scheme is in
+			// force at the point of use.
+			[for k, v in D.design.colors {"  --\(k): light-dark(\(v), \(D.design.dark[k]));"}],
+			[for k, v in D.design.rounded {"  --r-\(k): \(v);"}],
+			[for k, v in D.design.spacing {"  --sp-\(k): \(v);"}],
+			[for k, v in D.design.motion {"  --motion-\(k): \(v);"}],
+			[for k, v in D.design.control {"  --control-\(k): \(v);"}],
+			[for k, v in D.design.measures {"  --measure-\(k): \(v);"}],
+			[for k, v in D.design.type {"  --type-\(k): \(v);"}],
+			[for k, v in D.design.component {"  --c-\(k): \(v);"}],
+			[
+				"  --shell-bg: var(--\(D.design.shell.bg));",
+				"  --shell-fg: var(--\(D.design.shell.fg));",
+				"  --shell-rule: var(--\(D.design.shell.rule));",
+				"  color-scheme: \([if D.design.colorScheme != _|_ {D.design.colorScheme}, "light dark"][0]);",
+			],
+	]), "\n"))
+		}
+		/* The storybook stamps -dark frames as data-state values. colour-scheme
+		   is inherited and light-dark() reads it at the point of use, so
+		   flipping it on the frame resolves every token inside to its twin —
+		   both appearances reviewable on one device, with no second palette to
+		   drift from this one. */
+		.screen[data-state$="-dark"] {
+		  color-scheme: dark;
+		}
+
+		/* The terminal's chrome, styled here because the terminal ships no
+		   style: its markup carries stable classes and attributes, and this
+		   emission — program-owned, preset-derived, app-overridable — is the
+		   only stylesheet they have. Aesthetic values stay behind --shell-*
+		   variables so an app can retheme without repeating structure. */
+		/* The scrollbar's room is kept whether or not the page overflows: a
+		   screen swapping in is as short as its loading state until its data
+		   lands, and with a classic scrollbar the whole page would jump
+		   sideways and back on every navigation. */
+		html { scrollbar-gutter: stable; }
+		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
+		  background: var(--shell-bg); color: var(--shell-fg); }
+		/* Sticky, because the navigation stack restores a screen's scroll
+		   position on return — without it the way back to the primary
+		   navigation is scrolling up. A sticky element is transparent, so it
+		   needs its own background or content runs under it.
+
+		   One line, always: a wrapped strip is as tall as its rows and pushes
+		   the masthead below the fold, and any app with more routes than a
+		   phone's width holds would wrap at its natural size. It scrolls
+		   instead, and the scrollbar is hidden because a horizontal bar across
+		   the chrome reads as a second rule under the strip. */
+		body > nav { position: sticky; top: 0; z-index: 10;
+		  background: var(--shell-bg);
+		  display: flex; gap: var(--shell-nav-gap, 20px);
+		  flex-wrap: nowrap; align-items: center;
+		  overflow-x: auto; scrollbar-width: none;
+		  padding: var(--shell-nav-pad, 14px 24px);
+		  font-weight: var(--shell-nav-weight, 600);
+		  border-bottom: 1px solid var(--shell-rule); }
+		body > nav::-webkit-scrollbar { display: none; }
+		body > nav a { color: inherit; text-decoration: none; }
+		body > nav a:hover { text-decoration: var(--shell-nav-hover, underline); }
+		/* The routes carry their own width — shrinking them is what would make
+		   the strip fit by breaking words, which is the wrap this avoids. The
+		   identity beside them keeps flex's default shrink, so it is the part
+		   that gives and ellipsises. 24px is check-visual's touch-target floor:
+		   nav labels are small type, so the box grows to the floor rather than
+		   the type growing with it. */
+		body > nav > a { white-space: nowrap; flex: none;
+		  display: inline-flex; align-items: center; min-height: 24px; }
+		/* The signed-in person at the strip's far end, name-then-handle as a
+		   byline. All four ellipsis rules are load-bearing: nowrap alone
+		   cannot shrink, and min-width: 0 is what lets a flex item shrink
+		   below its content width at all. */
+		body > nav .shell-me { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+		body > nav .shell-who { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
+		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		body > nav .shell-who .name:empty { display: none; }
+		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
+		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
+		   lands below 4.5:1 contrast on both themes' nav ground. */
+		/* A short word is still a target: "sair" sets 23px of text, under the
+		   24px minimum a finger needs, so the box keeps the floor the label
+		   does not. */
+		body > nav .shell-signout { font-weight: 400;
+		  display: inline-flex; align-items: center; justify-content: center;
+		  min-height: 24px; min-width: 24px; }
+
+		/* Not a preference to weigh against the design: durations collapse
+		   and the interpreter's exit path, which waits on running animations,
+		   finds none and removes immediately. */
+		@media (prefers-reduced-motion: reduce) {
+		  :root { --motion-fast: 0s; --motion-base: 0s; --motion-shift: 0px; }
+		}
+
+		/* Lifecycle slots the interpreter stamps at moments no screen can
+		   observe. Keyframes, not transitions: screens style rows with
+		   transition, and the cascade would hand them the whole shorthand.
+		   These bindings are deliberately rebindable — a screen may point
+		   them at its own keyframes; the interpreter waits on whatever
+		   animations actually run. */
+		@keyframes shell-item-enter {
+		  from { opacity: 0; transform: translateY(var(--motion-shift)); }
+		}
+		@keyframes shell-item-exit {
+		  to { opacity: 0; transform: scale(.98); }
+		}
+		[data-id][data-enter] { animation: shell-item-enter var(--motion-base) var(--motion-ease); }
+		/* forwards holds the departed row invisible for the frames between
+		   the animation ending and the interpreter removing the node. */
+		[data-id][data-exit] { animation: shell-item-exit var(--motion-base) var(--motion-ease) forwards; }
+		@keyframes shell-reveal {
+		  from { opacity: 0; transform: translateY(calc(var(--motion-shift) * -1)); }
+		}
+		.empty, .invalid, .store-error {
+		  animation: shell-reveal var(--motion-base) var(--motion-ease);
+		}
+		/* A screen arriving on the navigation stack; the one it replaces is
+		   hidden at once — overlapping two live screens would need a stacking
+		   layout the terminal does not own. */
+		.shell-screen { transition: opacity var(--motion-fast) var(--motion-ease); }
+		.shell-screen[data-entering] { opacity: 0; }
+
+		/* The login ceremony — the one full surface the terminal renders,
+		   on the same tokens as everything else. */
+		body:has(.shell-login) { background: var(--login-surface, var(--surface)); }
+		.shell-login {
+		  box-sizing: border-box; min-height: 100svh; display: grid;
+		  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+		  align-items: center; gap: clamp(48px, 8vw, 128px);
+		  max-width: 1160px; margin: auto; padding: clamp(32px, 7vw, 96px);
+		  color: var(--primary, var(--shell-fg));
+		}
+		.shell-login .login-intro { padding-block: 32px; }
+		.shell-login .login-mark {
+		  display: grid; place-items: center; width: 56px; height: 56px;
+		  margin-block-end: 48px; color: var(--accent, var(--shell-fg));
+		  border: 1px solid var(--shell-rule); border-radius: var(--r-md, 8px);
+		  font: 400 32px/1 var(--shell-heading-font, ui-serif, Georgia, serif);
+		}
+		.shell-login h1 {
+		  margin: 0; font-family: var(--shell-heading-font, ui-serif, Georgia, serif);
+		  font-size: clamp(48px, 6.5vw, 88px); font-weight: 400; line-height: 1.05;
+		  letter-spacing: -.055em; overflow-wrap: anywhere;
+		}
+		.shell-login .login-hint {
+		  margin: 28px 0 0; max-width: 32ch; font-size: 1.125rem; line-height: 1.65;
+		  color: var(--secondary, var(--shell-fg));
+		}
+		.shell-login form {
+		  box-sizing: border-box; width: 100%; margin: 0; padding-block: 40px;
+		  border-block: 1px solid var(--shell-rule);
+		}
+		.shell-login .login-actions { display: grid; gap: 12px; }
+		.shell-login button, .shell-login .login-provider {
+		  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+		  width: 100%; min-height: 56px; padding: 14px 20px; font: inherit;
+		  font-size: .9375rem; font-weight: 600; text-align: center; text-decoration: none;
+		  line-height: 1.5; border: 1px solid var(--shell-rule); border-radius: var(--r-sm, 6px);
+		  background: var(--surface); color: var(--primary, var(--shell-fg)); cursor: pointer;
+		  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+		}
+		.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+		.shell-login .login-provider ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+		.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+		.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
+		.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }
+		.shell-login .login-provider:hover { filter: brightness(1.15); }
+		.shell-login .login-guest:hover { color: var(--primary, var(--shell-fg)); background: var(--surface-muted, var(--surface)); }
+		.shell-login :is(button, a):focus-visible { outline: 3px solid var(--accent, var(--shell-fg)); outline-offset: 4px; }
+		.shell-login .login-error { color: var(--danger); margin: 0 0 20px; font-size: .9375rem; }
+		@media (max-width: 700px) {
+		  .shell-login { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; padding: 48px 28px; }
+		  .shell-login .login-intro { padding: 0; }
+		  .shell-login .login-mark { margin-block-end: 32px; }
+		  .shell-login h1 { font-size: clamp(48px, 13vw, 72px); }
+		  .shell-login .login-hint { margin-block-start: 20px; font-size: 1rem; }
+		  .shell-login form { padding-block: 28px; }
+		}
+		@media (prefers-reduced-motion: reduce) {
+		  .shell-login button, .shell-login .login-provider { transition: none; }
+		  .shell-login button:hover, .shell-login .login-provider:hover { transform: none; }
+		}
+
+		"""
+}
+
 // The components of an app package — code, cluster, terminal, loop, build —
 // are inputs; program.cue wires the defaults (#DefaultCluster and the rest)
 // and bayt.cue redeclares cluster, terminal and loop as the escape-hatch seams.
@@ -3263,231 +3495,9 @@ _pgrollDir: "services/database/pgroll"
 			""",
 	][0]
 
-	// The design block becomes CSS here and only here.
-	_design: E.code.surface.design
-	// The scale block, read straight off #scale — platform data with no app
-	// seam, so this text is the same in every app. :where(html) is specificity
-	// (0,0,0) against :root's (0,1,0), which is what makes a role beat a rung
-	// by construction: an app naming --sp-md wins over --size-3 without an
-	// ordering argument, and a screen may shadow a step from its own :root
-	// without a specificity war. It is also the selector Open Props ships with.
-	//
-	// One comprehension over the buckets, so a bucket added to the vocabulary is
-	// emitted with no edit here and the emitted name is prefix + key by
-	// construction. The order is #scale.buckets' declaration order, which is
-	// where that decision is stated.
-	_scaleCss: """
-		/* The value vocabulary, composed from several sources, each bucket under
-		   its own source's upstream names. #scale says which sources those are;
-		   naming them here too would make this sentence false at the next
-		   registration. A rung, unlike a role, means only
-		   "the Nth one": it is what an author reaches for when no role fits,
-		   which is exactly the case that otherwise produces a number. Nothing
-		   here has an appearance, so nothing here has a dark twin — what
-		   changes with the appearance is which rung a role points at, one
-		   namespace up, where the twin is closed. */
-		:where(html) {
-		\(strings.Join(list.Concat([
-			for _, b in #scale.buckets {[for k, v in b.steps {"  \(b.prefix)\(k): \(v);"}]},
-	]), "\n"))
-		}
-		"""
-	_designCss: """
-
-		\(E._scaleCss)
-
-		/* Design system values, from DESIGN.md's frontmatter, which the program
-		   reads as its design block: the roles the preset publishes, each colour
-		   carrying both appearances. A screen that redeclares one of these has
-		   forked the system — the shared layer is the only declaration. */
-		:root {
-		\(strings.Join(list.Concat([
-			// One declaration per colour, both appearances inside it. The dark
-			// palette is not a second :root to keep in step — it is the other
-			// half of this value, resolved against whatever colour-scheme is in
-			// force at the point of use.
-			[for k, v in E._design.colors {"  --\(k): light-dark(\(v), \(E._design.dark[k]));"}],
-			[for k, v in E._design.rounded {"  --r-\(k): \(v);"}],
-			[for k, v in E._design.spacing {"  --sp-\(k): \(v);"}],
-			[for k, v in E._design.motion {"  --motion-\(k): \(v);"}],
-			[for k, v in E._design.control {"  --control-\(k): \(v);"}],
-			[for k, v in E._design.measures {"  --measure-\(k): \(v);"}],
-			[for k, v in E._design.type {"  --type-\(k): \(v);"}],
-			[for k, v in E._design.component {"  --c-\(k): \(v);"}],
-			[
-				"  --shell-bg: var(--\(E._design.shell.bg));",
-				"  --shell-fg: var(--\(E._design.shell.fg));",
-				"  --shell-rule: var(--\(E._design.shell.rule));",
-				"  color-scheme: light dark;",
-			],
-	]), "\n"))
-		}
-		/* The storybook stamps -dark frames as data-state values. colour-scheme
-		   is inherited and light-dark() reads it at the point of use, so
-		   flipping it on the frame resolves every token inside to its twin —
-		   both appearances reviewable on one device, with no second palette to
-		   drift from this one. */
-		.screen[data-state$="-dark"] {
-		  color-scheme: dark;
-		}
-
-		/* The terminal's chrome, styled here because the terminal ships no
-		   style: its markup carries stable classes and attributes, and this
-		   emission — program-owned, preset-derived, app-overridable — is the
-		   only stylesheet they have. Aesthetic values stay behind --shell-*
-		   variables so an app can retheme without repeating structure. */
-		/* The scrollbar's room is kept whether or not the page overflows: a
-		   screen swapping in is as short as its loading state until its data
-		   lands, and with a classic scrollbar the whole page would jump
-		   sideways and back on every navigation. */
-		html { scrollbar-gutter: stable; }
-		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
-		  background: var(--shell-bg); color: var(--shell-fg); }
-		/* Sticky, because the navigation stack restores a screen's scroll
-		   position on return — without it the way back to the primary
-		   navigation is scrolling up. A sticky element is transparent, so it
-		   needs its own background or content runs under it.
-
-		   One line, always: a wrapped strip is as tall as its rows and pushes
-		   the masthead below the fold, and any app with more routes than a
-		   phone's width holds would wrap at its natural size. It scrolls
-		   instead, and the scrollbar is hidden because a horizontal bar across
-		   the chrome reads as a second rule under the strip. */
-		body > nav { position: sticky; top: 0; z-index: 10;
-		  background: var(--shell-bg);
-		  display: flex; gap: var(--shell-nav-gap, 20px);
-		  flex-wrap: nowrap; align-items: center;
-		  overflow-x: auto; scrollbar-width: none;
-		  padding: var(--shell-nav-pad, 14px 24px);
-		  font-weight: var(--shell-nav-weight, 600);
-		  border-bottom: 1px solid var(--shell-rule); }
-		body > nav::-webkit-scrollbar { display: none; }
-		body > nav a { color: inherit; text-decoration: none; }
-		body > nav a:hover { text-decoration: var(--shell-nav-hover, underline); }
-		/* The routes carry their own width — shrinking them is what would make
-		   the strip fit by breaking words, which is the wrap this avoids. The
-		   identity beside them keeps flex's default shrink, so it is the part
-		   that gives and ellipsises. 24px is check-visual's touch-target floor:
-		   nav labels are small type, so the box grows to the floor rather than
-		   the type growing with it. */
-		body > nav > a { white-space: nowrap; flex: none;
-		  display: inline-flex; align-items: center; min-height: 24px; }
-		/* The signed-in person at the strip's far end, name-then-handle as a
-		   byline. All four ellipsis rules are load-bearing: nowrap alone
-		   cannot shrink, and min-width: 0 is what lets a flex item shrink
-		   below its content width at all. */
-		body > nav .shell-me { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
-		body > nav .shell-who { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
-		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		body > nav .shell-who .name:empty { display: none; }
-		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
-		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
-		   lands below 4.5:1 contrast on both themes' nav ground. */
-		/* A short word is still a target: "sair" sets 23px of text, under the
-		   24px minimum a finger needs, so the box keeps the floor the label
-		   does not. */
-		body > nav .shell-signout { font-weight: 400;
-		  display: inline-flex; align-items: center; justify-content: center;
-		  min-height: 24px; min-width: 24px; }
-
-		/* Not a preference to weigh against the design: durations collapse
-		   and the interpreter's exit path, which waits on running animations,
-		   finds none and removes immediately. */
-		@media (prefers-reduced-motion: reduce) {
-		  :root { --motion-fast: 0s; --motion-base: 0s; --motion-shift: 0px; }
-		}
-
-		/* Lifecycle slots the interpreter stamps at moments no screen can
-		   observe. Keyframes, not transitions: screens style rows with
-		   transition, and the cascade would hand them the whole shorthand.
-		   These bindings are deliberately rebindable — a screen may point
-		   them at its own keyframes; the interpreter waits on whatever
-		   animations actually run. */
-		@keyframes shell-item-enter {
-		  from { opacity: 0; transform: translateY(var(--motion-shift)); }
-		}
-		@keyframes shell-item-exit {
-		  to { opacity: 0; transform: scale(.98); }
-		}
-		[data-id][data-enter] { animation: shell-item-enter var(--motion-base) var(--motion-ease); }
-		/* forwards holds the departed row invisible for the frames between
-		   the animation ending and the interpreter removing the node. */
-		[data-id][data-exit] { animation: shell-item-exit var(--motion-base) var(--motion-ease) forwards; }
-		@keyframes shell-reveal {
-		  from { opacity: 0; transform: translateY(calc(var(--motion-shift) * -1)); }
-		}
-		.empty, .invalid, .store-error {
-		  animation: shell-reveal var(--motion-base) var(--motion-ease);
-		}
-		/* A screen arriving on the navigation stack; the one it replaces is
-		   hidden at once — overlapping two live screens would need a stacking
-		   layout the terminal does not own. */
-		.shell-screen { transition: opacity var(--motion-fast) var(--motion-ease); }
-		.shell-screen[data-entering] { opacity: 0; }
-
-		/* The login ceremony — the one full surface the terminal renders,
-		   on the same tokens as everything else. */
-		body:has(.shell-login) { background: var(--login-surface, var(--surface)); }
-		.shell-login {
-		  box-sizing: border-box; min-height: 100svh; display: grid;
-		  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
-		  align-items: center; gap: clamp(48px, 8vw, 128px);
-		  max-width: 1160px; margin: auto; padding: clamp(32px, 7vw, 96px);
-		  color: var(--primary, var(--shell-fg));
-		}
-		.shell-login .login-intro { padding-block: 32px; }
-		.shell-login .login-mark {
-		  display: grid; place-items: center; width: 56px; height: 56px;
-		  margin-block-end: 48px; color: var(--accent, var(--shell-fg));
-		  border: 1px solid var(--shell-rule); border-radius: var(--r-md, 8px);
-		  font: 400 32px/1 var(--shell-heading-font, ui-serif, Georgia, serif);
-		}
-		.shell-login h1 {
-		  margin: 0; font-family: var(--shell-heading-font, ui-serif, Georgia, serif);
-		  font-size: clamp(48px, 6.5vw, 88px); font-weight: 400; line-height: 1.05;
-		  letter-spacing: -.055em; overflow-wrap: anywhere;
-		}
-		.shell-login .login-hint {
-		  margin: 28px 0 0; max-width: 32ch; font-size: 1.125rem; line-height: 1.65;
-		  color: var(--secondary, var(--shell-fg));
-		}
-		.shell-login form {
-		  box-sizing: border-box; width: 100%; margin: 0; padding-block: 40px;
-		  border-block: 1px solid var(--shell-rule);
-		}
-		.shell-login .login-actions { display: grid; gap: 12px; }
-		.shell-login button, .shell-login .login-provider {
-		  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-		  width: 100%; min-height: 56px; padding: 14px 20px; font: inherit;
-		  font-size: .9375rem; font-weight: 600; text-align: center; text-decoration: none;
-		  line-height: 1.5; border: 1px solid var(--shell-rule); border-radius: var(--r-sm, 6px);
-		  background: var(--surface); color: var(--primary, var(--shell-fg)); cursor: pointer;
-		  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
-		}
-		.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
-		.shell-login .login-provider ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
-		.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
-		.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
-		.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }
-		.shell-login .login-provider:hover { filter: brightness(1.15); }
-		.shell-login .login-guest:hover { color: var(--primary, var(--shell-fg)); background: var(--surface-muted, var(--surface)); }
-		.shell-login :is(button, a):focus-visible { outline: 3px solid var(--accent, var(--shell-fg)); outline-offset: 4px; }
-		.shell-login .login-error { color: var(--danger); margin: 0 0 20px; font-size: .9375rem; }
-		@media (max-width: 700px) {
-		  .shell-login { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; padding: 48px 28px; }
-		  .shell-login .login-intro { padding: 0; }
-		  .shell-login .login-mark { margin-block-end: 32px; }
-		  .shell-login h1 { font-size: clamp(48px, 13vw, 72px); }
-		  .shell-login .login-hint { margin-block-start: 20px; font-size: 1rem; }
-		  .shell-login form { padding-block: 28px; }
-		}
-		@media (prefers-reduced-motion: reduce) {
-		  .shell-login button, .shell-login .login-provider { transition: none; }
-		  .shell-login button:hover, .shell-login .login-provider:hover { transform: none; }
-		}
-
-		"""
+	// The design block becomes CSS here and only here (#DesignCss).
+	_design:    E.code.surface.design
+	_designCss: (#DesignCss & {design: E._design}).text
 
 	_appMigrations: #appMigrations & {"code": E.code}
 	_seedFile: _appMigrations._seedFile
@@ -4077,7 +4087,37 @@ _pgrollDir: "services/database/pgroll"
 					  END IF;
 
 					"""
-				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(_tokenRoles, ", ")) TO authenticator;\n"
+				_login: """
+
+					DO $$ DECLARE r text; m record; BEGIN
+					  IF NOT (SELECT rolcanlogin AND NOT rolinherit FROM pg_roles WHERE rolname = 'authenticator') THEN
+					    ALTER ROLE authenticator NOINHERIT LOGIN;
+					  END IF;
+					  FOREACH r IN ARRAY ARRAY[\(strings.Join([for r in _tokenRoles {"'\(r)'"}], ", "))] LOOP
+					    -- PostgREST only switches into these: no grant of one, by any grantor, lets it
+					    -- inherit the role's privileges or grant it on. An ADMIN it already granted
+					    -- onward stays (revoking it would need CASCADE, which drops the deployment's
+					    -- grants), with a notice.
+					    FOR m IN SELECT pg_get_userbyid(grantor) AS g, inherit_option, admin_option FROM pg_auth_members
+					             WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND (inherit_option OR admin_option) LOOP
+					      IF m.inherit_option THEN
+					        EXECUTE format('REVOKE INHERIT OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					      END IF;
+					      IF m.admin_option THEN
+					        IF EXISTS (SELECT FROM pg_auth_members WHERE roleid = r::regrole AND grantor = 'authenticator'::regrole) THEN
+					          RAISE NOTICE 'authenticator keeps ADMIN on % (granted by %): it has granted % onward', r, m.g, r;
+					        ELSE
+					          EXECUTE format('REVOKE ADMIN OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					        END IF;
+					      END IF;
+					    END LOOP;
+					    IF NOT EXISTS (SELECT FROM pg_auth_members WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND set_option) THEN
+					      EXECUTE format('GRANT %I TO authenticator WITH INHERIT FALSE, SET TRUE', r);
+					    END IF;
+					  END LOOP;
+					END $$;
+
+					"""
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -4089,27 +4129,62 @@ _pgrollDir: "services/database/pgroll"
 				// current_scopes(), so every shape yields an empty snapshot with no
 				// error.
 				_bypass: [
-					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
+					if E._serviceOn {"""
+
+						DO $$ BEGIN
+						  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'service') THEN
+						    ALTER ROLE service BYPASSRLS;
+						  END IF;
+						END $$;
+
+						"""},
 					// No password: the deployment's secret sets it (mecha's
 					// #RolePasswordsStep), and a schema that set one would
 					// overwrite it whenever it ran.
-					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
-						"GRANT USAGE ON SCHEMA public TO electric;\n" +
-						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
-						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
-						""
-					},
+					if E._serverOn {"""
+
+						DO $$ BEGIN
+						  -- One attribute at a time, so a role short of one asks only for that one's privilege.
+						  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric BYPASSRLS;
+						  END IF;
+						  IF NOT (SELECT rolreplication FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric REPLICATION;
+						  END IF;
+						  IF NOT (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric LOGIN;
+						  END IF;
+						END $$;
+						GRANT USAGE ON SCHEMA public TO electric;
+						GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;
+						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
+
+						"""},
 				]
 
-				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
-				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
+				// The innermost timeouts of a request (plugins/pronto/resilience), per token role,
+				// compared as durations: a value stored as a bare number is in milliseconds, the
+				// unit of all three, so '5s' and 5000 hold alike.
+				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\nDO $$ DECLARE s record; BEGIN\n  FOR s IN SELECT * FROM (VALUES\n"], [strings.Join([
 					for r in _tokenRoles
-					let tier = [if r == "service" {"service"}, "client"][0] {
-						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
-						"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
-						"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
-					},
-				]])
+					let tier = [if r == "service" {"service"}, "client"][0]
+					for k, v in {
+						statement_timeout:                   resilience.resilience.timeouts.statement[tier]
+						lock_timeout:                        resilience.resilience.timeouts.lock[tier]
+						idle_in_transaction_session_timeout: resilience.resilience.timeouts.idleInTransaction[tier]
+					} {"    ('\(r)', '\(k)', '\(v)s')"},
+				], ",\n")], ["""
+
+					  ) AS v(role, setting, value) LOOP
+					    IF NOT EXISTS (SELECT FROM pg_db_role_setting, unnest(setconfig) AS c
+					                   WHERE setdatabase = 0 AND setrole = s.role::regrole AND split_part(c, '=', 1) = s.setting
+					                     AND (CASE WHEN split_part(c, '=', 2) ~ '^[0-9]+$' THEN split_part(c, '=', 2) || 'ms' ELSE split_part(c, '=', 2) END)::interval = s.value::interval) THEN
+					      EXECUTE format('ALTER ROLE %I SET %I = %L', s.role, s.setting, s.value);
+					    END IF;
+					  END LOOP;
+					END $$;
+
+					"""]])
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -4984,7 +5059,11 @@ _pgrollDir: "services/database/pgroll"
 				"""
 			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
-			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1)
+			// The sites the door reads (sites-on): one variable per front, or SITES.
+			_sitesAnchor:   "    {$SITES}\n"
+			_sitesAnchored: true & strings.Contains(_caddyfileAsset, _sitesAnchor)
+			_sites: [if E.code.surface.fronts != _|_ {strings.Join([for _, f in E.code.surface.fronts {"{$\(f.sites)}"}], "\n    ")}, "{$SITES}"][0]
+			text: resilience.caddySnippets + strings.Replace(strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1), _sitesAnchor, "    \(_sites)\n", 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why

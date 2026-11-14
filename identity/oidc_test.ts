@@ -21,9 +21,10 @@ const jwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid: "k
 const keys = async (kid: string) => (kid === "k1" ? jwk : undefined);
 const now = 1_800_000_000;
 
-async function token(claims: Record<string, unknown>, kid = "k1", key = pair.privateKey, alg = "RS256") {
+// Claims as an object, or as the raw JSON an issuer signed (JSON.stringify writes no 1e400).
+async function token(claims: Record<string, unknown> | string, kid = "k1", key = pair.privateKey, alg = "RS256") {
   const head = base64url(enc.encode(JSON.stringify({ alg, kid })));
-  const body = base64url(enc.encode(JSON.stringify(claims)));
+  const body = base64url(enc.encode(typeof claims === "string" ? claims : JSON.stringify(claims)));
   const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(`${head}.${body}`)));
   return `${head}.${body}.${base64url(sig)}`;
 }
@@ -37,6 +38,8 @@ Deno.test("a token signed for this audience and nonce names its subject", async 
 Deno.test("every claim that does not hold is refused", async () => {
   await assertRefused(async () => check(await token({ ...good, iss: "https://evil.example" })), "issuer");
   await assertRefused(async () => check(await token({ ...good, aud: "client-2" })), "audience");
+  // 1e400 parses as Infinity, which no time is past.
+  await assertRefused(async () => check(await token(JSON.stringify(good).replace(`"exp":${good.exp}`, `"exp":1e400`))), "expired");
   await assertRefused(async () => check(await token({ ...good, exp: now - 61 })), "expired");
   await assertRefused(async () => check(await token({ ...good, nonce: "n2" })), "nonce");
   await assertRefused(async () => check(await token({ ...good, sub: "" })), "subject");
@@ -47,6 +50,10 @@ Deno.test("a forged signature, another algorithm, an unknown key and a malformed
   await assertRefused(async () => check(await token(good, "k1", other.privateKey)), "signature");
   await assertRefused(async () => check(await token(good, "k1", pair.privateKey, "ES256")), "not RS256");
   await assertRefused(async () => check(await token(good, "k9")), "key unknown");
+  // A key of another type than the alg's is the token's refusal, not an import error.
+  const ec = { ...(await crypto.subtle.exportKey("jwk", (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"])).publicKey)), kid: "e1" };
+  await assertRefused(async () => verifyIdToken(await token(good, "e1"), { alg: "RS256", issuers: [good.iss], audience: "client-1", nonce: "n1", keys: async () => ec, now }), "key type");
+  await assertRefused(async () => verifyIdToken(await token(good, "k1", pair.privateKey, "ES256"), { alg: "ES256", issuers: [good.iss], audience: "client-1", nonce: "n1", keys: async () => jwk, now }), "key type");
   await assertRefused(() => check("not.a-token"), "malformed");
   const [h, , s] = (await token(good)).split(".");
   await assertRefused(() => check(`${h}.${base64url(enc.encode(JSON.stringify({ ...good, sub: "g-999" })))}.${s}`), "signature");

@@ -47,8 +47,16 @@ const lint = `${args.omnishell}/check-visual.ts`
 
 // An app with a GCP release plan reads secrets by name in the projects it releases to: a missing one
 // fails here, before a pull request merges, not in release@gcp's rc preview (gcp/secrets.nu).
-const secrets = await new Deno.Command("nu", { args: [new URL("./gcp/secrets.nu", import.meta.url).pathname, "check", appDir, "--if-gcp"], stdout: "inherit", stderr: "inherit" }).output()
-if (!secrets.success) fail("check-secrets failed: the secrets the app's release reads are not all in place")
+// INTEGRATE_LOCAL_SECRETS=skip leaves it to release@gcp, for an app whose release project is a
+// placeholder no one can sign in to; the release itself still checks.
+const secretsMode = Deno.env.get("INTEGRATE_LOCAL_SECRETS") ?? ""
+if (secretsMode !== "" && secretsMode !== "skip") fail(`INTEGRATE_LOCAL_SECRETS is "${secretsMode}": it is unset or "skip"`)
+if (secretsMode === "skip") {
+  console.error("integrate@local: check-secrets skipped (INTEGRATE_LOCAL_SECRETS=skip); release@gcp still runs it")
+} else {
+  const secrets = await new Deno.Command("nu", { args: [new URL("./gcp/secrets.nu", import.meta.url).pathname, "check", appDir, "--if-gcp"], stdout: "inherit", stderr: "inherit" }).output()
+  if (!secrets.success) fail("check-secrets failed: the secrets the app's release reads are not all in place")
+}
 
 // The release's pass ledger (gcp/local-gate-key.nu): the tree's key, taken before the stack starts.
 // A stack on a slot runs from a copy of the app that is no git tree (tests/slot.ts), which names

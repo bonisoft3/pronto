@@ -421,6 +421,11 @@ import (
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
 	component: {for k, v in D._preset.component {(k): *v | string}}
+	// The appearances the app is drawn in. Absent, both: each colour's dark
+	// twin answers a dark colour-scheme. "light" pins the page to its light
+	// half, for an identity that has no dark one yet (its twins then restate
+	// the light values, as #Design.dark is closed over the same names).
+	colorScheme?: "light"
 	// Which colour the terminal's own chrome resolves to; the shell has no
 	// opinion about which swatch is a background.
 	shell: {
@@ -2178,6 +2183,11 @@ import (
 		// global.
 		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
+		// The fronts the door's several-sites mode serves (mecha's docs/proxy.md,
+		// "Several sites"), each by the variable the deployment lists its sites
+		// in, so a deployment names them by front. Without fronts the door reads
+		// SITES.
+		fronts?: [Name=string]: close({sites!: =~"^[A-Z][A-Z0-9_]*$"})
 		flows: [Name=string]: #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
 		// app-relative path: the one spelling every loader and lint read, and
