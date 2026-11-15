@@ -49,6 +49,9 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 		// The broker as readers reach it, which is also its issuer: the
 		// operator's, so an application names nothing.
 		broker: *localBroker | #Url
+		// Production broker issuer for release targets when `broker` stays
+		// `localBroker` so local `launch` and `integrate` still run Hydra.
+		releaseBroker?: #Url
 		// The broker as the cluster reaches it: the local broker's service
 		// (below) by its name in compose, overridden on the host projection
 		// via auth's process-compose.env.
@@ -76,9 +79,12 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 						(p): {
 							...
 							issuer:   S.signin.broker
+							if S._local && S.signin.releaseBroker != _|_ {
+								releaseIssuer: S.signin.releaseBroker
+							}
 							internal: S.signin.brokerInternal
 							client:   "origin"
-							scope:    "openid"
+							scope:    "openid profile email"
 							params:   "provider=\(p)"
 						}
 					}

@@ -2547,7 +2547,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: {for p in S.auth.providers {
 		(p): {}
 		if S.auth.provider != _|_ if S.auth.provider[p] != _|_ {
-			(p): S.auth.provider[p]
+			let P = S.auth.provider[p]
+			(p): {
+				if P.issuer != _|_ {issuer: P.issuer}
+				if P.internal != _|_ {internal: P.internal}
+				if P.client != _|_ {client: P.client}
+				if P.scope != _|_ {scope: P.scope}
+				if P.params != _|_ {params: P.params}
+			}
 		}
 	}}
 }

@@ -4,6 +4,8 @@
 #   identity/serve.sh [env-file]          on Ory Hydra (hydra/front.ts)
 #   identity/serve.sh release --project P --domain D --google-client-id C
 #                                         to Cloud Run (release.nu)
+#   identity/serve.sh txt --project P --domain D <https://app.example>...
+#                                         mints _pronto-identity.<host> TXT records
 # The env file (default ~/.config/pronto-identity/broker.env, never committed)
 # holds BROKER_ISSUER, BROKER_SECRET and each provider's client, e.g.
 # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. HYDRA_SECRET there encrypts
@@ -13,7 +15,11 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 if [ "${1:-}" = release ]; then
 	shift
-	exec mise x nushell@0.116.1 -- nu "$here/release.nu" "$@"
+	exec mise x github:nushell/nushell@0.116.1 github:denoland/deno@v2.9.7 -- nu "$here/release.nu" "$@"
+fi
+if [ "${1:-}" = txt ]; then
+	shift
+	exec mise x github:nushell/nushell@0.116.1 github:denoland/deno@v2.9.7 -- nu "$here/release.nu" txt "$@"
 fi
 env_file=${1:-$HOME/.config/pronto-identity/broker.env}
 [ -f "$env_file" ] || { echo "identity/serve.sh: no $env_file" >&2; exit 2; }

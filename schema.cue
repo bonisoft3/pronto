@@ -1912,6 +1912,7 @@ import (
 				_providersPresent: true & (providers != _|_)
 				_named:            true & list.Contains(providers, Name)
 				issuer?:           string
+				releaseIssuer?:    string
 				internal?:         string
 				client?:           string
 				scope?:            string

@@ -9,7 +9,20 @@
 // start and never stored, since its tokens live five minutes and tenants
 // fetch a key they do not know.
 import { base64url, fromBase64url, jwksSource, type KeySource, randomToken, Refused, signEs256, verifyIdToken } from "../oidc.ts";
-import { type AuthRequest, Codes, idTokenClaims, pairwiseKey, pairwiseSubject, parseAuthorize, redeem } from "./core.ts";
+import {
+  type AuthRequest,
+  Codes,
+  idTokenClaims,
+  type OptionalScope,
+  pairwiseKey,
+  pairwiseSubject,
+  parseAuthorize,
+  profileClaims,
+  redeem,
+  tenantTrustKey,
+  tenantTxtHost,
+  tenantTxtMatches,
+} from "./core.ts";
 
 const enc = new TextEncoder();
 
@@ -88,17 +101,74 @@ export function back(redirectUri: string, params: Record<string, string>): Respo
   return new Response(null, { status: 302, headers: { location: url.toString(), "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 }
 
-export async function broker(p: { issuer: string; secret: string; providers: Provider[]; codes?: Codes }) {
+export type TxtResolver = (hostname: string) => Promise<readonly string[]>;
+
+const RESERVED_DNS = /(^|\.)(localhost|example|invalid|test)$/i;
+
+export const systemTxtResolver: TxtResolver = async (hostname) => {
+  if (RESERVED_DNS.test(hostname) || hostname.includes(":") || /^\d+(\.\d+){3}$/.test(hostname)) return [];
+  try {
+    const rows = await Deno.resolveDns(`${hostname}.`, "TXT");
+    return rows.map((chunks) => chunks.join(""));
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return [];
+    throw e;
+  }
+};
+
+export async function tenantVerifier(p: {
+  issuer: string;
+  secret: string;
+  resolveTxt?: TxtResolver;
+  now?: () => number;
+  positiveTtlMs?: number;
+  negativeTtlMs?: number;
+  maxEntries?: number;
+}): Promise<(tenant: string) => Promise<boolean>> {
+  const issuer = p.issuer.replace(/\/$/, "");
+  const key = await tenantTrustKey(p.secret);
+  const resolveTxt = p.resolveTxt ?? systemTxtResolver;
+  const now = p.now ?? Date.now;
+  const posTtl = p.positiveTtlMs ?? 5 * 60_000;
+  const negTtl = p.negativeTtlMs ?? 30_000;
+  const maxEntries = p.maxEntries ?? 1024;
+  const cache = new Map<string, { ok: boolean; expires: number }>();
+  return async (tenant: string) => {
+    const t = now();
+    const hit = cache.get(tenant);
+    if (hit && hit.expires > t) return hit.ok;
+    const records = await resolveTxt(tenantTxtHost(tenant));
+    const ok = await tenantTxtMatches(key, issuer, tenant, records);
+    if (cache.size >= maxEntries && !cache.has(tenant)) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(tenant, { ok, expires: t + (ok ? posTtl : negTtl) });
+    return ok;
+  };
+}
+
+export async function broker(p: { issuer: string; secret: string; providers: Provider[]; codes?: Codes; resolveTxt?: TxtResolver }) {
   if (p.secret.length < 32) throw new Error("BROKER_SECRET is at least 32 characters");
   const issuer = p.issuer.replace(/\/$/, "");
   const providers = new Map(p.providers.map((x) => [x.name, x]));
   const pairwise = await pairwiseKey(p.secret);
   const stateKey = await hmacKey(p.secret, "broker round trip");
+  const isTrusted = await tenantVerifier({ issuer, secret: p.secret, resolveTxt: p.resolveTxt });
   const codes = p.codes ?? new Codes();
   const signing = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const kid = randomToken(8);
   const publicJwk = { ...(await crypto.subtle.exportKey("jwk", signing.publicKey)), kid, alg: "ES256", use: "sig" };
   const callback = (provider: string) => `${issuer}/callback/${provider}`;
+
+  function toProvider(provider: Provider, legToken: string, pn: string, scopes: readonly OptionalScope[] = []): Response {
+    const to = new URL(provider.authUrl);
+    to.search = new URLSearchParams({
+      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
+      scope: ["openid", ...scopes].join(" "), state: legToken, nonce: pn, prompt: "select_account",
+    }).toString();
+    return new Response(null, { status: 302, headers: { location: to.toString(), "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+  }
 
   async function authorize(url: URL): Promise<Response> {
     const parsed = parseAuthorize(url.searchParams, [...providers.keys()]);
@@ -108,7 +178,11 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
     }
     const r = parsed.request;
     const provider = providers.get(r.provider)!;
-    const leg = await seal(stateKey, { r, pn: randomToken(16), exp: Math.floor(Date.now() / 1000) + 600 });
+    const pn = randomToken(16);
+    const trusted = await isTrusted(r.tenant);
+    const scopes = trusted ? r.scopes : [];
+    const leg = await seal(stateKey, { r: { ...r, scopes }, pn, exp: Math.floor(Date.now() / 1000) + 600 });
+    if (trusted) return toProvider(provider, leg, pn, scopes);
     const host = new URL(r.tenant).host;
     return page(`Sign in to ${host}`, `<h1>Sign in to <span class="origin">${esc(host)}</span></h1>
 <p>You'll continue with ${esc(provider.label)}. Only <span class="origin">${esc(r.tenant)}</span> learns that it's you, and it can't tell you apart in any other app.</p>
@@ -117,16 +191,12 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
   }
 
   async function proceed(url: URL): Promise<Response> {
-    const leg = await unseal(stateKey, url.searchParams.get("leg"));
-    if (!leg) return page("Sign-in expired", `<h1>This sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
+    const legToken = url.searchParams.get("leg");
+    const leg = await unseal(stateKey, legToken);
+    if (!leg || !legToken) return page("Sign-in expired", `<h1>This sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
     const r = leg.r as AuthRequest;
     const provider = providers.get(r.provider)!;
-    const to = new URL(provider.authUrl);
-    to.search = new URLSearchParams({
-      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
-      scope: "openid", state: url.searchParams.get("leg")!, nonce: leg.pn as string, prompt: "select_account",
-    }).toString();
-    return new Response(null, { status: 302, headers: { location: to.toString(), "cache-control": "no-store" } });
+    return toProvider(provider, legToken, leg.pn as string);
   }
 
   async function arrive(name: string, url: URL): Promise<Response> {
@@ -153,19 +223,22 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
       console.error(`broker: ${name}'s token exchange answered ${exchanged.status}: ${await exchanged.text()}`);
       return back(r.redirectUri, { error: "access_denied", state: r.state });
     }
-    let providerSub: string;
+    let claims: Record<string, unknown> & { sub: string };
     try {
       const { id_token } = await exchanged.json();
-      ({ sub: providerSub } = await verifyIdToken(String(id_token ?? ""), {
+      claims = await verifyIdToken(String(id_token ?? ""), {
         alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce: leg.pn as string, keys: provider.keys,
-      }));
+      });
     } catch (e) {
       if (!(e instanceof Refused)) throw e;
       console.error(`broker: ${name}'s id token refused: ${e.message}`);
       return back(r.redirectUri, { error: "access_denied", state: r.state });
     }
-    const sub = await pairwiseSubject(pairwise, r.tenant, provider.name, providerSub);
-    const code = codes.issue({ tenant: r.tenant, redirectUri: r.redirectUri, challenge: r.challenge, nonce: r.nonce, sub, provider: provider.name });
+    const sub = await pairwiseSubject(pairwise, r.tenant, provider.name, claims.sub);
+    const code = codes.issue({
+      tenant: r.tenant, redirectUri: r.redirectUri, challenge: r.challenge, nonce: r.nonce, sub, provider: provider.name,
+      ...profileClaims(claims, r.scopes ?? []),
+    });
     return back(r.redirectUri, { code, state: r.state });
   }
 
@@ -187,7 +260,7 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
     id_token_signing_alg_values_supported: ["ES256"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["openid"],
+    scopes_supported: ["openid", "profile", "email"],
     providers: [...providers.values()].map((x) => ({ name: x.name, label: x.label })),
   };
 

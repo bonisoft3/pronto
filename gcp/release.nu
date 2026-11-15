@@ -389,7 +389,16 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
 		}
 	}
-	let auth_env = $compose.services.auth.environment
+	let release_providers = (do { cd $app_info.dir; ^cue export . -e '*code.capabilities.auth.provider | {}' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
+	let auth_env = ($release_providers | transpose name cfg | reduce -f $compose.services.auth.environment {|it, acc|
+		let issuer = ($it.cfg.releaseIssuer? | default "")
+		if ($issuer | is-empty) { return $acc }
+		let upper = ($it.name | str uppercase)
+		let ik = $"OIDC_($upper)_ISSUER"
+		let nk = $"OIDC_($upper)_INTERNAL"
+		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
+		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
+	})
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })

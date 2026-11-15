@@ -26,6 +26,7 @@ Deno.test("the broker stands in each provider's place, as defaults a deployment 
   assertEquals(env.value.OIDC_PROVIDERS, "google");
   assertEquals(env.value.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:28443}");
   assertEquals(env.value.OIDC_GOOGLE_CLIENT_ID, "${OIDC_GOOGLE_CLIENT_ID:-origin}");
+  assertEquals(env.value.OIDC_GOOGLE_SCOPE, "${OIDC_GOOGLE_SCOPE:-openid profile email}");
   assertEquals(env.value.OIDC_GOOGLE_AUTHORIZE_PARAMS, "${OIDC_GOOGLE_AUTHORIZE_PARAMS:-provider=google}");
   // A public client: the program gives no secret, only the deployment's slot for one.
   assertEquals(env.value.OIDC_GOOGLE_CLIENT_SECRET, "${OIDC_GOOGLE_CLIENT_SECRET:-}");
@@ -52,6 +53,26 @@ Deno.test("an operator's broker elsewhere is theirs to run: no local broker", as
   assertEquals("identity-hydra" in targets.value, false);
   assertEquals("identity" in targets.value, false);
   assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-https://id.example.com}");
+});
+
+Deno.test("releaseBroker keeps the local Hydra cluster for launch and integrate while naming the release issuer", async () => {
+  const both = await exported(
+    signin(`releaseBroker: "https://id.example.com"`),
+    "{targets: _cluster.surface.targets, provider: code.capabilities.auth.provider}",
+  );
+  assertEquals(both.success, true, both.stderr);
+  assertEquals("identity-hydra" in both.value.targets, true);
+  assertEquals("identity" in both.value.targets, true);
+  assertEquals(both.value.targets.auth.compose.environment.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:28443}");
+  assertEquals(both.value.provider.google.releaseIssuer, "https://id.example.com");
+
+  const explicitRemote = await exported(
+    signin(`broker: "https://custom.example.com", releaseBroker: "https://id.example.com"`),
+    "code.capabilities.auth.provider.google",
+  );
+  assertEquals(explicitRemote.success, true, explicitRemote.stderr);
+  assertEquals(explicitRemote.value.issuer, "https://custom.example.com");
+  assertEquals("releaseIssuer" in explicitRemote.value, false);
 });
 
 Deno.test("the terminal draws the way in and never sees the broker's settings", async () => {

@@ -32,8 +32,13 @@ A tenant is an app's origin, which is also its client id: a public client with
 PKCE and one exact redirect per provider, mecha's
 `<origin>/auth/oidc/<provider>/callback`. The subject the broker vouches for is
 pairwise (a keyed hash of tenant, provider and the provider's subject), so one
-person is a stranger to every other app. `identity/broker/core.ts` decides all
-of it apart from the network.
+person is a stranger to every other app. An operator-owned tenant that publishes
+the HMAC TXT record `identity/serve.sh txt` mints at `_pronto-identity.<host>`
+skips the broker's confirmation page, `302`-redirects straight to the
+provider, and receives requested `profile` and verified `email` claims;
+unverified origins see the origin-naming confirmation page first and receive
+`sub` alone.
+`identity/broker/core.ts` decides all of it apart from the network.
 
 ## The broker on Ory Hydra
 

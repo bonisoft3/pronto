@@ -3,6 +3,7 @@
 // is a stranger to a second tenant, and a sign-in never leaves for a redirect
 // that is not the tenant's.
 import { base64url, type Jwk, randomToken, sha256url, verifyIdToken } from "../oidc.ts";
+import { tenantTrustKey, tenantTxtHost, tenantTxtValue } from "./core.ts";
 import { broker, type Provider } from "./main.ts";
 
 function assertEquals(a: unknown, b: unknown, m = "") {
@@ -13,12 +14,17 @@ const enc = new TextEncoder();
 const pair = await crypto.subtle.generateKey(
   { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
 const googleJwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid: "g1" };
-const pending = new Map<string, { nonce: string; sub: string; redirect: string }>();
+const pending = new Map<string, { nonce: string; sub: string; redirect: string; scope: string }>();
 const fakeGoogle = async (req: Request) => {
   const url = new URL(req.url);
   if (url.pathname === "/auth") {
     const code = crypto.randomUUID();
-    pending.set(code, { nonce: url.searchParams.get("nonce")!, sub: url.searchParams.get("login_hint") ?? "alice", redirect: url.searchParams.get("redirect_uri")! });
+    pending.set(code, {
+      nonce: url.searchParams.get("nonce")!,
+      sub: url.searchParams.get("login_hint") ?? "alice",
+      redirect: url.searchParams.get("redirect_uri")!,
+      scope: url.searchParams.get("scope") ?? "openid",
+    });
     const to = new URL(url.searchParams.get("redirect_uri")!);
     to.searchParams.set("code", code);
     to.searchParams.set("state", url.searchParams.get("state")!);
@@ -29,8 +35,17 @@ const fakeGoogle = async (req: Request) => {
     const c = pending.get(f.get("code") ?? "");
     pending.delete(f.get("code") ?? "");
     if (!c || f.get("client_secret") !== "op-secret" || f.get("redirect_uri") !== c.redirect) return Response.json({ error: "invalid_grant" }, { status: 400 });
+    const scopes = c.scope.split(/\s+/);
     const head = base64url(enc.encode(JSON.stringify({ alg: "RS256", kid: "g1" })));
-    const body = base64url(enc.encode(JSON.stringify({ iss: "https://accounts.google.com", aud: "op-client", sub: c.sub, nonce: c.nonce, exp: Math.floor(Date.now() / 1000) + 600 })));
+    const body = base64url(enc.encode(JSON.stringify({
+      iss: "https://accounts.google.com",
+      aud: "op-client",
+      sub: c.sub,
+      nonce: c.nonce,
+      exp: Math.floor(Date.now() / 1000) + 600,
+      ...(scopes.includes("profile") ? { name: "Alice Example", picture: "https://lh3.googleusercontent.com/a/alice" } : {}),
+      ...(scopes.includes("email") ? { email: "Alice@Example.test", email_verified: true } : {}),
+    })));
     const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
     return Response.json({ id_token: `${head}.${body}.${base64url(sig)}` });
   }
@@ -70,12 +85,14 @@ async function redeem(tenant: string, code: string, verifier: string, over: Reco
   return { status: res.status, body: await res.json() };
 }
 
-const A = "https://app-a.example", B = "https://app-b.example";
+const A = "https://app-a.example", B = "https://app-b.example", TRUSTED = "https://iris.cleaning";
+const SECRET = "s".repeat(40);
+const txtRecords = new Map<string, string[]>();
 const cases: [string, () => Promise<void>][] = [];
 
 
 cases.push(["a tenant signs a person in and gets a token only it accepts", async () => {
-  const s = await signIn(A, "alice");
+  const s = await signIn(A, "alice", { scope: "openid profile email" });
   assertEquals(s.html!.includes("Sign in to <span class=\"origin\">app-a.example</span>"), true, "the page names the app");
   assertEquals(`${s.landed!.origin}${s.landed!.pathname}`, `${A}/auth/oidc/google/callback`);
   assertEquals(s.landed!.searchParams.get("state"), s.q!.get("state"));
@@ -84,6 +101,7 @@ cases.push(["a tenant signs a person in and gets a token only it accepts", async
   const claims = await verifyIdToken(t.body.id_token, { alg: "ES256", issuers: [ISSUER], audience: A, nonce: s.q!.get("nonce")!, keys: brokerKeys });
   assertEquals(claims.aud, A);
   assertEquals(claims.sub === "alice", false, "never Google's own subject");
+  assertEquals([claims.name, claims.picture, claims.email], [undefined, undefined, undefined], "unverified tenant never receives profile or email");
 }]);
 
 cases.push(["the same person is a stranger to another tenant, and the same to the same tenant", async () => {
@@ -122,6 +140,46 @@ cases.push(["discovery and keys describe a pairwise ES256 provider", async () =>
   assertEquals([k.keys.length, k.keys[0].kty, k.keys[0].d], [1, "EC", undefined], "the public half only");
 }]);
 
+cases.push(["a tenant with a valid _pronto-identity DNS TXT record 302-redirects straight to Google without an interstitial", async () => {
+  const key = await tenantTrustKey(SECRET);
+  const validTxt = await tenantTxtValue(key, ISSUER, TRUSTED);
+  txtRecords.set(tenantTxtHost(TRUSTED), [validTxt]);
+  // Forged replay of TRUSTED's TXT record onto another domain must NOT bypass the interstitial.
+  txtRecords.set(tenantTxtHost("https://forged.example"), [validTxt]);
+
+  const verifier = randomToken(32);
+  const q = new URLSearchParams({
+    client_id: TRUSTED, redirect_uri: `${TRUSTED}/auth/oidc/google/callback`, response_type: "code", scope: "openid profile email",
+    state: "st-trusted", nonce: "nn-trusted", provider: "google", code_challenge: await sha256url(verifier), code_challenge_method: "S256",
+  });
+  const direct = await call(`${ISSUER}/authorize?${q}`);
+  assertEquals(direct.status, 302, "trusted tenant skips interstitial HTML");
+  const toGoogle = new URL(direct.headers.get("location")!);
+  assertEquals(toGoogle.searchParams.get("scope"), "openid profile email");
+  toGoogle.searchParams.set("login_hint", "alice");
+  const hop = await fetch(toGoogle, { redirect: "manual" });
+  await hop.body?.cancel();
+  const landed = new URL((await call(hop.headers.get("location")!)).headers.get("location")!);
+  assertEquals(`${landed.origin}${landed.pathname}`, `${TRUSTED}/auth/oidc/google/callback`);
+  const t = await redeem(TRUSTED, landed.searchParams.get("code")!, verifier);
+  assertEquals(t.status, 200);
+  const claims = await verifyIdToken(t.body.id_token, { alg: "ES256", issuers: [ISSUER], audience: TRUSTED, nonce: "nn-trusted", keys: brokerKeys });
+  assertEquals(claims.aud, TRUSTED);
+  assertEquals([claims.name, claims.picture, claims.email, claims.email_verified], [
+    "Alice Example",
+    "https://lh3.googleusercontent.com/a/alice",
+    "alice@example.test",
+    true,
+  ]);
+
+  const forgedQ = new URLSearchParams({
+    client_id: "https://forged.example", redirect_uri: "https://forged.example/auth/oidc/google/callback", response_type: "code", scope: "openid",
+    state: "st-forged", nonce: "nn-forged", provider: "google", code_challenge: await sha256url(verifier), code_challenge_method: "S256",
+  });
+  const forgedRes = await call(`${ISSUER}/authorize?${forgedQ}`);
+  assertEquals(forgedRes.status, 200, "replayed TXT record on another domain still shows confirmation page");
+}]);
+
 
 // One test owns the fake Google from start to shutdown, so no operation of
 // its server outlives the test; each case is a step within it.
@@ -132,7 +190,12 @@ Deno.test("the broker end to end", async (t) => {
     name: "google", label: "Google", authUrl: `${G}/auth`, tokenUrl: `${G}/token`, issuers: ["https://accounts.google.com"],
     keys: async (kid) => (kid === "g1" ? googleJwk : undefined), clientId: "op-client", clientSecret: "op-secret",
   };
-  handler = await broker({ issuer: ISSUER, secret: "s".repeat(40), providers: [provider] });
+  handler = await broker({
+    issuer: ISSUER,
+    secret: SECRET,
+    providers: [provider],
+    resolveTxt: async (host) => txtRecords.get(host) ?? [],
+  });
   try {
     for (const [name, run] of cases) await t.step({ name, fn: run, sanitizeOps: false, sanitizeResources: false });
   } finally {

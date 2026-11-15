@@ -28,7 +28,9 @@ Each application is its own tenant, and tenants are never merged:
   tenant's.
 - The subject the broker vouches for is pairwise: a keyed hash of tenant,
   provider and the provider's subject. One person is a stranger to every other
-  app, and nothing else about them arrives (scope `openid`).
+  app. Unverified origins receive `sub` alone (scope `openid`); operator-owned
+  domains verified by `_pronto-identity.<host>` DNS TXT also receive requested
+  `profile` (`name`, `picture`) and verified `email` claims.
 - A code is single-use and redeemable only by the tenant and redirect it was
   issued to; the ID token's audience is that tenant alone.
 
@@ -48,8 +50,10 @@ verbs are green:
    identity.#Signin & {signin: providers: ["google"]}
    ```
 
-   `signin: broker: "https://id.example.com"` names an operator's broker
-   elsewhere than the default; the app then runs no local broker.
+   `signin: releaseBroker: "https://id.example.com"` keeps the local Hydra +
+   stand-in broker for `launch` and `integrate` while pinning the production
+   broker for release targets; `signin: broker: "https://id.example.com"` uses
+   the remote broker everywhere and runs no local broker.
 2. Add a decision for the sign-in to `ir.html` (and `code.decisions` in CUE); `saytw generate` re-pins `meta.ir.sha256` automatically.
 3. The terminal's strip offers each provider to a guest. An app that hides the
    strip presses its `.shell-provider[data-provider=<name>]` link from its own
@@ -99,10 +103,16 @@ A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
    is the platform's.
 4. `identity/serve.sh release --project P --domain D --google-client-id C`
    releases the broker to Cloud Run.
+5. `identity/serve.sh txt --project P --domain D <https://app.example>...`
+   mints the `_pronto-identity.<host>` DNS TXT record (`pronto-identity=<mac>`)
+   that lets an operator-owned domain `302`-redirect straight to the provider
+   without stopping on the broker's confirmation page.
 
 ## Limits
 
-- Google's consent screen names the operator's client, not each app; the
-  broker's own page names the app's origin before leaving for Google.
+- Google's consent screen names the operator's client, not each app; unverified
+  origins see the broker's origin-naming confirmation page before leaving for
+  Google, while domains publishing a valid `_pronto-identity.<host>` TXT record
+  redirect straight through.
 - One way in per account: a passkey or a provider, never both, and a provider
   never promotes a guest.

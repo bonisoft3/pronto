@@ -10,7 +10,7 @@
 // see unrelated subjects for one person, and an application's redirect is its
 // own origin's callback for the provider it asks for, exact, never shared or
 // wildcarded: the one mecha's auth service signs in at.
-import { base64url, sha256url } from "../oidc.ts";
+import { base64url, fromBase64url, sha256url } from "../oidc.ts";
 
 
 /**
@@ -48,6 +48,64 @@ export async function pairwiseSubject(key: CryptoKey, tenant: string, provider: 
   return base64url(new Uint8Array(mac));
 }
 
+const TXT_PREFIX = "pronto-identity=";
+
+/** The DNS TXT owner name where an operator-owned tenant proves it belongs to the broker. */
+export const tenantTxtHost = (tenant: string) => `_pronto-identity.${new URL(tenant).hostname}`;
+
+/** Domain-separated HMAC key for DNS TXT tenant ownership proofs. */
+export async function tenantTrustKey(secret: string): Promise<CryptoKey> {
+  if (secret.length < 32) throw new Error("the pairwise secret is at least 32 characters");
+  const root = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const derived = new Uint8Array(await crypto.subtle.sign("HMAC", root, enc.encode("pronto-identity tenant trust")));
+  return crypto.subtle.importKey("raw", derived, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+/** The TXT record value an operator publishes at `tenantTxtHost(tenant)` for zero-click sign-in. */
+export async function tenantTxtValue(key: CryptoKey, issuer: string, tenant: string): Promise<string> {
+  if (tenantOf(tenant) !== tenant) throw new Error(`tenant is not a bare https origin: ${tenant}`);
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${issuer.replace(/\/$/, "")}\u0000${tenant}`));
+  return `${TXT_PREFIX}${base64url(new Uint8Array(mac))}`;
+}
+
+/** True when any TXT record on `tenantTxtHost(tenant)` carries a valid HMAC for `(issuer, tenant)`. */
+export async function tenantTxtMatches(key: CryptoKey, issuer: string, tenant: string, records: readonly string[]): Promise<boolean> {
+  if (tenantOf(tenant) !== tenant) return false;
+  const msg = enc.encode(`${issuer.replace(/\/$/, "")}\u0000${tenant}`);
+  for (const raw of records) {
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith(TXT_PREFIX)) continue;
+    const token = trimmed.slice(TXT_PREFIX.length);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) continue;
+    if (await crypto.subtle.verify("HMAC", key, fromBase64url(token), msg)) return true;
+  }
+  return false;
+}
+
+export type OptionalScope = "profile" | "email";
+
+export interface VerifiedProfile {
+  name?: string;
+  picture?: string;
+  email?: string;
+  email_verified?: true;
+}
+
+/** Verified profile and email claims an operator-verified tenant asked for;
+ * unverified origins pass `[]` so neither name nor email crosses tenants. */
+export function profileClaims(claims: Record<string, unknown>, scopes: readonly OptionalScope[]): VerifiedProfile {
+  const out: VerifiedProfile = {};
+  if (scopes.includes("profile")) {
+    if (typeof claims.name === "string" && claims.name.trim() !== "") out.name = claims.name.trim().slice(0, 120);
+    if (typeof claims.picture === "string" && claims.picture.startsWith("https://")) out.picture = claims.picture;
+  }
+  if (scopes.includes("email") && claims.email_verified === true && typeof claims.email === "string" && claims.email.trim() !== "") {
+    out.email = claims.email.trim().toLowerCase().slice(0, 254);
+    out.email_verified = true;
+  }
+  return out;
+}
+
 /** A tenant's sign-in request, as /authorize accepts it. */
 export interface AuthRequest {
   tenant: string;
@@ -56,6 +114,7 @@ export interface AuthRequest {
   state: string;
   nonce: string;
   challenge: string;
+  scopes: readonly OptionalScope[];
 }
 
 /**
@@ -78,18 +137,20 @@ export function parseAuthorize(q: URLSearchParams, providers: readonly string[])
   const fail = (error: string) => ({ ok: false as const, error, redirect });
   if (state === "" || state.length > 1024) return { ok: false, error: "state required", redirect: null };
   if (q.get("response_type") !== "code") return fail("unsupported_response_type");
-  if (!(q.get("scope") ?? "").split(" ").includes("openid")) return fail("invalid_scope");
+  const words = (q.get("scope") ?? "").split(/\s+/).filter(Boolean);
+  if (!words.includes("openid")) return fail("invalid_scope");
+  const scopes = (["profile", "email"] as const).filter((s) => words.includes(s));
   if (q.get("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(q.get("code_challenge") ?? "")) return fail("invalid_request");
   const nonce = q.get("nonce") ?? "";
   if (nonce === "" || nonce.length > 256) return fail("invalid_request");
-  return { ok: true, request: { tenant, redirectUri: redirect, provider, state, nonce, challenge: q.get("code_challenge")! } };
+  return { ok: true, request: { tenant, redirectUri: redirect, provider, state, nonce, challenge: q.get("code_challenge")!, scopes } };
 }
 
 export const pkceMatches = async (verifier: unknown, challenge: string) =>
   typeof verifier === "string" && /^[A-Za-z0-9._~-]{43,128}$/.test(verifier) && (await sha256url(verifier)) === challenge;
 
 /** What a code carries from the provider's callback to the tenant's /token. */
-export interface Grant {
+export interface Grant extends VerifiedProfile {
   tenant: string;
   redirectUri: string;
   challenge: string;
@@ -144,5 +205,8 @@ export function idTokenClaims(p: { issuer: string; grant: Grant; now?: number })
     idp: p.grant.provider,
     iat: now,
     exp: now + 300,
+    ...(p.grant.name !== undefined ? { name: p.grant.name } : {}),
+    ...(p.grant.picture !== undefined ? { picture: p.grant.picture } : {}),
+    ...(p.grant.email !== undefined ? { email: p.grant.email, email_verified: true } : {}),
   };
 }
