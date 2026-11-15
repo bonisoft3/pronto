@@ -45,6 +45,7 @@ use release.nu [
 	app-services-environment
 	seed-configmaps
 	seed-fill
+	seed-off
 	apply-alert-rules
 	check-backup-secrets
 	sops-platform
@@ -992,8 +993,21 @@ def test_seed_configmaps [] {
 	assert ($calls | all {|c| not ($c | str starts-with "patch configmap full-flags") }) "one that lacks nothing is left alone"
 	let filled = (seed-fill {flags: {old: {defaultVariant: "off"}}} {flags: {old: {defaultVariant: "on", targeting: {}}, new: {defaultVariant: "off"}}, "$schema": "x"})
 	assert ($filled.flags.old == {defaultVariant: "off"}) "a flag the operator set keeps its value, and gains nothing deeper"
-	assert ($filled.flags.new == {defaultVariant: "off"}) "a flag it lacks comes with the seed's default"
+	assert ($filled.flags.new == {defaultVariant: "off"}) "a flag it lacks with no state comes as the seed has it"
 	assert ($filled."$schema" == "x") "a top-level key it lacks is added"
+	# PRONTO-464: a flag the ConfigMap lacks is added DISABLED, whatever the generated file says (a release
+	# before the push must not turn it on), its variants kept so a push can; one the operator holds is untouched.
+	let on = {state: "ENABLED", variants: {default: true, local: true}, defaultVariant: "default"}
+	let live = {flags: {held: {state: "ENABLED", variants: {default: false}, defaultVariant: "default"}}}
+	let next = (seed-fill $live {flags: {held: {state: "DISABLED", variants: {default: true}, defaultVariant: "default"}, board_keeps_game: $on}})
+	assert ($next.flags.board_keeps_game.state == "DISABLED") "a flag the live object lacks comes DISABLED, not ENABLED as generated"
+	assert ($next.flags.board_keeps_game.variants == $on.variants) "its variants come with it, so a push can turn it on"
+	assert ($next.flags.board_keeps_game.defaultVariant == "default")
+	assert ($next.flags.held == $live.flags.held) "a flag the operator holds keeps its state and variants"
+	let whole = (seed-fill {} {flags: {a: $on, b: {state: "DISABLED", variants: {x: 1}}}})
+	assert (($whole.flags | values | get state) == ["DISABLED" "DISABLED"]) "a live object with no flags at all gets every flag DISABLED"
+	let other = (seed-fill {} {settings: {state: "ENABLED"}})
+	assert ($other.settings.state == "ENABLED") "only flagd's flags are held off: another key's value is kept"
 	let bad = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { seed-configmaps {flagd: {seed: {other: "nope.json"}}} $"($dir)/app" "sample" }; false } catch { true })
 	assert $bad "a seed that is not there fails the release"
 	rm -r $dir
