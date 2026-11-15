@@ -527,7 +527,7 @@ export def main [
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
-	let release_providers = (do { cd $app_source_dir; ^cue export . -e '*code.capabilities.auth.provider | {}' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
+	let release_providers = (do { cd $app_source_dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
 	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $release_providers)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
 	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate)} | to json | save -f $pushed_file

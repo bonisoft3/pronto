@@ -389,7 +389,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
 		}
 	}
-	let release_providers = (do { cd $app_info.dir; ^cue export . -e '*code.capabilities.auth.provider | {}' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
+	let release_providers = (do { cd $app_info.dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
 	let auth_env = ($release_providers | transpose name cfg | reduce -f $compose.services.auth.environment {|it, acc|
 		let issuer = ($it.cfg.releaseIssuer? | default "")
 		if ($issuer | is-empty) { return $acc }

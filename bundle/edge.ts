@@ -37,7 +37,7 @@ import { type Functions, renderFunctions } from './edge-functions.ts'
 import { renderEffects } from './edge-effects.ts'
 import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
-import { clusterDrains, clusterSteps, hasEffects, releaseScripts } from './edge-scripts.ts'
+import { clusterDrains, clusterSteps, EDGE_CAPABILITIES_CUE, EDGE_STATE_CUE, hasEffects, releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -100,7 +100,7 @@ if (hatches.length && !clustered) fail('edge hatches run in the cluster, which a
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{assets: *code.capabilities.seedAssets | null, seedBlobs: *code.capabilities.seedBlobs | null, blobs: *code.capabilities.blobs | false, images: *code.capabilities.edgeImages | null, signIn: *cluster.capabilities.signIn | {}, providerRelease: *code.capabilities.auth.provider | {}}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities failed')
 const { assets, seedBlobs, blobs, images, signIn, providerRelease } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string }>; providerRelease: Record<string, { releaseIssuer?: string }> }
 const routeScreens: Record<string, string> = {}
@@ -257,7 +257,7 @@ await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify(relea
 // tick — its cron schedules, its reducers that arm a deadline; a plv8
 // machine's timers never run here — for the clock outside the object below.
 const stateOut = await new Deno.Command('cue', {
-  args: ['export', '.', '-e', '{reducers: *code.state.mecha.reducers | {}, functions: *code.state.functions | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
+  args: ['export', '.', '-e', EDGE_STATE_CUE, '--out', 'json'],
   cwd: app, stdout: 'piped', stderr: 'inherit',
 }).output()
 if (!stateOut.success) fail('cue export of the machines and schedules failed')

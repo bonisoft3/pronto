@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { clusterSteps, releaseFiles, releaseScripts } from './edge-scripts.ts'
-import { emitFiles, paymentProgram } from '../effects-fixtures.ts'
+import { clusterSteps, EDGE_CAPABILITIES_CUE, EDGE_STATE_CUE, releaseFiles, releaseScripts } from './edge-scripts.ts'
+import { cue, emitFiles, paymentProgram } from '../effects-fixtures.ts'
 import { browserTier } from '../../../libraries/mecha/packages/mecha-browser/fence.ts'
 
 const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
@@ -166,4 +166,43 @@ Deno.test('a placement written before the job key step is refused, not defaulted
   } finally {
     await Deno.remove(dir, { recursive: true })
   }
+})
+
+// Regression: `*code.state.mecha.reducers | {}` collapsed to `{}` under CUE
+// v0.18 because `reducers` carries a pattern constraint and nested defaults on
+// `#Reducer`, stripping `src/machines.js` from edge releases (`pgl_step: no machine`).
+Deno.test('edge CUE queries preserve mecha reducers, functions, and optional capabilities without default disjunctions', async () => {
+  const base = paymentProgram() + '\ncode: app\ncluster: _cluster\n'
+  const emptyState = await cue(['export', '-', '-e', EDGE_STATE_CUE, '--out', 'json'], base)
+  assert.equal(emptyState.success, true, emptyState.stderr)
+  assert.deepEqual(JSON.parse(emptyState.stdout), { reducers: {}, functions: {}, crons: [] })
+
+  const emptyCaps = await cue(['export', '-', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], base)
+  assert.equal(emptyCaps.success, true, emptyCaps.stderr)
+  assert.deepEqual(JSON.parse(emptyCaps.stdout), { assets: null, seedBlobs: null, blobs: false, images: null, signIn: {}, providerRelease: {} })
+
+  const populated = base + `
+app: state: mecha: reducers: presence: {
+  rules: "machines/presence.js"
+  machine: {
+    config: {initial: "ready", states: ready: {}}
+    setup: {
+      version: 1
+      types: {
+        context: {type: "object", fields: {}}
+        view: {type: "object", fields: {}}
+        events: {}
+      }
+    }
+  }
+}
+app: state: functions: normalize: {rules: "functions/normalize.js", fuel: 1000, note: "normalize payload"}
+`
+  const fullState = await cue(['export', '-', '-e', EDGE_STATE_CUE, '--out', 'json'], populated)
+  assert.equal(fullState.success, true, fullState.stderr)
+  const parsedState = JSON.parse(fullState.stdout) as { reducers: Record<string, { reducer: { name: string; fuel: number } }>; functions: Record<string, unknown> }
+  assert.deepEqual(Object.keys(parsedState.reducers), ['presence'])
+  assert.equal(parsedState.reducers.presence.reducer.name, 'presence')
+  assert.equal(typeof parsedState.reducers.presence.reducer.fuel, 'number')
+  assert.deepEqual(Object.keys(parsedState.functions), ['normalize'])
 })
