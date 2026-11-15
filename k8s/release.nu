@@ -843,7 +843,9 @@ export def app-services-environment [compose: record, services: list<string>, ow
 # seed them (App.services.<n>.seed), each keyed by its file's name, when they are not there yet. One
 # that exists is the operator's (pronto-flags push's): nothing in it changes, but a JSON seed fills in
 # what it lacks (seed-fill), so a flag added since the ConfigMap was seeded reaches it with its
-# default, not as an unknown flag.
+# default, not as an unknown flag: its variants come with it, but it comes DISABLED (seed-off), whatever
+# state the generated file says, since a release must never turn a flag on (PRONTO-464: board_keeps_game,
+# merged `default: true`, went live at the release before its pronto-flags push). A push owns a flag's state.
 export def seed-configmaps [services: record, app_dir: string, namespace: string] {
 	for s in ($services | values) {
 		for c in ($s.seed? | default {} | transpose name file) {
@@ -869,18 +871,26 @@ export def seed-configmaps [services: record, app_dir: string, namespace: string
 
 # `have` with what `seed` has and it lacks: a missing top-level key, or a missing member of a top-level
 # object (one flag of flagd's `flags`). Nothing `have` holds is changed, and nothing deeper is added,
-# so a flag the operator changed keeps its variants and targeting as they are.
+# so a flag the operator changed keeps its variants and targeting as they are. A flag of flagd's `flags`
+# that `have` lacks is added DISABLED (seed-off): only `pronto-flags push` turns a flag on.
 export def seed-fill [have: record, seed: record]: nothing -> record {
 	$seed | transpose k v | reduce -f $have {|e, acc|
 		let mine = ($acc | get -o $e.k)
+		let off = {|v| if $e.k == "flags" { seed-off $v } else { $v } }
 		if $mine == null {
-			$acc | upsert $e.k $e.v
+			$acc | upsert $e.k (if ($e.v | describe) =~ "^record" and $e.k == "flags" { $e.v | items {|k, f| {k: $k, v: (seed-off $f)} } | reduce -f {} {|i, o| $o | upsert $i.k $i.v } } else { $e.v })
 		} else if (($mine | describe) =~ "^record" and ($e.v | describe) =~ "^record") {
-			$acc | upsert $e.k ($e.v | transpose k v | reduce -f $mine {|m, inner| if ($inner | get -o $m.k) == null { $inner | upsert $m.k $m.v } else { $inner } })
+			$acc | upsert $e.k ($e.v | transpose k v | reduce -f $mine {|m, inner| if ($inner | get -o $m.k) == null { $inner | upsert $m.k (do $off $m.v) } else { $inner } })
 		} else {
 			$acc
 		}
 	}
+}
+
+# A flag the ConfigMap lacks, as it is added: its variants and targeting as generated, its state DISABLED.
+# Anything that is not a flag (no `state`) is left as it is.
+export def seed-off [flag: any]: nothing -> any {
+	if ($flag | describe) =~ "^record" and ($flag | get -o state) != null { $flag | upsert state "DISABLED" } else { $flag }
 }
 
 # <name>-alert-rules: the app's alerting rules (App.alerting.rules), each file under its name, written
