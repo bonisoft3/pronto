@@ -12,7 +12,7 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests with drains, durable snapshot
+`docker` and `gcp` are built, `cloudflare` for guests, passkeys and providers with drains, durable snapshot
 computations and its clock,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
@@ -65,12 +65,17 @@ in a deploy tree mecha does not write, and without the declaration a schedule
 nothing wakes fails silently. Compose runs the cluster's own clock, and the
 cloudflare release writes its own ([below](#cloudflare)).
 
-`verify@<target>` checks a live deployment. Pages, Cloudflare, and Kubernetes
-use the HTTP and browser verification runner. GCP defaults to the compose
-integration drivers that read `APP_URL`, built and run in Cloud Build against
-the released service or a named preview. An explicit `--target`, `APP_URL`,
-`--tier`, `--headless`, or `--session` selects the HTTP and browser runner for
-GCP too. See [[release-targets#gcp]].
+**`verify@<target>` adds no checks.** The integrate drivers that measure a
+running app read `APP_URL` ([`base-url.ts`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/base-url.ts)), so
+each becomes a `verify` rule per target with `APP_URL` bound to that target's
+door and no compose prepend. Two things come first. The base: a driver that
+navigates to `${origin}/ar` (`apps/truco/tests/acceptance.ts`) cannot reach a
+site under a subpath, and an `APP_URL` ending in a slash yields `//`, which the
+router refuses. And the budgets, whose 20 s are tuned to a warm local stack
+that a cold page boot exceeds. The projection is emitted for `gcp` alone
+(`verify@gcp`, [gcp](#gcp)), whose address is a host with no subpath and no
+trailing slash; the other targets' are
+[not emitted](../PENDING.md#release-targets).
 
 ## A release is its entry
 
@@ -318,9 +323,10 @@ The scoped Cache API leaves dynamic page and authentication caching unchanged.
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
-Social sign-in providers are currently refused (`_authTargetRefusal`): the edge
-cluster runs guest sessions, passkey ceremonies and shape tokens in its Durable Object,
-leaving social provider integration to container and cloud tiers (`gcp`, `k8s`, `docker`).
+The edge cluster runs guest sessions, passkey ceremonies, the auth service's
+provider sign-in and shape tokens in its Durable Object, so social sign-in
+providers (`capabilities.auth.providers`) are admitted here as on the
+container and cloud tiers ([below](#cloudflare-sign-in)).
 
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
@@ -419,7 +425,11 @@ OpenAI): each is set from the publish's environment, or must already be the
 deployed dispatcher's, or the publish is refused.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/README.md))
+([`edge-pglite.ts`](../bundle/edge-pglite.ts)): with `EDGE_BUILD_PROJECT=<project>` in that
+project's Cloud Build, kept in `gs://<project>-pronto-edge` under a hash of those sources, so
+the next release on the same mecha downloads it and the machine releasing needs no Docker;
+without it, by the local Docker;
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
 [mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
@@ -438,7 +448,7 @@ service, and nothing runs while no one uses the app:
 | compose service | at the edge | sleeps | |
 |---|---|---|---|
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
-| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
+| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests, passkeys and providers |
 | conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
 | compute | private Query and Compute Workers, each with a Durable Object; a separate coordinator object dispatches through service bindings | when idle | built, snapshot mode |
 | transform | stream mapping through a Queue consumer | between batches | designed |
@@ -507,9 +517,17 @@ What fixes its shape, as built:
   [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
-  policy is Postgres's own here as on a single machine. Guests only:
-  `/auth/guest` mints the credentials; passkeys and providers wait for mecha's
-  auth service to run in the Worker.
+  policy is Postgres's own here as on a single machine.
+- <a id="cloudflare-sign-in"></a>**The auth service's sign-in, in the object.**
+  `/auth/guest` mints a guest's credentials, the passkey ceremonies run with
+  the Worker's door as the relying party, and the object runs the auth
+  service's provider sign-in (`/auth/oidc/*`) for the providers the program
+  names (`auth.providers`): [`edge-signin.ts`](../bundle/edge-signin.ts)
+  writes the settings compose would give the auth service into the Worker's
+  vars, the program's or the build environment's `OIDC_<NAME>_<SETTING>`, and
+  `publish-edge.ts` puts each client secret, `OIDC_<NAME>_CLIENT_SECRET` from
+  its environment, beside `JWT_SECRET`; register the callback
+  `<origin>/auth/oidc/<name>/callback` with the provider (or the broker).
 - **Sync holds requests open.** A tab's live shape request waits on the
   object, which keeps the object awake while a tab is open; that is the price
   of the simplest path, and a poke on a hibernating WebSocket is the cheaper
@@ -728,14 +746,141 @@ it deploys rather than a stack on the machine releasing: `release.nu` first
 releases the checkout as the preview `rc` ([Previews](#previews)), then runs
 `verify@gcp` against it, and only when every driver passes releases the app,
 with the very images tested: copied by digest from the previews' repository,
-not built again. The preview is stopped whatever happened (its service, jobs
-and clock), and its Cloud SQL instance stays for the next release, which
-starts it on an empty database: making an instance is most of ten minutes.
+not built again. The drivers' images build in Cloud Build while the preview
+deploys, and the build waits for the release's go, a marker in the project's
+Cloud Build bucket, to run them; while they run, the release's project copies
+the preview's images as `candidate`, and tags them `release` only once every
+driver passed. While they run the release also stages production: the
+project, the plan rendered with the tested digests, the bucket and the
+grants, none of it running the app; when they pass only the schema job and
+the deploy are left, the first of the release's code production runs
+([staged release](decisions/2026-10-29-staged-release.md)). A release skips the schema job when the live service already carries the hash of the
+job it would run (the `pronto-job` label of its revision, the hash of the rendered job: its
+image, so every migration, seed, policy, publication and hybrid machine, and its commands,
+roles and secrets); a missing label, a revision not ready or a failed read runs it, as do
+previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
+The deploy takes no traffic at first: the new revision is tagged
+`next` and probed at its own address (`/health`, which answers the
+revision's name), traffic moves to it only once it answers, and the public
+address is then polled, three minutes at most each, until it answers as the
+new revision. If either fails, traffic goes back to the revision that served
+before (by `--rollback`'s own step, so not past a migration) and the release exits non-zero; a first deploy has none to go back to.
+`--rollback`
+sends the traffic back to the revision before, where its schema is the
+same. A release that fails stops the preview (its service, jobs and clock); one that
+is live reports so at once and deletes only the preview's clock, the one part that acts alone:
+the rest stays idle (Cloud Run scales to zero) and the next release, which takes the
+app's lock first, stops it as it empties the database. The tests' log is read beside going
+live and saved to `dist/gcp/tests-log.txt`. The preview's Cloud SQL instance stays for the next
+release, which starts it on an empty database: making an instance is most of ten minutes.
+A project's setup (APIs, repository, account, secrets, instance) is skipped when what it reads
+(the plan's project, names, region, repository and database settings, and the setup's code in
+release.nu) hashes as it did for the last release that set it up, kept in a `-setup` secret;
+an unreadable marker sets it up, and `PRONTO_SETUP=always` forces it.
 One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a
 preview that does not come up, stops the release there. `--preview`,
 `--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
-releases without the preview. A local stack (`sayt integrate`) is for
-development and CI.
+releases without the preview.
+
+Before even that, release.nu hands Cloud Run every service yaml it will apply (the door and
+each sidecar apart, the rc preview's and production's) to `gcloud run services replace --dry-run`,
+in parallel, so a fault only Cloud Run sees (a reserved env name such as `PORT`) fails the release
+in seconds, naming the file and Cloud Run's message, before the gates, the build or the tests. The
+dry run needs no image to exist, so the yaml is rendered over placeholder digests; it does check the
+service account, so a project not yet set up (a first release) is validated when applied. Jobs are not
+checked: `gcloud run jobs replace` has no `--dry-run`.
+
+Before all of that, first in `release@gcp` and again at the start of `integrate@local`
+(for an app with a GCP release plan), [`gcp/secrets.nu`](../gcp/secrets.nu)'s `check-secrets`
+lists, by metadata alone (`gcloud secrets versions describe latest`, which gives the state, never a
+value), the secrets the release reads by name (the OIDC secrets and every
+`GCP.sidecars.<n>.secrets`) in every project it touches, the release's and the rc
+preview's, and fails naming every pair (project, secret) whose latest version is not enabled, all at once. Declare one in
+the repo's `infra/gcp`, applied by `release@infra`. gcloud not signed in is a failure too. `INTEGRATE_LOCAL_SECRETS=skip`
+leaves the check to `release@gcp` alone, for an app whose release project is still a placeholder no
+one can sign in to; any other value but unset is refused.
+
+Before any of that, a release (gated or `--no-gate`, not a preview, a dry run
+or a snapshot) runs the same drivers on the machine releasing: `release.nu`
+runs `sayt integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all`, which brings the
+app up as host processes, runs the visual lint and then every other driver
+the rc gate runs (the same selection, [`local-drivers.ts`](../local-drivers.ts)),
+each from the app's directory with `APP_URL` at the local door, and fails if
+any failed. A failing scenario stops the release in about a minute with
+nothing built, pushed or deployed, where the rc gate would find it half an
+hour in. A scenario a driver skips away from localhost (a stand-in's) runs
+here, where its stand-in is. The rc gate stays after it, since a preview finds
+what only the cloud has. An app without `integrate@local` is refused;
+`--no-local-gate`, or `PRONTO_RELEASE_NO_LOCAL_GATE=1`, skips the pre-gate,
+only when asked.
+
+The pre-gate runs beside the preview's emptying, the tests' build and the
+preview's deploy, its output prefixed `local-gate|`; the tests are told to run,
+and production staged, only once it passed, and a failing gate stops the deploy
+and the preview. A tree that already passed it on this machine, whether by a
+release or by `integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all` run by hand,
+is not run again: the stamp is `~/.cache/pronto/local-gate/<app>/<key>`, the key
+a hash of the app's files as git lists them and of the pronto files the gate
+runs ([`gcp/local-gate-key.nu`](../gcp/local-gate-key.nu)), so any change to
+either runs it. `go-live` runs what does not depend on the rest together: the
+retired migrate job's removal beside the service's replacement, then the door's grant, the sidecars, the clock
+and the domains
+([decision](decisions/2026-11-01-release-concurrency.md)).
+
+Where the local gate passed for the tree, and the deploy-shaped files (release.cue,
+program.cue, compose files, Dockerfiles and `docker/`, web server, entrypoint and sidecar files,
+`.say.yaml`, `.pronto/cluster.json`, `infra/`, cue.mod/module.cue, `.mise.toml`, mise.lock, and the content of the pronto runtime but its
+release engine (`gcp/*.nu`, the release tests, `testdata/`, `docs/`) and its version number, so a pronto
+prerelease that changes only the engine does not run rc; not database migrations, which the local gate runs) are those of a release that passed the rc gate, the release skips rc:
+no preview, no copy, its images built and staged for production as `--no-gate` does,
+and live. `~/.cache/pronto/rc-passed/<app>/<key>` records the last such pass, written
+after a gated release succeeds. `--rc` runs the rc gate anyway, and so does
+`--no-local-gate`; the log says which path and why
+([decision](decisions/2026-11-01-local-gate-replaces-rc.md)). An app's own
+rehearsal records a local pass with `nu gcp/local-gate-key.nu stamp <app dir>`.
+
+`GCP.rehearsal` moves the gate into the cloud: the app's checks (slowed, repeated) run in a Cloud
+Run job of the previews project against the rc preview, beside the drivers Cloud Build still
+runs, and the release waits for both. The rc always runs, as nothing local stands in for it, and
+neither the local gate nor its ledger runs on the releasing machine. The job (its size, command and
+account) is the infrastructure's (`runJobs`); each run points it at the image the tests' build
+pushed for `rehearsal.driver`, sets `rehearsal.env` and APP_URL, prints its log with the prefix
+`rehearsal|`, and records `rehearsal: {ok, job, execution, seconds, vcpu, memoryGi, usd}` in the
+release's record, `usd` being the job's seconds at its vCPU and GiB at `rehearsal.price`.
+`rehearsal.replaces` names the drivers the job runs in Cloud Build's stead.
+
+One release of an app runs at a time, wherever it starts: before anything else a release
+takes the app's lock, `gs://<project>-release-locks/<app>` (a preview's is `<app>-<preview>`),
+an object made only where none is (`--if-generation-match=0`), saying who holds it and until
+when (45 minutes on). A second release of the app stops at once and names the holder; releases of
+other apps take locks of their own and run beside it. The lock is let go when the release ends,
+however it ends; a release that died holds it until it expires, and `PRONTO_RELEASE_BREAK_LOCK=1`
+takes it at once. A dry run and a snapshot take none. Two releases of ume-rental had gone live four
+seconds apart, their IAM bindings racing.
+
+Every run is recorded, however it ends, once its lock is let go: one JSON line appended to
+`~/.cache/pronto/releases/<app>.jsonl` (`<app>` is `GCP.name`), which a local DORA dashboard reads
+([`gcp/release-record.nu`](../gcp/release-record.nu)). A dry run, a snapshot and a preview's
+`--delete` record nothing; failing to write the record prints a warning and never fails the release.
+
+| field | value |
+|---|---|
+| `app`, `service`, `project` | `GCP.name`, the service released (a preview's `<service>-<preview>`) and its project |
+| `preview` | the preview released, `""` for production |
+| `commit`, `dirty` | `git rev-parse HEAD` of the app's checkout before the release (`null` without one), and whether the app's directory differs from it |
+| `pronto` | the pronto version releasing (`distribution/config.cue`'s `#Version`) |
+| `started`, `ended` | ISO 8601, UTC |
+| `outcome` | `live`, `failed`, `refused` (another release holds the lock) or `rolled-back` (`--rollback`) |
+| `failure` | the failure's first line, `null` otherwise |
+| `rc` | `ran`, or `skipped: <why>` |
+| `localGate` | `ran`, `reused` (the ledger's pass) or `skipped` |
+| `rehearsal` | `GCP.rehearsal`'s run: `ok`, `job`, `execution`, `seconds`, `vcpu`, `memoryGi`, `usd`; `null` without one |
+| `revision` | the revision serving once live (or the one `--rollback` went back to), `null` otherwise |
+| `phases` | seconds, `null` where the phase never started: `lock` (taking it), `gate` (the local gate), `rc` (the rc preview through its tests), `stage`, `schema` (the job, or `"skipped"`), `deploy` (go-live but the schema job), `total`. A phase the run failed in is timed to the run's end; the gate and rc run beside the stage, so phases overlap |
+
+```json
+{"app":"guestbook","service":"guestbook","project":"brawl-chess","preview":"","commit":"4f1c2e0…","dirty":false,"pronto":"0.25.2","started":"2026-11-02T14:03:11Z","ended":"2026-11-02T14:19:40Z","outcome":"live","failure":null,"rc":"ran","localGate":"ran","revision":"guestbook-00042-xaz","phases":{"lock":1.4,"gate":71.2,"rc":702.5,"stage":188.9,"schema":41.7,"deploy":96.3,"total":989.1}}
+```
 
 `sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
 `verify@<target>` against the release's address, or a preview's with
@@ -757,21 +902,24 @@ sent. The build runs as the project's default Cloud Build account, which the
 release lets push to the repository and write its log; the release reads each
 digest back from the registry and names it in the service and jobs.
 
-Runtime and driver layers are cached in Artifact Registry. Unchanged app
-sources reuse their previously built digests; the cache key includes file
-contents, modes, symlink targets, the build recipe, and platform. Driver images
-build while the preview deploys. Image copies start while tests run, under a
-candidate tag; promotion waits for a passing verdict and verifies each digest.
-
-Infrastructure setup is cached by its plan and release script. After changing
-resources manually, set `PRONTO_SETUP=always` to reconcile them. Deleting a
-preview also deletes its setup marker so recreating it provisions resources.
+Each image has its own key, so an edit to one service's files builds that
+image and the ones built from it, and no others. The key hashes the image's
+build record from the compose project, its Dockerfile, the files of its
+context that the Dockerfile `COPY`s (a source that is a build argument, or a
+bound mount, counts as the whole app), and, through its `service:` contexts,
+the keys of the images it is built from; it is left on the pushed image as the
+tag `src-<key>`, and a release builds only the images without one (an
+`--override`, release@k8s's release tree, keys each image by the whole app, as
+a `.dockerignore` is not read: both only ever build more). The drivers of
+`verify@gcp` are cached the same way, as `<service>-verify-<driver>:src-<key>`:
+one whose key is in the registry is pulled by digest instead of built, and the
+others are pushed once built. `PRONTO_VERIFY_NO_DRIVER_CACHE=1` builds them all.
 
 | compose | on GCP |
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
-| migrate | where the app declares pgroll migrations, the same `<app>-initdb` job runs the cluster's migration runner after initdb, using a combined `schema` image; the former separate migration job is removed |
-| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| migrate | where the app declares pgroll migrations, the cluster's runner in the same Job `<app>-initdb`, after initdb and before the service rolls, as compose runs it on every boot: its image is `<app>-schema`, migrate's with the database image's initdb directory, which the release builds beside compose's, so the Job starts once |
+| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; one instance at most, none at rest, unless `maxScale` says more ([scaling out](#scaling-out)) |
 | ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
 | clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
@@ -817,14 +965,11 @@ What bit on a real instance:
   (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
   untouched, until its owner deletes it.
 - **The smallest tier admits about 25 connections**, so the instance is raised
-  to 50. Crud's pool is capped at 5; Electric defaults to 5 and can be set with
-  `GCP.electric.pool`. Its CPU and memory use `GCP.electric.cpu` (millicpu)
-  and `GCP.electric.memory`. Previews keep CPU active between requests and
-  allow a longer replication timeout while tests open shapes. A probe reaches a
+  to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, compute, blobs, images or render, and an airlock whose effects reach
+change-feed unit, compute, blobs, images, and a renderer the app does not name in `GCP.sidecars` (below), and an airlock whose effects reach
 anything but the AI gateway, since Cloud Run's has no daprd. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
@@ -855,7 +1000,12 @@ compose names is the port that container holds there: `http://crud:3000` is
 sidecar is its own port (the plan's `loopback`). A key naming one of the
 cluster's secrets (`SERVICE_JWT`, `PGRST_JWT_SECRET`, …) is mounted from Secret
 Manager, never compose's development value, and `ORIGIN` is where readers are.
-`sidecars: <name>: env` adds to what compose gives.
+`sidecars: <name>: env` adds to what compose gives, and `sidecars: <name>:
+secrets` reads a variable from a Secret Manager secret of the app's own (a key
+it must keep, or one it shares with another app), in place of any value env or
+compose gives: the release grants the service's account each one, and refuses
+to start while one is missing, since such a secret is made where the project's
+infrastructure is, never by the release.
 
 ```cue
 GCP: schema.#Release & {
@@ -866,8 +1016,8 @@ GCP: schema.#Release & {
 ```
 
 Cloud Run runs at most 10 containers in a revision, and the cluster holds up to
-six of them (caddy, crud, auth, electric, the Auth Proxy and the ticker), so
-the release refuses a service of more. A sidecar given
+eight of them (caddy, crud, auth, electric, the Auth Proxy, the ticker, and the
+blob plane's two), so the release refuses a service of more. A sidecar given
 `apart: {}` runs as a Cloud Run service of its own, `<service>-<name>`, in
 place of a container of the cluster's instance: one container taking the
 service's requests at its port, beside Managed Prometheus's collector where it
@@ -875,12 +1025,33 @@ exports metrics (its config the secret `<name>-<sidecar>-gmp-config`). The
 release applies it after the cluster's service, public as the door is, and a
 preview's goes with the preview. The door dials it at its run.app address over
 TLS, so the app's route to it sets the Host that address answers to (`header_up
-Host {upstream_hostport}`). Outside the instance, the cluster is reached through
+Host {upstream_hostport}`, as pronto-perf's, pronto-billing's and
+pronto-flags' routes do). Outside the instance, the cluster is reached through
 the door: compose's `http://crud:3000` is `https://<the service's run.app
 address>/crud`, another sidecar apart is its own address, and nothing else of
 the cluster's is reachable (the plan's `peers`). It scales on its own
 requests, none at rest; one that serves none, a worker polling the gateway,
 keeps `apart: minScale` instances, its CPU unthrottled between requests.
+`apart: maxScale` is the most it runs: 2 by default, so a replacement can start
+beside an instance Cloud Run is retiring (at 1, requests in that gap wait for an
+instance, are aborted with 429, and the door answers 500); a sidecar apart is then
+stateless, its state per instance. One with `minScale` above 0 is a worker whose
+timers must not run twice, and defaults to 1.
+`apart: cpu` sets its service's CPU in millicpu (absent, a whole one). Below
+1000 Cloud Run takes it only billed by request, one request at a time, in the
+first generation environment, so the service is so and its CPU is throttled
+between requests even with instances kept (billed at the idle rate). Its `memory` is then at most 512Mi below 500,
+and 1Gi below 1000; the release refuses more.
+
+The terminal's renderer (`ssr: "ssr"` routes) is one such sidecar: name `render` in
+`GCP.sidecars`, `apart: {}`, with `probe: "/health"` (it is ready once its
+eager tables are warm), and `ORIGIN` in its `env` so the release writes the
+deployment's origin there. It reads the app as a reader does, so compose's
+`http://caddy:8080` is `https://<the service's run.app address>` (the plan's
+`peers`), and the door's route to it sets the Host as above. A renderer at
+`minScale: 0` answers a crawler's first request after a rest in the time it takes
+to start, which a link preview does not wait for; `minScale: 1` keeps it warm.
+
 
 ```cue
 GCP: schema.#Release & {
@@ -895,6 +1066,30 @@ A sidecar's `memory` is its container's (`"4Gi"`), as Cloud Run spells it;
 absent, Cloud Run's default. `alwaysOn: true` keeps the instance's CPU
 unthrottled between requests, for a sidecar inside it whose work runs while
 nobody is asking.
+
+### Scaling out
+
+`maxScale` (default 1) lets the service run more instances, with `minScale`
+(default 0, at most `maxScale`) kept at rest; a preview stays at 0 and 1.
+Electric names its replication slot, and the advisory lock behind it, by its
+stream id, so instances sharing the default one would wait on each other's
+lock and serve no shape. Past 1, each instance's electric runs on a temporary
+slot of a random name (`CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN` and
+`ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME`, electric 1.8.1), which
+Postgres drops with its connection and which retains no WAL, beside the
+default stream's publication. The service sets session affinity, so a
+client's long-polls stay on the instance holding its shapes, and each
+electric gets a liveness probe on `/v1/health` (answered 200 once active, 202
+while waiting or starting, so it restarts a hung electric, not a waiting one).
+
+The database is sized for the replicas, by the plan's `sqlFlags`:
+`max_replication_slots` and `max_wal_senders` at `2*maxScale+2` (a rollout
+overlaps the old and new instances), `max_slot_wal_keep_size` 1024 MB so a hung
+but connected replica cannot fill the disk, and `max_connections` from the
+pools of both instances (`(crud + electric pool + 10) * 2*maxScale + 10`). A
+`sqlTier` of `db-f1-micro` or `db-g1-small` is refused, since the WAL senders
+and connections do not fit in their memory; the release patches the tier and
+flags of an existing instance when they differ, which restarts it once.
 
 An app that acts for its owner alone sets `iap: true`: Identity-Aware Proxy
 stands in front of the service, the release grants `roles/run.invoker` to IAP's
@@ -1019,6 +1214,17 @@ applies:
 | `aws` | ACK | ECS Express Mode on Fargate | Aurora Serverless v2, from 0.5 ACU |
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
+
+`k8s` is built for Kind and for a cluster the operator runs behind NAT
+(`envs.Metal`): its images built in Cloud Build and pulled from Artifact
+Registry, its door a Cloudflare Tunnel ([k8s/README.md](../k8s/README.md#12-metal-a-cluster-of-your-own-behind-nat)).
+On every cluster but metal it also deploys what the compose project runs
+beside the cluster, an app's effects included: mecha's airlock and its own
+daprd as two pods, each walled by a network policy as compose walls them with
+two networks, the effects' secrets read from Secrets the release names
+([k8s/docs/index.md](../k8s/docs/index.md#the-airlock)). Container bridges,
+the AI gateway, and a tenant's release or a preview of an app with effects are
+refused there.
 
 The compute scales by itself; the floor is the database, and AWS's is the
 highest, since Aurora does not pause while logical replication is on. Project,

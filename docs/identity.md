@@ -60,3 +60,21 @@ Hydra holds those, with a store that can outlive a restart.
 | `pages` / `cloudflare` | refused at compile time (`_authTargetRefusal`) | browser tier runs guest sessions; social providers require container/cloud tiers |
 
 An app naming `signin: broker: <url>` runs no local broker. Pronto publishes no custom runtime image: local runs use the host's Deno and Hydra binaries, and Docker launches use pinned base images.
+
+## Another issuer's token, for one operation
+
+A person another service has proven (a code sent to a phone, say) reaches the
+app as that service's bearer token, which the app's own front exchanges for a
+session scoped to one operation. The app names each issuer once,
+`identity.#Issuer` (`identity/issuer.cue`): its `iss`, its clients (`azp`), the
+claims it must carry, where the operation's kind and id come from, and how it
+proved the person (`amr`). `identity/bearer.ts` checks a token against that
+entry, by the keys the issuer's discovery document publishes, cached, and maps
+it to `operation_kind`, `operation_id`, `amr` and `idp`. The front never signs:
+it hands the browser's session and those claims to mecha's `POST /auth/upgrade`,
+which keeps the session's subject and signs with the key it already has
+(mecha's `services/auth/README.md#upgrade`). A refusal names its reason and
+none of the token's values.
+
+A sign-in by redirect stays mecha's provider sign-in, above: `#Issuer` takes
+only a token the front is handed.

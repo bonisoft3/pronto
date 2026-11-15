@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
@@ -584,8 +584,91 @@ Deno.test("an effect's cluster keeps the wake's names, and the service role the 
 // migration that set one would overwrite it whenever it ran.
 Deno.test("the roles migration leaves electric's password to the deployment", async () => {
   const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
-  assertStringIncludes(roles, "ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;");
+  for (const a of ["BYPASSRLS", "REPLICATION", "LOGIN"]) assertStringIncludes(roles, `ALTER ROLE electric ${a};`);
   assertEquals(/PASSWORD/i.test(roles), false);
+});
+
+// Roles managed outside (a DBA, an operator) are already as the migration
+// would make them, and the login that migrates holds no CREATEROLE: every role
+// change is guarded, so that login runs it, and a role short of an attribute
+// still fails on the privilege it lacks. Timeouts compare as durations.
+Deno.test("the roles migration changes a role only where it lacks what it sets", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  const db = new PGlite();
+  try {
+    await db.exec(roles);
+    await db.exec("ALTER ROLE anon SET lock_timeout = 2000; CREATE ROLE migrator NOCREATEROLE; GRANT CREATE ON SCHEMA public TO migrator; SET ROLE migrator");
+    await db.exec(roles);
+    await db.exec("RESET ROLE; ALTER ROLE electric NOLOGIN; SET ROLE migrator");
+    await assertRejects(() => db.exec(roles), Error, "permission denied to alter role");
+    const members = await db.query("SELECT inherit_option, set_option, admin_option FROM pg_auth_members WHERE member = 'authenticator'::regrole");
+    assertEquals(members.rows, [{ inherit_option: false, set_option: true, admin_option: false }, { inherit_option: false, set_option: true, admin_option: false }]);
+  } finally { await db.close(); }
+});
+
+// The unguarded roles file earlier releases applied, which a deployment's
+// database already holds when it takes the guarded one.
+const LEGACY_ROLES = `
+CREATE ROLE anon NOLOGIN; CREATE ROLE service NOLOGIN; CREATE ROLE electric NOLOGIN;
+CREATE ROLE authenticator NOINHERIT;
+ALTER ROLE authenticator LOGIN;
+GRANT anon, service TO authenticator;
+ALTER ROLE service BYPASSRLS;
+ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;
+ALTER ROLE anon SET statement_timeout = '5s'; ALTER ROLE anon SET lock_timeout = '2s'; ALTER ROLE anon SET idle_in_transaction_session_timeout = '10s';
+ALTER ROLE service SET statement_timeout = '30s'; ALTER ROLE service SET lock_timeout = '5s'; ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';
+`;
+
+// Memberships made outside, by several grantors, are repaired grant by grant;
+// an ADMIN authenticator has already used to grant the role onward is kept with
+// a notice, since revoking it would need CASCADE and drop the deployment's grant.
+Deno.test("the roles migration repairs memberships made before it and outside it", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  const members = (db: PGlite, role: string) =>
+    db.query(`SELECT pg_get_userbyid(grantor) AS grantor, inherit_option, set_option, admin_option FROM pg_auth_members WHERE roleid = '${role}'::regrole AND member = 'authenticator'::regrole ORDER BY 1`);
+  const legacy = new PGlite();
+  try {
+    await legacy.exec(LEGACY_ROLES + "CREATE ROLE migrator NOCREATEROLE; GRANT CREATE ON SCHEMA public TO migrator; SET ROLE migrator");
+    await legacy.exec(roles);
+  } finally { await legacy.close(); }
+  const db = new PGlite();
+  try {
+    await db.exec(LEGACY_ROLES + `
+      CREATE ROLE dba CREATEROLE; GRANT anon TO dba WITH ADMIN TRUE;
+      GRANT anon TO authenticator WITH INHERIT TRUE, ADMIN TRUE GRANTED BY dba;
+      GRANT service TO authenticator WITH ADMIN TRUE;
+      CREATE ROLE downstream; SET ROLE authenticator; GRANT service TO downstream; RESET ROLE;`);
+    await db.exec(roles);
+    await db.exec(roles);
+    assertEquals((await members(db, "anon")).rows, [
+      { grantor: "dba", inherit_option: false, set_option: true, admin_option: false },
+      { grantor: "postgres", inherit_option: false, set_option: true, admin_option: false },
+    ]);
+    assertEquals((await members(db, "service")).rows, [{ grantor: "postgres", inherit_option: false, set_option: true, admin_option: true }]);
+    assertEquals((await db.query("SELECT 1 FROM pg_auth_members WHERE member = 'downstream'::regrole")).rows.length, 1);
+  } finally { await db.close(); }
+});
+
+// An app's schemas reach every reader of them: the migration that makes the
+// schema, the floor at 003 for it, the door's Electric route (Electric reads a
+// bare table as public's) and the facts the release targets read. Unset, the
+// app is as before: public's tables, no schema made, the door unchanged.
+Deno.test("an app's schemas reach its migrations, its door and its release facts", async () => {
+  const at = (files: Record<string, { text: string }>, rel: string) => files[rel] as unknown as { text: string; data: { schemas: unknown } };
+  const plain = await emitFiles(paymentProgram());
+  assertEquals(at(plain, ".pronto/cluster.json").data.schemas, { app: "public", floor: "public", mecha: "mecha" });
+  assertEquals(plain["services/database/migrations/000_extensions.sql"].text.includes("CREATE SCHEMA"), false);
+  assertEquals(at(plain, "docker/Caddyfile").text.includes("uri query table"), false);
+  const own = await emitFiles(paymentProgram() + '\napp: meta: schemas: {app: "orders", floor: "mecha"}\n');
+  assertEquals(at(own, ".pronto/cluster.json").data.schemas, { app: "orders", floor: "mecha", mecha: "mecha" });
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "CREATE SCHEMA IF NOT EXISTS orders;");
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "SET search_path = orders, mecha");
+  assertStringIncludes(own["services/database/migrations/003_rls.sql"].text, "FUNCTION mecha.auth_uid()");
+  // After the gate, which compares the bare table, and right where the secret is added: Electric is sent
+  // orders.<table>, never a bare name it would read as public's.
+  const door = at(own, "docker/Caddyfile").text;
+  assertStringIncludes(door, "      uri query secret {$ELECTRIC_SECRET}\n      uri query table orders.{query.table}\n");
+  assert(door.indexOf("uri /auth/shape/verify") < door.indexOf("uri query table orders."), "the table is named after the gate");
 });
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
@@ -614,9 +697,33 @@ Deno.test("a sink's target entry wins, the rest take its default, and a target l
   // time as not deployed (container-bridges.md#Targets).
   const settled = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`).replace("targets: []", 'targets: ["cloudflare"]'));
   assertEquals(JSON.parse(JSON.stringify(settled["services/airlock/effects.json"])).data.effects.charge.bridge.targets, []);
-  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: {origin: "https://b.example", bridge: "mail"}, idempotent: true}`)), "names one of origin and bridge for target docker");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: {origin: "https://b.example", bridge: "mail"}, idempotent: true}`)), "names one of origin, bridge and service for target docker");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: local: bridge: "mail", idempotent: true}`)), "local");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: origin: "http://plain.example", idempotent: true}`)), "plain.example");
+});
+
+Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes release reads from cluster.json", async () => {
+  const k8sSinks = async (sink: string, bridges = "") => {
+    const files = await emitFiles(bridged(bridges, sink).replace("targets: []", 'targets: ["k8s"]'));
+    return JSON.parse(JSON.stringify(files[".pronto/cluster.json"])).data.k8sSinks;
+  };
+  assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", path: "/v1"}, idempotent: true}`), {
+    charge: { service: { name: "ledger", namespace: "payments", port: 80, targetPort: 80, path: "/v1" } },
+  });
+  assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", port: 8081, targetPort: 9000, podSelector: app: "ledger"}, idempotent: true}`), {
+    charge: { service: { name: "ledger", namespace: "payments", port: 8081, targetPort: 9000, podSelector: { app: "ledger" } } },
+  });
+  // A simulator on the stack every app launches on, the cluster's own service on k8s.
+  assertEquals(await k8sSinks(`sink: {bridge: "mail", targets: k8s: service: {name: "ledger", namespace: "payments"}, idempotent: false}\n      reentry: "repeat"`, MAIL_BRIDGE), {
+    charge: { service: { name: "ledger", namespace: "payments", port: 80, targetPort: 80 } },
+  });
+  // The default where k8s names none, as on every target.
+  assertEquals(await k8sSinks(`sink: {origin: "https://a.example", idempotent: true}`), { charge: { origin: "https://a.example" } });
+  for (const t of ["docker", "cloudflare", "gcp", "aws"]) {
+    assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: ${t}: service: {name: "ledger", namespace: "payments"}, idempotent: true}`)), "service");
+  }
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: {origin: "https://b.example", service: {name: "ledger", namespace: "payments"}}, idempotent: true}`)), "names one of origin, bridge and service for target k8s");
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: service: {name: "Ledger.x", namespace: "payments"}, idempotent: true}`)), "name");
 });
 
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {

@@ -24,6 +24,63 @@ Deno.test("a provider reaches the terminal's auth and the auth service as a requ
   assertStringIncludes(env.value.OIDC_GOOGLE_CLIENT_ID, "OIDC_GOOGLE_CLIENT_ID is required");
 });
 
+// The cluster's capabilities.android is mecha-fork's (0.18.1-host.12): run against the module
+// the fork publishes, as prerelease.env pins it (CUE_REGISTRY github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules).
+Deno.test("the app's Android certificates reach the cluster's auth and not the terminal", async () => {
+  const fp = "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C";
+  const code = withAuth(`{required: false, service: "/auth", android: ["${fp}"]}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("android" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.value.WEBAUTHN_ANDROID_ORIGINS, `\${WEBAUTHN_ANDROID_ORIGINS:-${fp}}`);
+  for (const bad of [`["fa:c6"]`, `[]`, `["${fp}", "${fp}"]`, `["${fp.toLowerCase()}"]`]) {
+    const res = await exported(withAuth(`{required: false, service: "/auth", android: ${bad}}`), "app.capabilities.auth.android");
+    assertEquals(res.success, false, bad);
+  }
+});
+
+// The cluster's capabilities.apiKeys is mecha-fork's (0.22.0-host.9 on, PRONTO-312): the auth service
+// serves /auth/keys only where the app turns it on, and the terminal never sees it.
+Deno.test("the app's API keys reach the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeys: true}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("apiKeys" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.value.AUTH_API_KEYS, "true");
+  const off = await exported(withAuth(`{required: false, service: "/auth"}`), "_cluster.surface.targets.auth.compose.environment");
+  assertEquals("AUTH_API_KEYS" in off.value, false);
+  const bad = await exported(withAuth(`{required: false, service: "/auth", apiKeys: "yes"}`), "app.capabilities.auth.apiKeys");
+  assertEquals(bad.success, false);
+});
+
+// An app's gate over its keys (mecha-fork's apiKeysGate, PRONTO-323): a function in its database that
+// auth asks per request, so a flag decides; it turns keys on and never reaches the terminal.
+Deno.test("the app's API key gate reaches the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeysGate: "public.api_keys_on"}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("apiKeysGate" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals([env.value.AUTH_API_KEYS, env.value.AUTH_API_KEYS_GATE], ["true", "public.api_keys_on"]);
+  const bad = await exported(withAuth(`{required: false, service: "/auth", apiKeysGate: "x; drop table y"}`), "app.capabilities.auth.apiKeysGate");
+  assertEquals(bad.success, false);
+});
+
+// An app's hook on a key's exchange (mecha-fork's keyExchanged, PRONTO-316): auth calls it per exchange;
+// it reaches auth's environment, never the terminal, and turns nothing on.
+Deno.test("the app's key-exchanged hook reaches the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeys: true, keyExchanged: "player_record.mark_bot"}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("keyExchanged" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.value.AUTH_KEY_EXCHANGED_HOOK, "player_record.mark_bot");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", keyExchanged: "x; drop table y"}`), "app.capabilities.auth.keyExchanged");
+  assertEquals(bad.success, false);
+});
+
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
   const code = withAuth(`{required: false, service: "/auth"}`);
   const files = await exported(code, "out");
@@ -36,12 +93,29 @@ Deno.test("an app naming no provider leaves the terminal and the auth service as
 
 Deno.test("a provider the terminal does not offer, a repeated one, and an empty list are refused", async () => {
   // Each refused for its own reason, not for one the program shares with them.
-  // A provider nobody offers meets the cluster's providers before the terminal's.
-  for (const [providers, why] of [[`["myspace"]`, "signIn.myspace: field not allowed"], [`["google", "google"]`, "list.UniqueItems"], [`[]`, "app.capabilities.auth.providers: incompatible list lengths"]]) {
+  // A provider the terminal does not name, with no issuer in its place, is
+  // refused where the auth service would be given none.
+  for (const [providers, why] of [[`["myspace"]`, "OIDC_MYSPACE_ISSUER: required field missing: issuer"], [`["google", "google"]`, "list.UniqueItems"], [`[]`, "app.capabilities.auth.providers: incompatible list lengths"]]) {
     const res = await exported(withAuth(`{required: false, service: "/auth", providers: ${providers}}`), "out");
     assertEquals(res.success, false, providers);
     assertStringIncludes(res.stderr, why, providers);
   }
+});
+
+// A provider the terminal does not name is one an identity broker offers (its
+// phone sign-in): offered where the program names the issuer standing in its
+// place, drawn by the terminal as any other, and refused without one.
+Deno.test("a provider the terminal does not name is offered through the issuer the program names", async () => {
+  const code = withAuth(`{required: false, service: "/auth", providers: ["google", "phone"], provider: phone: {issuer: "http://localhost:28443", client: "origin", params: "provider=phone"}}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.providers, ["google", "phone"]);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(env.value.OIDC_PROVIDERS, "google,phone");
+  assertEquals(env.value.OIDC_PHONE_ISSUER, "${OIDC_PHONE_ISSUER:-http://localhost:28443}");
+  const bare = await exported(withAuth(`{required: false, service: "/auth", providers: ["google", "phone"]}`), "out");
+  assertEquals(bare.success, false, "no issuer stands in the phone's place");
 });
 
 // A provider's settings reach the auth service as defaults the deployment's
@@ -86,4 +160,24 @@ Deno.test("provider settings require a provider list while an empty settings map
   const unauthenticated = await exported(paymentProgram(), "out");
   assertEquals(unauthenticated.success, true, unauthenticated.stderr);
   assertEquals("auth" in unauthenticated.value["shell/shell.json"].data, false);
+});
+
+// A guest kept across visits (PRONTO-208): the flag that turns it on reaches the
+// terminal, which asks it before keeping or adopting a guest.
+Deno.test("the flag that keeps a guest across visits reaches the terminal's auth", async () => {
+  const files = await exported(withAuth(`{required: false, service: "/auth", keepGuest: "keep_guest"}`), "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.keepGuest, "keep_guest");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", keepGuest: "Keep Guest"}`), "out");
+  assertEquals(bad.success, false);
+});
+
+// A provider's sign-in that keeps the guest it starts from (PRONTO-209): the flag that
+// turns it on reaches the terminal, which asks it before handing the guest over.
+Deno.test("the flag that has a provider's sign-in adopt the guest reaches the terminal's auth", async () => {
+  const files = await exported(withAuth(`{required: false, service: "/auth", adoptGuest: "google_adopts_guest"}`), "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.adoptGuest, "google_adopts_guest");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", adoptGuest: "Adopt Guest"}`), "out");
+  assertEquals(bad.success, false);
 });

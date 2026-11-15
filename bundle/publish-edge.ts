@@ -2,7 +2,9 @@ import { hatchEnvironment, refuseMissingHatchSecrets } from './edge-hatches.ts'
 // Makes an edge release live: deploys <out> (edge.ts's) with the wrangler
 // mecha's pglite-workerd pins, its secrets in the same version, and loads the
 // data directory into its object. JWT_SECRET is set once, since every session
-// is signed with it; IMPORT_TOKEN is new at every publish and lives only here.
+// is signed with it; IMPORT_TOKEN is new at every publish and lives only here;
+// a provider's client secret comes from this environment at every publish
+// (edge-signin.ts).
 // Secrets put after a deploy are a version of their own, which a request in
 // between does not see. The load resumes a partial one and leaves a complete
 // directory, live data, alone, unless --reset replaces it: the object answers
@@ -25,6 +27,7 @@ import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { SEED_TYPES } from './edge-blobs.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
+import { releasedIssuers, signInSecrets } from './edge-signin.ts'
 import { migrateKeptDirectory, previousDeployment, rollbackRefusedMigration } from './publish-edge-state.ts'
 import { keptJwtSecrets, validateJwtMode } from './publish-edge-secrets.ts'
 import { prepareStorage } from './publish-edge-storage.ts'
@@ -146,7 +149,12 @@ await requireLocalCluster({ config: authConfig, name: authSettings.name, previou
 const jwtSecret = keepJwtSecret
   ? (await keptJwtSecrets(authConfig, token, runWrangler), undefined)
   : await releaseJwtSecret({ secret: Deno.env.get('JWT_SECRET'), config: authConfig, previous, wrangler: runWrangler, random })
-const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
+// The sign-in providers the release names (edge-signin.ts): each one's secret from the environment.
+const { vars = {} } = JSON.parse(await Deno.readTextFile(config)) as { vars?: Record<string, string> }
+let providerSecrets: Record<string, string>
+try { releasedIssuers(vars); providerSecrets = signInSecrets(vars, (name) => Deno.env.get(name)) }
+catch (e) { fail((e as Error).message) }
+const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}), ...providerSecrets }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
 if (Boolean(turnId) !== Boolean(turnToken)) fail('Configure both Cloudflare TURN credentials together')

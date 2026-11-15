@@ -12,7 +12,7 @@
 
 import { boundTypes } from "./type-table.ts";
 import { types, type Types } from "./portable-types.ts";
-import { exportJson } from "./cue.ts";
+import { programPackage, readApp } from "./derive.ts";
 import { readCheckInputs } from "./check-inputs.ts";
 import { ifMissing } from "./missing.ts";
 
@@ -113,7 +113,7 @@ function sectionOf(ir: string, name: string): { open: string; body: string; at: 
 }
 
 async function exportEntities(appDir: string): Promise<ProgramEntity[]> {
-  return Object.values(await exportJson<Record<string, ProgramEntity>>(appDir, "code.state.entities"));
+  return Object.values(await readApp(appDir, await programPackage(appDir), false, "app.code.state.entities") as Record<string, ProgramEntity>);
 }
 
 async function readSnapshot(appDir: string): Promise<Identities | undefined> {

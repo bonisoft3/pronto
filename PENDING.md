@@ -516,9 +516,10 @@ tree, or the scratch stages owe an empty one.
 **`k8s` is in neither `#Target` nor `#Tier`**
 ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
-**Compose integration drivers run remotely for `gcp` alone.**
-The other targets use HTTP and browser verification; they do not yet run the
-compose drivers against the deployed address ([[docs/release-targets]]).
+**`verify@<target>` is emitted for `gcp` alone**
+([the design](docs/release-targets.md#what-a-release-is)): `pages`,
+`cloudflare` and `k8s` have no rule that runs the drivers against their
+address.
 
 **The page derives by drain alone** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in

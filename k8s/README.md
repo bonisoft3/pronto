@@ -98,7 +98,7 @@ Manifests are cached in `~/.cache/sayt/k8s/operators` and applied via `kubectl a
 | **Envoy Gateway** | `v1.2.4` | `5554f170...` | Next-generation API Gateway with OpenTelemetry tracing |
 | **CloudNativePG (CNPG)** | `v1.25.0` | `54032561...` | Declarative cloud-native PostgreSQL clusters |
 | **External Secrets (ESO)** | `v0.10.5` (Helm chart) | `5cf78ad9...` | Syncs SOPS / external stores into native Kubernetes Secrets |
-| **Dapr** | `v1.14.4` (Helm chart) | `97f64b80...` | Distributed application runtime with native Kubernetes secret store |
+| **Dapr** | `v1.16.21` (Helm chart) | `71233ad4...` | Distributed application runtime with native Kubernetes secret store |
 
 ---
 
@@ -119,6 +119,10 @@ Observability is implemented with zero architectural dispersion and an idle foot
 Every service runs the image the app's own compose project builds (database, migrate, crud, electric, auth, caddy, render), baked reproducibly (`SOURCE_DATE_EPOCH=0`, no provenance) so an unchanged source pushes the same digest and rolls nothing, and referenced by the tag and digest pushed. The database is mecha's database image; CloudNativePG reads its tag as the Postgres major.
 
 The schema is built as compose builds it, by two Jobs on the app's images: `<app>-initdb` runs the database image's `/docker-entrypoint-initdb.d` once, on a fresh database (a database comment marks it built), and `<app>-migrate`, where the app has pgroll migrations, carries the schema forward on every release. The services are applied after both, so none starts on a missing schema.
+
+An app's own services, a plugin's (pronto-billing's `billing`, say), are `App.services`, as `GCP.sidecars` are on Cloud Run: `services: billing: {port: 8688, env: BILLING_BROKER: "https://…"}`. Each names a service of the compose project, built and pushed with the cluster's images, and runs as a Deployment of its own in the mesh, which the door reaches at `PRONTO_UPSTREAM_<NAME>`. Its environment is compose's under what release.cue sets, a peer compose names (`http://crud:3000`) is that peer through the mesh, and `SERVICE_JWT` is the release's own: the service role's token signed with the cluster's `PGRST_JWT_SECRET`, kept in `<app>-service-jwt`. Its network policy lets it reach the internet on 443 (a broker), which the cluster's own services cannot.
+
+What else the compose project runs beside the cluster (native compute, the ticker, the blob plane, an app's effects through the airlock) is read from it on every target but metal, built and pushed with the cluster's images, and deployed as [[docs/index]] states: the airlock as two pods, `airlock` and its own daprd `airlock-mesh`, each behind a network policy of its own, its effects' secrets read from the Secrets `airlock.secrets` names. Container bridges and the AI gateway are refused, and so are a tenant's release and a preview of an app with effects.
 
 ---
 
@@ -142,9 +146,11 @@ Load is shed at the gateway, by Envoy's concurrency limits on caddy's pool: past
 
 ## 10. Secrets Management Architecture
 
-- **Authoring**: Flat key/value pairs encrypted with [SOPS](https://github.com/getsops/sops) under the Cloud KMS key its `.sops.yaml` names, in Git (`apps/<app>/secrets.enc.yaml`). Local runs read the same file through `sops exec-env`; a `kind` release decrypts it into the Secret `<app>-secrets`. It holds sandbox keys, so no other cluster gets it: production keys live in the cloud's own secret service ([keys](../docs/release-targets.md#keys)).
+- **Authoring**: Flat key/value pairs encrypted with [SOPS](https://github.com/getsops/sops) under the Cloud KMS key its `.sops.yaml` names, in Git (`apps/<app>/secrets.enc.yaml`). Local runs read the same file through `sops exec-env`; a `kind` release decrypts it into the Secret `<app>-secrets`. It holds sandbox keys, so no other cluster gets it: a GKE release's production keys live in the cloud's own secret service ([keys](../docs/release-targets.md#keys)).
+- **A released environment's keys** (any environment but `kind`, such as `metal`): k8s Secrets in `apps/<app>/secrets.<environment>.enc.yaml`, their values encrypted with SOPS for the age recipients the repository's `.sops.yaml` names, their names readable. The release decrypts the file in memory with a pinned sops (fetched by checksum, as the operators are) and applies it server-side as `pronto-sops`, so a Secret made by hand before is taken over. The age key is `SOPS_AGE_KEY` when set; on a Mac, the Keychain item `pronto-sops-age`; else the cluster's own Secret `pronto-sops/age-key` (`keys.txt`), made on the node and never copied off it. A cluster with no key and no file needs neither.
 - **Operator Bridge**: External Secrets Operator (ESO) bridges encrypted or external secrets into native Kubernetes `v1/Secret` objects. Without a `ClusterSecretStore`, ESO `Password` generators make each secret once in-cluster; no secret is a literal in a spec.
-- **Database roles**: CloudNativePG sets `postgres`'s, `electric`'s and `authenticator`'s passwords from basic-auth secrets (`<app>-db-postgres`, `<app>-electric-db`, `<app>-authenticator-db`); the schema never sets a password. Compose sets both from `ELECTRIC_PASSWORD` and `AUTHENTICATOR_PASSWORD`, through mecha's initdb step.
+- **Database roles**: CloudNativePG sets `postgres`'s, `electric`'s and `authenticator`'s passwords from basic-auth secrets (`<app>-db-postgres`, `<app>-electric-db`, `<app>-authenticator-db`); the schema never sets a password. Compose sets both from `ELECTRIC_PASSWORD` and `AUTHENTICATOR_PASSWORD`, through mecha's initdb step. The roles migration (`001_roles.sql`) changes a role only where it lacks what it sets, so where the roles are made outside (a DBA, an operator) the login that migrates needs no `CREATEROLE`, `BYPASSRLS` or `REPLICATION`.
+- **A service's database login**: `database.logins` names LOGIN roles of the app's own (each a member of the `inRoles` its migrations made), and a service's `database: {login, env}` connects as one, its URL in `env` (`DATABASE_URL` by default). CloudNativePG gets the role as a managed role; its password is generated in the cluster into `<app>-<login>-db` (dashes for underscores), with a `url` key, and never written anywhere. The service gets egress to the database on 5432 from a policy of its own.
 - **Runtime Access**: Workloads and Dapr sidecars consume native Kubernetes secrets (`type: secretstores.kubernetes`).
 
 ---
@@ -161,7 +167,8 @@ sayt -d /path/to/app release@k8s
 sayt -d /path/to/app release@k8s --dry-run
 
 # 3. Render for cloud environments (AWS EKS, Azure AKS); deploying there is not
-#    implemented yet: only Kind provisions operators, observability and TLS.
+#    implemented yet: only Kind and a metal cluster (section 12) provision
+#    operators and observability.
 sayt -d /path/to/app release@k8s --cluster-env eks --dry-run
 sayt -d /path/to/app release@k8s --cluster-env aks --dry-run
 
@@ -194,5 +201,124 @@ open http://telemetry.localhost/jaeger/
 ctlptl delete -f plugins/pronto/k8s/cluster.yaml
 ```
 
+
+---
+
+## 12. Metal: a Cluster of Your Own, Behind NAT
+
+`envs.Metal` releases to a cluster the operator runs on their own machines —
+k3s on one node at home, say — with no public address. Three things a cloud
+gives stand in from elsewhere:
+
+| A cloud's | Metal's |
+| :--- | :--- |
+| A load balancer with a public address | A [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/): `cloudflared` in the cluster dials out, and Cloudflare serves each app's host and terminates its TLS. The gateway listens on HTTP alone. |
+| A registry beside the nodes | A registry on the node, which the release runs there and which listens on the node's loopback alone (`build: {by: "node"}`, the default); or Artifact Registry, which the node pulls from with a reader's key (k3s's `registries.yaml`) |
+| Building where it deploys | Docker on the machine releasing, which pushes through the release's SSH tunnel to the node's registry; or Cloud Build, as `release@gcp` builds (`gcp/build.nu`), so the machine releasing needs no Docker daemon |
+
+The cluster, its tunnel and its registry are the operator's, made once and
+shared by every app released there. An app's `release.cue` names them:
+
+```cue
+Metal: envs.Metal & {
+	context: "home"                                       // the kube context
+	access: ssh: "<user>@<node>"                          // the release's tunnel, to the API and the registry
+	ingress: id: "<tunnel id>"
+	domainSuffix: "<zone>"                                // <app>.<zone>, or App.gateway.host
+	// platform: "linux/arm64"                            // for an ARM node
+}
+metalManifests: (schema.#BuildManifests & {release: App, env: Metal}).manifests
+```
+
+To build in Cloud Build instead, give its project and Artifact Registry
+repository (and the node the reader's key below):
+
+```cue
+Metal: envs.Metal & {
+	registry: "us-central1-docker.pkg.dev/<project>/pronto"
+	build: {by: "cloudbuild", project: "<project>"}
+}
+```
+
+`sayt release@k8s` releases there when the app gives a `Metal` (`-e kind`
+still releases to Kind), and installs the operators, observability and
+`cloudflared` on the first run.
+
+### Previews
+
+`sayt release@k8s --preview=rc` releases the app's whole stack a second time into a namespace of its own,
+`<name>-rc`, beside the released one: its own CloudNativePG database (initdb and the migrations replayed over
+it, as the release's are), its own secrets and services, the same images by digest. It exists to prove a
+release's images, migrations and config on the cluster before traffic moves, so it claims **no public name**:
+no tunnel route or DNS record is added, its gateway host is `<name>-rc.<domainSuffix>` which nothing points at,
+and it takes **no backups**. It is reached with `kubectl port-forward -n <name>-rc svc/caddy 18080:8080` (its
+services' `ORIGIN` is `http://localhost:18080`, `previewOrigin` in the release, and a passkey's relying party
+`localhost`). A page that holds many live requests at once stalls over plain HTTP/1.1, which allows a browser six
+connections to one host: such an app sets `previewOrigin` to `https://localhost:<port>` and puts a local TLS front
+before the forward (`caddy reverse-proxy --from https://localhost:<port> --to localhost:18080`), so the browser
+speaks HTTP/2. `sayt release@k8s --preview=rc --delete` removes the namespace, and with it the database, volumes
+and secrets; `--delete` without `--preview` is refused, and so is a namespace that is the release's own.
+Spec: `#ReleaseSpec.preview`, with `id` (every object's name) and `ns` (its namespace) derived in
+`k8s/schema/release.cue`; a release with no preview renders byte for byte as before.
+
+### Once, for the node
+
+```sh
+# k3s, without its own ingress and load balancer: Envoy Gateway is the door.
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.34.12+k3s1 sh -s - --disable traefik --disable servicelb
+# The node's own registry, which the first release starts: plain HTTP on its loopback.
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<YAML
+mirrors:
+  "127.0.0.1:5000":
+    endpoint: ["http://127.0.0.1:5000"]
+YAML
+sudo systemctl restart k3s
+```
+
+Building in Cloud Build instead, the node reads Artifact Registry with a
+reader's key in place of the mirror above:
+
+```sh
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<YAML
+configs:
+  us-central1-docker.pkg.dev:
+    auth:
+      username: _json_key
+      password: '$(cat reader-key.json | tr -d '\n')'
+YAML
+sudo systemctl restart k3s
+```
+
+Copy `/etc/rancher/k3s/k3s.yaml` to the machine releasing, with `127.0.0.1`
+replaced by the node's address, as the context the environment names.
+
+### Once, for the project the images build in (Cloud Build only)
+
+```sh
+gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project <project>
+gcloud artifacts repositories create pronto --repository-format docker --location us-central1 --project <project>
+builds=$(gcloud builds get-default-service-account --project <project> --format 'value(serviceAccountEmail)' | sed 's|.*/||')
+gcloud artifacts repositories add-iam-policy-binding pronto --location us-central1 --project <project> \
+  --member serviceAccount:$builds --role roles/artifactregistry.writer
+gcloud iam service-accounts create metal-reader --project <project>
+gcloud artifacts repositories add-iam-policy-binding pronto --location us-central1 --project <project> \
+  --member serviceAccount:metal-reader@<project>.iam.gserviceaccount.com --role roles/artifactregistry.reader
+gcloud iam service-accounts keys create reader-key.json --iam-account metal-reader@<project>.iam.gserviceaccount.com
+```
+
+### Once, for the tunnel
+
+```sh
+cloudflared tunnel login                 # the zone the apps' hosts are in
+cloudflared tunnel create home           # prints the tunnel's id
+kubectl --context home create namespace cloudflared
+kubectl --context home create secret generic tunnel-credentials -n cloudflared \
+  --from-file=credentials.json=$HOME/.cloudflared/<id>.json
+```
+
+The tunnel carries every request to the gateway, which routes each by its
+host, so a new app needs only its DNS record, which the release prints:
+`cloudflared tunnel route dns <id> <host>`. No wildcard record: one would
+publish `telemetry.<zone>`, the observability stack's gateway, as well.
 
 Native pipeline and GKE release contracts start at [[docs/index]].

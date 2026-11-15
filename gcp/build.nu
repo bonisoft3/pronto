@@ -1,12 +1,10 @@
 # build.nu: the images a release runs, built in Cloud Build as the app's
 # compose project builds them, so the machine releasing needs no Docker
-# daemon. release@gcp pushes them beside the service it rolls
-# (docs/release-targets.md).
+# daemon. release@gcp pushes them beside the service it rolls, release@k8s to
+# the registry its cluster pulls from (docs/release-targets.md).
 
 # What builds and runs the drivers: Docker's own CLI image, with its buildx
 # and compose plugins, run by Cloud Build against the Docker of its worker.
-const build_script = path self
-
 export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
 # What lets an amd64 worker build another platform's images: QEMU's handlers.
 const binfmt = "tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
@@ -18,10 +16,37 @@ export def stamp []: nothing -> string {
 	$"[+($s // 60 | fill -a r -c '0' -w 2):($s mod 60 | fill -a r -c '0' -w 2)]"
 }
 
+# A read that failed on the network (its name did not resolve, no connection opened, or none
+# answered in time) is asked again: it changes nothing, so asking twice is safe. A write is not
+# repeated, since gcloud may have sent it before the part that failed (a release lost on one failed
+# lookup of cloudbuild.googleapis.com while it polled the rc's tests, 2026-11-03).
+const reads = [describe list read get-iam-policy get-default-service-account]
+const writes = [add add-iam-policy-binding apply cancel create delete deploy execute import remove remove-iam-policy-binding replace set set-iam-policy submit update]
+const offline = "NameResolutionError|Failed to resolve|nodename nor servname|NewConnectionError|Failed to establish a new connection|ConnectionError|ReadTimeout|timed out|Connection reset|Connection aborted|RemoteDisconnected|UNAVAILABLE|HTTPError 503"
+def read-again [args: list, input: any, r: record]: nothing -> record {
+	# The verb: the first command word that is one (a resource named "read" after "add" is no read).
+	# An argument may be a number or another value a caller passed as it is (`--max-instances $n`).
+	let words = ($args | each {|a| $a | into string } | take while {|a| not ($a | str starts-with "-") })
+	let verb = ($words | where {|w| $w in ($reads ++ $writes) } | first 1)
+	if $verb == [] or $verb.0 not-in $reads { return $r }
+	mut r = $r
+	# Asked again while Google is not reached, waiting 2s, doubling to 60s (no limit; each ask
+	# says so); any other failure is the answer.
+	mut wait = 2sec
+	loop {
+		if $r.exit_code == 0 or not ($r.stderr =~ $offline) { break }
+		print -e $"gcp: (stamp) gcloud ($args | first 3 | each {|a| $a | into string } | str join ' ') did not reach Google; again in ($wait)"
+		sleep $wait
+		$wait = ([($wait * 2) 60sec] | math min)
+		$r = ($input | ^gcloud --quiet ...$args | complete)
+	}
+	$r
+}
+
 export def --wrapped gc [...args] {
 	let input = $in
 	# Never a prompt: a release runs where nobody answers one.
-	let r = ($input | ^gcloud --quiet ...$args | complete)
+	let r = (read-again $args $input ($input | ^gcloud --quiet ...$args | complete))
 	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
 	$r.stdout
 }
@@ -29,11 +54,51 @@ export def --wrapped gc [...args] {
 # token, a disabled API or a network that dropped would otherwise read as a
 # resource to create, and the creation then dies on one that exists.
 export def --wrapped exists [...args]: nothing -> bool {
-	let r = (^gcloud --quiet ...$args | complete)
+	let r = (read-again $args null (^gcloud --quiet ...$args | complete))
 	if $r.exit_code != 0 and not ($r.stderr =~ "NOT_FOUND|HTTPError 404|Cannot find|does not exist|not found|was not found") {
 		error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"}
 	}
 	$r.exit_code == 0
+}
+
+
+# The message of a failure, down to its cause. A closure of each or par-each fails with nu's
+# wrapper ("Eval block failed with pipeline input", code nu::shell::eval_block*), the cause
+# nested in `details.inner`: `$e.msg` alone is the wrapper and the run log and release record
+# said nothing (2026-11-04). Any other error keeps its own message.
+export def failure-message [e: record]: nothing -> string {
+	let own = ($e.details? | default {msg: $e.msg})
+	messages-of $own | uniq | str join "\n"
+}
+
+def messages-of [d: record]: nothing -> list<string> {
+	let inner = ($d.inner? | default [])
+	if (($d.code? | default "") | str starts-with "nu::shell::eval_block") and ($inner | is-not-empty) {
+		$inner | each {|i| messages-of $i } | flatten
+	} else { [$d.msg] }
+}
+
+# What `tags add` does to a tag: leave it (it names the digest), make it (none yet), or move it.
+export def tag-action [current: any, digest: string]: nothing -> string {
+	if $current == null { "create" } else if $current == $digest { "keep" } else { "move" }
+}
+
+# The tag `tag` on the image at `digest` of `repo` (host/project/repository/package). gcloud's
+# `tags add` deletes a tag that exists and makes it again, and the release's account may not
+# delete tags in the previews project (artifactregistry.tags.delete denied, 2026-11-04: every
+# reused image of the rc preview failed so). A tag already there is left, and one that moves
+# is updated, which that account may.
+export def tag-image [repo: string, digest: string, tag: string] {
+	let at = $"($repo):($tag)"
+	let current = if (exists artifacts docker images describe $at) { gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim } else { null }
+	match (tag-action $current $digest) {
+		"keep" => {}
+		"create" => { gc artifacts docker tags add $"($repo)@($digest)" $at | ignore }
+		_ => {
+			let parts = ($repo | split row "/")
+			gc artifacts tags update $tag --location ($parts.0 | str replace "-docker.pkg.dev" "") --project $parts.1 --repository $parts.2 --package ($parts | skip 3 | str join "/") --version $digest | ignore
+		}
+	}
 }
 
 
@@ -43,11 +108,11 @@ export def build-account [project: string]: nothing -> string {
 	gc builds get-default-service-account --project $project --format "value(serviceAccountEmail)" | str trim | split row "/" | last
 }
 
-# What an image build reads, as one key: every file of the app's as git sees
-# it (its path and its content's hash, unsaved ones included), and what else
-# the build is told. Equal keys build equal images, the build being
-# reproducible: what was pushed for a key is what building again would push.
-export def source-key [app_dir: string, files: string, told: string]: nothing -> string {
+# Each file of the app as git sees it (unsaved ones included), with its
+# content's hash: the paths `files` lists, hashed in one call.
+export def file-hashes [app_dir: string, files: string]: nothing -> table<path: string, hash: string> {
+	let paths = (open --raw $files | lines)
+	if ($paths | is-empty) { return [] }
 	# hash-object reads the paths it is given from the repository's top, and
 	# ls-files wrote them from the app's own directory: the app's prefix
 	# (apps/<name>/ in a monorepo) turns one into the other.
@@ -55,29 +120,159 @@ export def source-key [app_dir: string, files: string, told: string]: nothing ->
 		cd $app_dir
 		let prefix = (^git rev-parse --show-prefix | str trim)
 		let top = (^git rev-parse --show-toplevel | str trim)
-		open --raw $files | lines | each {|f| $"($prefix)($f)" } | str join (char nl) | ^git -C $top hash-object --stdin-paths
-	} | str trim)
-	let metadata = (open --raw $files | lines | each {|f|
-		let entry = (ls -l ($app_dir | path join $f) | first)
-		[$f $entry.type $entry.mode? $entry.target?]
-	} | to json -r)
-	[(open --raw $files) $hashes $metadata $told] | str join (char nl) | hash sha256 | str substring 0..23
+		$paths | each {|f| $"($prefix)($f)" } | str join (char nl) | ^git -C $top hash-object --stdin-paths
+	} | lines)
+	$paths | zip $hashes | each {|p| {path: $p.0, hash: $p.1} }
+}
+
+# What every image of a build reads, as one key: every file of the app's and
+# what else the build is told. Equal keys build equal images, the build being
+# reproducible: what was pushed for a key is what building again would push.
+# The key of an image whose inputs are not known more closely (image-keys).
+export def source-key [hashes: table, told: string]: nothing -> string {
+	[($hashes | each {|h| $"($h.path) ($h.hash)" } | str join (char nl)) $told] | str join (char nl) | hash sha256 | str substring 0..23
+}
+
+# A glob of Docker's COPY as an anchored regex's body: `*` and `?` stay within
+# a path segment, `**` crosses them, `[!x]` is `[^x]`.
+def glob-regex [g: string]: nothing -> string {
+	$g | str replace -a -r '([.+(){}|^$\\])' '\$1' | str replace -a '[!' '[^' | str replace -a '**' "\u{1}" | str replace -a '*' '[^/]*' | str replace -a '?' '[^/]' | str replace -a "\u{1}" '.*'
+}
+
+# The paths of its build context a Dockerfile reads, as globs; null when it
+# may read any (a source that is a build argument, a bound mount of the
+# context, a copy of the whole context).
+def dockerfile-reads [text: string]: nothing -> any {
+	mut reads = []
+	mut end = ""
+	for raw in ($text | str replace -a -r '\\\r?\n' ' ' | lines) {
+		let l = ($raw | str trim)
+		# A heredoc's body is the Dockerfile's own text.
+		if $end != "" { if $l == $end { $end = "" }; continue }
+		let words = ($l | split row -r '\s+')
+		let kw = ($words | first)
+		# Only a RUN, COPY or ADD opens a heredoc, by a `<<` that starts a word (not a shell's `$((1<<2))`).
+		if ($kw =~ '(?i)^(RUN|COPY|ADD)$') {
+			let tag = ($l | parse -r "(?:^|\\s)<<-?['\"]?(?<tag>\\w+)")
+			if ($tag | is-not-empty) { $end = ($tag | first | get tag) }
+		}
+		if ($kw =~ '(?i)^RUN$') {
+			let binds = ($words | where {|w| $w starts-with "--mount=" and ($w | str contains "type=bind") and not ($w | str contains "from=") })
+			if ($binds | is-not-empty) { return null }
+		}
+		if not ($kw =~ '(?i)^(COPY|ADD)$') { continue }
+		let args = ($words | skip 1)
+		let flags = ($args | take while {|w| $w starts-with "--" })
+		if ($flags | any {|f| $f starts-with "--from=" }) { continue }
+		mut srcs = ($args | skip ($flags | length))
+		if ($srcs | is-empty) { continue }
+		if ($srcs | first | str starts-with "[") {
+			let j = (try { $srcs | str join " " | from json } catch { null })
+			if $j == null { return null }
+			$srcs = $j
+		}
+		for s in ($srcs | drop 1 | where {|s| not ($s starts-with "<<") and not ($s =~ '^(https?://|git@)') }) {
+			if ($s | str contains "$") { return null }
+			let p = ($s | str replace -r '^(\./)+' '' | str trim --char '/')
+			if $p in ["" "."] { return null }
+			$reads = ($reads | append $p)
+		}
+	}
+	$reads
+}
+
+# What one image's build reads, as its own hash and the services whose images
+# it builds from: its build record from the compose project (machine paths
+# made the app's), its Dockerfile, and the files of its context the Dockerfile
+# copies. An input not known more closely stands for the whole app (`whole`).
+def image-own [app_real: string, app_given: string, b: any, hashes: table, whole: string]: nothing -> record {
+	let all = {own: $whole, deps: []}
+	if $b == null { return $all }
+	let ctx = (try { $b.context | path expand | path relative-to $app_real } catch { null })
+	if $ctx == null { return $all }
+	let text = if ($b.dockerfile_inline? | is-not-empty) { $b.dockerfile_inline } else {
+		let f = ($app_real | path join $ctx ($b.dockerfile? | default "Dockerfile"))
+		if ($f | path type) != "file" { return $all }
+		open --raw $f
+	}
+	let under = if ($ctx | is-empty) { $hashes } else {
+		$hashes | where {|h| $h.path starts-with $"($ctx)/" } | update path {|h| $h.path | str substring (($ctx | str length) + 1).. }
+	}
+	let reads = (dockerfile-reads $text)
+	let files = if $reads == null { $under } else if ($reads | is-empty) { [] } else {
+		let re = ("^(?:" + ($reads | each {|g| glob-regex $g } | str join '|') + ")(?:/.*)?$")
+		$under | where {|h| $h.path =~ $re }
+	}
+	let contexts = ($b.additional_contexts? | default {} | transpose name ref)
+	let deps = ($contexts | where {|c| $c.ref starts-with "service:" } | each {|c| $c.ref | str replace "service:" "" })
+	# A context that is a directory of the machine counts, when the Dockerfile reads from it, as the whole app.
+	let dirs = ($contexts | where {|c| not ($c.ref =~ '^[a-z-]+:') and ($text =~ ('(?i)(from=|FROM )' + ($c.name | str replace -a -r '([.+(){}|^$\\*?\[\]-])' '\$1') + '(\s|$)')) } | each { $whole })
+	let record = ($b | reject -o tags cache_from cache_to | to json | str replace -a $app_real "." | str replace -a $app_given ".")
+	let own = ([$record ($text | hash sha256) ($files | each {|h| $"($h.path) ($h.hash)" } | str join (char nl))] | append $dirs | str join (char nl) | hash sha256 | str substring 0..23)
+	{own: $own, deps: $deps}
+}
+
+# The key of each image of `services`: what its build reads and, through the
+# images it builds from, what theirs read, so an edit to one service's files
+# changes its key and its dependents' alone. The app's compose project is read
+# for that (null reading it, or an override, keys each image by the whole app).
+export def image-keys [app_dir: string, compose: any, hashes: table, told: string, services: list<string>]: nothing -> record {
+	let whole = (source-key $hashes $told)
+	let app_real = ($app_dir | path expand)
+	# Compose names the paths as the app's directory was given, through a symlink or not.
+	let app_given = ($app_dir | path expand --no-symlink)
+	let known = ($compose.services? | default {})
+	mut owns = {}
+	mut todo = ($services | where {|s| $s != "schema" or $s in ($known | columns) })
+	# The schema job's image is built from migrate's and the database's.
+	if "schema" in $services and "schema" not-in ($known | columns) {
+		$owns = ($owns | insert schema {own: ("schema" | hash sha256), deps: ["migrate" "database"]})
+		$todo = ($todo | append ["migrate" "database"])
+	}
+	while ($todo | is-not-empty) {
+		let s = ($todo | first)
+		$todo = ($todo | skip 1)
+		if $s in ($owns | columns) { continue }
+		let o = if $compose == null { {own: $whole, deps: []} } else { image-own $app_real $app_given ($known | get -o $s | default {} | get -o build) $hashes $whole }
+		$owns = ($owns | insert $s $o)
+		$todo = ($todo | append ($o.deps | where {|d| $d not-in ($owns | columns) }))
+	}
+	let owns = $owns
+	$services | each {|svc|
+		mut seen = []
+		mut queue = [$svc]
+		while ($queue | is-not-empty) {
+			let s = ($queue | first)
+			$queue = ($queue | skip 1)
+			if $s in $seen { continue }
+			$seen = ($seen | append $s)
+			$queue = ($queue | append ($owns | get $s | get deps))
+		}
+		let key = ($seen | sort | each {|s| $"($s) ($owns | get $s | get own)" } | prepend $told | str join (char nl) | hash sha256 | str substring 0..23)
+		{svc: $svc, key: $key}
+	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.key }
 }
 
 # The tag an image's key leaves on it, which a later release finds it by.
 export def key-tag [key: string]: nothing -> string { $"src-($key)" }
 
-# The images pushed for this key before, by service, when every one of them
-# was: a release whose app did not change since (a retry, a release again)
-# builds nothing. Null when any is missing.
-export def pushed-for [refs: list<record>, key: string]: nothing -> any {
-	let found = ($refs | par-each --keep-order {|r|
-		let at = $"($r.repo):(key-tag $key)"
+# The images pushed for their keys before, by service: those of a release
+# whose image did not change since (a retry, a release again, an edit to
+# another service's files) need no build. Each image is asked after at once:
+# one after another, a dozen gcloud calls were most of a minute.
+export def pushed-for [refs: list<record>, keys: record]: nothing -> list<record> {
+	$refs | par-each --keep-order {|r|
+		let at = $"($r.repo):(key-tag ($keys | get $r.svc))"
 		if (exists artifacts docker images describe $at) {
 			{svc: $r.svc, repo: $r.repo, digest: (gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim)}
 		}
-	} | compact)
-	if ($found | length) == ($refs | length) { $found } else { null }
+	} | compact
+}
+
+# The one step of push-images' build: `script` run by the builder, with what compose reads there.
+# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
+export def cloud-build-step [script: string, build_env: list<string>]: nothing -> record {
+	{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: (["SOURCE_DATE_EPOCH=0"] | append $build_env)}
 }
 
 # The runtime images, built in Cloud Build as the app's compose project builds
@@ -86,14 +281,16 @@ export def pushed-for [refs: list<record>, key: string]: nothing -> any {
 # alone, as git sees them: every context of its images is the app's
 # directory or an image by digest. Each image's layers are cached in the
 # registry beside it (`:buildcache`), so a layer whose inputs did not change is
-# pulled, not built again; and an app unchanged since its last push builds
-# nothing at all (source-key).
+# pulled, not built again; and an image whose inputs did not change since its
+# last push is not built at all (image-keys): an edit to one service's files
+# builds that image and the ones built from it, no others.
 # `--override` is a compose file the build reads after the app's own
 # (`--platform`'s images, and release@k8s's release tree, `release-tree`).
 export def push-images [
 	app_dir: string, plan: record, name: string, services: list<string>
 	--platform: string = "linux/amd64"
 	--override: string # compose YAML read over the app's compose.yaml
+	--build-env: list<string> = [] # NAME=value that compose reads in the build (release@k8s's airlock secrets' stand-ins)
 ]: nothing -> record {
 	let p = $plan.project
 	let host = ($plan.registry | split row "/" | first)
@@ -104,17 +301,34 @@ export def push-images [
 	# Never a certificate pair `sayt setup` issued for this machine: an image
 	# carries none.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
-	# What it was told before the override existed, so a gcp release keeps its key.
-	let key = (source-key $app_dir $"($work)/files" ([$builder (open --raw $build_script | hash sha256) ($services | str join " ") $platform] | append (if ($override | is-empty) { [] } else { [$override] }) | str join " "))
-	let before = (pushed-for $refs $key)
-	if $before != null {
-		print $"gcp: (stamp) ($services | str join ', ') unchanged since they were last built: reusing them"
-		rm -rf $work
-		return ($before | par-each --keep-order {|b|
-			gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
-			{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
-		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+	let hashes = (file-hashes $app_dir $"($work)/files")
+	let told = ([$builder $platform] | append (if ($override | is-empty) { [] } else { [$override] }) | str join " ")
+	# An override changes what the images are built from: each is keyed by the whole app then.
+	# Compose is asked from the app's resolved directory, so a symlink (/tmp) cannot change the
+	# paths it prints and with them every key.
+	let compose = if ($override | is-not-empty) { null } else {
+		let r = (with-env ($build_env | parse "{k}={v}" | reduce -f {} {|e, acc| $acc | insert $e.k $e.v }) { cd ($app_dir | path expand); ^docker compose --profile "*" config --format json } | complete)
+		if $r.exit_code == 0 { try { $r.stdout | from json } catch { null } } else {
+			print $"gcp: (stamp) image reuse is coarse: docker compose config failed, so each image is keyed by the whole app \(($r.stderr | lines | last | default '' | str trim)\)"
+			null
+		}
 	}
+	if ($override | is-not-empty) { print $"gcp: (stamp) image reuse is coarse: an override is given, so each image is keyed by the whole app" }
+	let keys = (image-keys $app_dir $compose $hashes $told $services)
+	let before = (pushed-for $refs $keys)
+	let reused = ($before | par-each --keep-order {|b|
+		tag-image $b.repo $b.digest $tag
+		{svc: $b.svc, ref: {tag: $tag, digest: $b.digest, key: ($keys | get $b.svc)}}
+	})
+	let all = $services
+	let refs = ($refs | where {|r| $r.svc not-in ($before | each {|b| $b.svc }) })
+	let services = ($refs | get svc)
+	if ($refs | is-empty) {
+		print $"gcp: (stamp) ($all | str join ', ') unchanged since they were last built: reusing them"
+		rm -rf $work
+		return ($reused | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+	}
+	if ($reused | is-not-empty) { print $"gcp: (stamp) reusing ($reused | each {|b| $b.svc } | str join ', '), unchanged since they were last built" }
 	# The schema job's image, `schema`: migrate's, with the database's initdb
 	# directory, so one job builds the schema and carries it forward. A bake
 	# target beside compose's, from theirs.
@@ -160,10 +374,9 @@ export def push-images [
 		$"docker compose ($compose_files)--profile '*' config | docker buildx bake ($bake_files) --push --provenance=false --allow=fs.read=/workspace --set '*.platform=($platform)' ($sets) ($services | str join ' ')"
 	] | str join "\n")
 	{
-		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
-		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: ["SOURCE_DATE_EPOCH=0"]}]
+		steps: [(cloud-build-step $script $build_env)]
 		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "1800s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) building ($services | str join ', ') in Cloud Build"
 	let r = (^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p | complete)
@@ -175,7 +388,19 @@ export def push-images [
 	$refs | par-each --keep-order {|r|
 		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
 		# Found by its key the next time, should nothing change.
-		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag $key)" | ignore
-		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
-	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag ($keys | get $r.svc))" | ignore
+		{svc: $r.svc, ref: {tag: $tag, digest: $digest, key: ($keys | get $r.svc)}}
+	} | append $reused | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+}
+
+# The service role's token, HS256 under the gateway's secret, as mecha's
+# cluster signs its own (role service, the nil subject) but with no expiry:
+# the release restates it from the secret, so it changes only with it.
+export def service-jwt [secret: string]: nothing -> string {
+	$secret | ^python3 -I -c 'import sys,hmac,hashlib,base64,json
+b=lambda d: base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+h=b(json.dumps({"alg":"HS256","typ":"JWT"},separators=(",",":")).encode())
+p=b(json.dumps({"role":"service","sub":"00000000-0000-0000-0000-000000000000"},separators=(",",":")).encode())
+k=sys.stdin.buffer.read()
+print(h+"."+p+"."+b(hmac.new(k,(h+"."+p).encode(),hashlib.sha256).digest()),end="")'
 }

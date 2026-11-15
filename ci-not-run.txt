@@ -1,0 +1,15 @@
+# The test files ci leaves out (PRONTO-221), each with why. ci fails a test file in none of
+# ci-tests.txt, ci-monorepo-tests.txt and this list, so a new test is placed on purpose.
+# Upstream's own apps, which no mirror carries (apps/snapcards, truco, w3caria, jsfb):
+bundle/edge-dispatcher_test.ts
+check-outcomes.test.ts
+check-workflows.test.ts
+terminal-corpus_test.ts
+workflow-invocations.test.ts
+write_test.ts
+# .say.yaml's cloudflare and edge platforms (docker's native DuckDB, wrangler, pglite-workerd's dist):
+bundle/edge-compute_test.ts
+bundle/edge-ssr-rpc_test.ts
+bundle/mecha-edge-compression_test.ts
+bundle/mecha-edge-compute_test.ts
+bundle/mecha-edge-retention_test.ts

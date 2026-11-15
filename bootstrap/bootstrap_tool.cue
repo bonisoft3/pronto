@@ -3,6 +3,7 @@
 package bootstrap
 
 import (
+	"encoding/json"
 	"list"
 	"tool/file"
 )
@@ -64,6 +65,12 @@ command: bootstrap: B={
 		// attestation checks that would. A roster changed later is relocked.
 		lock:     file.Create & {$after: B._after, filename: "mise.lock", contents: _lock}
 		hostLock: file.Create & {$after: B._after, filename: "mise.host.lock", contents: _hostLock}
+		// Claude Code's settings for the repo (claude.cue), kept where it has its own.
+		claudeSettings: file.Glob & {$after: B._after, glob: ".claude/settings.json"}
+		if len(B.claudeSettings.files) == 0 {
+			claudeDirectory: file.Mkdir & {$after: B.claudeSettings, path: ".claude", createParents: true}
+			claude: file.Create & {$after: B.claudeDirectory, filename: ".claude/settings.json", contents: json.Indent(json.Marshal(#ClaudeSettings), "", "  ") + "\n"}
+		}
 	}
 }
 

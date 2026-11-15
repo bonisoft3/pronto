@@ -1,0 +1,66 @@
+# Builds what a mecha host launch otherwise compiles on its first start, Electric's release (patched
+# as services/electric/patch.exs patches it) and PLV8 for the portable PostgreSQL, once, for Linux
+# x64, and publishes them as a release here, tagged mecha-prebuilt-<name>. mecha's
+# services/prebuilt.tsv names each with its sha256, and its host.sh and plv8.sh fetch it rather than
+# build it: a machine that starts empty (Pronto Studio's workspaces) launches in minutes, not hours.
+#
+# Push a branch named `prebuilt-mecha/<name>`, such as prebuilt-mecha/linux-x64-1: the scripts are
+# .github/prerelease-mecha.env's MECHA_REF, built with the versions below, which the apps' launches
+# pass (their .say.yaml) and their PostgreSQL pins (theseus-rs/postgresql-binaries).
+name: prebuilt-mecha
+on:
+  push:
+    branches: ['prebuilt-mecha/*']
+permissions:
+  contents: write
+env:
+  ELECTRIC: 1.8.1 0f404200402f918a4b1596bc5c8a53479a435349 29.0.2 1.20.2-otp-29
+  POSTGRES: 18.6.1
+  MISE_VERSION: v2026.8.11
+  # hex.pm's version list took longer than mise's 3 s once, and Elixir never installed.
+  MISE_FETCH_REMOTE_VERSIONS_TIMEOUT: 60s
+  MISE_HTTP_TIMEOUT: 120s
+jobs:
+  build:
+    # The oldest glibc a machine is likely to run beside: Studio's image is Debian bookworm.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: versions
+        run: |
+          echo "NAME=${GITHUB_REF_NAME#prebuilt-mecha/}" >> "$GITHUB_ENV"
+          grep -E '^MECHA_REF=[0-9a-f]{40}$' .github/prerelease-mecha.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: bsoneca/mecha-fork
+          ref: ${{ env.MECHA_REF }}
+          path: mecha
+          fetch-depth: 1
+      # What Erlang and PLV8 (its V8) are compiled with.
+      - name: compilers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential autoconf m4 libssl-dev libncurses-dev unzip cmake ninja-build python3
+      - name: mise
+        run: |
+          curl -fsSL https://mise.run | MISE_VERSION="$MISE_VERSION" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: electric
+        env:
+          XDG_CACHE_HOME: ${{ runner.temp }}/cache
+        run: bash mecha/services/electric/host.sh build $ELECTRIC
+      - name: plv8
+        env:
+          XDG_CACHE_HOME: ${{ runner.temp }}/cache
+          # The PostgreSQL the apps pin, which this repository's own lockfile does not name.
+          MISE_LOCKED: "0"
+        run: mise x "github:theseus-rs/postgresql-binaries@$POSTGRES" -- bash mecha/services/database/plv8.sh build
+      - name: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE: ${{ runner.temp }}/cache/mecha
+        run: |
+          mkdir dist
+          for d in "$CACHE"/electric/*/; do k=$(basename "$d"); tar czf "dist/electric-$k-linux-x64.tar.gz" -C "$CACHE/electric" "$k"; done
+          for d in "$CACHE"/plv8/*/; do k=$(basename "$d"); tar czf "dist/plv8-$k-linux-x64.tar.gz" -C "$CACHE/plv8" "$k"; done
+          (cd dist && sha256sum *.tar.gz)
+          gh release create "mecha-prebuilt-$NAME" dist/*.tar.gz --target "$GITHUB_SHA" --prerelease --title "mecha prebuilt $NAME (Linux x64)" --notes "Electric's release and PLV8, built from bsoneca/mecha-fork@$MECHA_REF's scripts on ubuntu-22.04 x64, for mecha's services/prebuilt.tsv."

@@ -65,7 +65,8 @@ effectWakeUrls: _effectingTargets.ticker.compose.environment.WAKE_URLS & "http:/
 // The cluster reads what the emitter writes, where the emitter writes it.
 effectManifest: _effectingTargets.airlock.dockerfile.copy[0] & {srcs: ["services/airlock/effects.json"], dst: "/airlock/effects.json"}
 effectManifestEmitted: (_effectingFiles["services/airlock/effects.json"].data.effects.charge.handler) & "effects/charge.js"
-effectHandler: _effectingTargets.airlock.dockerfile.copy[1] & {srcs: ["effects/charge.js"], dst: "/airlock/effects/charge.js"}
+// The airlock loads the handler's bundle, which derive writes beside the manifest.
+effectHandler: _effectingTargets.airlock.dockerfile.copy[1] & {srcs: ["services/airlock/effects/charge.js"], dst: "/airlock/effects/charge.js"}
 effectBinding: _effectingTargets["airlock-mesh"].dockerfile.copy[1] & {srcs: ["services/airlock/dapr/charge.yaml"], dst: "/dapr/airlock/charge.yaml"}
 effectBindingEmitted: _effectingFiles["services/airlock/dapr/charge.yaml"].data.spec.baseUrl & "https://api.acquirer.example"
 effectAllowlist: _effectingTargets["airlock-mesh"].dockerfile.copy[0] & {srcs: ["/app/airlock/dapr.yaml"], dst: "/dapr/config.yaml"}
@@ -82,5 +83,5 @@ effectRootIncludes: list.Contains(_effectingFiles["compose.yaml"].data.include, 
 // lint admits each handler as the airlock does, against the manifest above.
 _admitEffects: _effectingLoop.surface.checks.admitEffects
 admitEffectsLints: _admitEffects.verb & "lint"
-admitEffectsManifest: strings.HasSuffix(_admitEffects.cmds[0], "admit.ts) services/airlock/effects.json .") & true
+admitEffectsManifest: strings.HasSuffix(_admitEffects.cmds[0], "admit.ts) services/airlock/effects.json services/airlock") & true
 admitEffectsUnderPins: strings.Contains(_admitEffects.cmds[0], "services airlock deno.json") & true

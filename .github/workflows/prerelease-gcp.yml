@@ -1,0 +1,45 @@
+# Publishes a forks' prerelease of pronto (bsoneca/pronto forks/README.md) from
+# Actions, by running prerelease.sh, the one publish there is: the CUE module to
+# ghcr.io/bsoneca/cue-modules and the runtime tarballs as a release here.
+#
+# Push the commit to publish as `publish/v<version>`, such as
+# publish/v0.24.1-gcp.127: the version is the branch's, and the mecha and
+# omnishell the snapshot pins are .github/prerelease.env's MECHA_V and
+# OMNISHELL_V, versions ghcr.io/bsoneca/cue-modules already holds. The lock
+# bootstrap ships is written from those pins at publish time (prerelease.sh's
+# fork_lock): this workflow once staged its own snapshot, which pinned mecha
+# alone and shipped upstream's lock as it stood (gcp.122-126: mecha 0.18.0,
+# omnishell 0.20.2, pronto 0.25.2), so a new app's locked install refused the
+# versions its module named.
+name: prerelease-gcp
+on:
+  push:
+    branches: ['publish/v*']
+permissions:
+  contents: write
+  packages: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # prerelease.sh runs crane and cue through sayt's pinned mise.
+      - name: mise
+        run: |
+          curl -fsSL https://github.com/jdx/mise/releases/download/v2026.8.11/mise-v2026.8.11-linux-x64 -o "$RUNNER_TEMP/mise"
+          chmod +x "$RUNNER_TEMP/mise"
+          echo "SAYT_MISE_BIN=$RUNNER_TEMP/mise" >> "$GITHUB_ENV"
+      # GHCR_TOKEN, a token with write:packages, when the package doesn't
+      # grant this repository's Actions write.
+      - name: ghcr
+        working-directory: ${{ runner.temp }}
+        env:
+          GHCR: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR" | "$SAYT_MISE_BIN" exec 'github:google/go-containerregistry[bin=crane]@v0.20.2' -- crane auth login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+      - name: publish
+        run: ./prerelease.sh "${GITHUB_REF_NAME#publish/v}" "$GITHUB_SHA"

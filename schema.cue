@@ -421,6 +421,11 @@ import (
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
 	component: {for k, v in D._preset.component {(k): *v | string}}
+	// The appearances the app is drawn in. Absent, both: each colour's dark
+	// twin answers a dark colour-scheme. "light" pins the page to its light
+	// half, for an identity that has no dark one yet (its twins then restate
+	// the light values, as #Design.dark is closed over the same names).
+	colorScheme?: "light"
 	// Which colour the terminal's own chrome resolves to; the shell has no
 	// opinion about which swatch is a background.
 	shell: {
@@ -1149,12 +1154,17 @@ import (
 	// models: the entry wins, the rest take the default, and a target left with
 	// neither is refused. docker is the compose stack every app launches and
 	// integrates on, simulators included. Sandbox or live is the app's own value.
+	// k8s alone may name an in-cluster `service` instead (#InClusterSink;
+	// k8s/docs/index.md, "The airlock").
 	sink: {
 		origin?: mechaCluster.#Origin
 		bridge?: string
 		ai?:     mechaCluster.#AiModality
 		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
-		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+		targets?: {
+			[("docker" | "cloudflare" | "gcp" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+			k8s?: {origin?: mechaCluster.#Origin, bridge?: string, service?: #InClusterSink}
+		}
 		credential?:  #Credential
 		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
 	}
@@ -1176,6 +1186,21 @@ import (
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
 	endowments?: [...mechaCluster.#CageEndowment]
+}
+
+// A sink in the release's own Kubernetes cluster: a Service the airlock's daprd
+// calls at http://<name>.<namespace>.svc.cluster.local[:port][path], plain
+// HTTP whose encryption is the cluster's service mesh's. Its egress is opened
+// to `namespace` on `targetPort`, the pod's port, since a NetworkPolicy matches
+// the connection after the Service's address is translated to a pod's;
+// `podSelector`, the pods' labels, narrows it to them.
+#InClusterSink: {
+	name:       =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+	namespace:  =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+	port:       *80 | int & >=1 & <=65535
+	targetPort: *port | int & >=1 & <=65535
+	path?:      =~"^(/[A-Za-z0-9._~-]+)+$"
+	podSelector?: [string]: string
 }
 
 // A provider's word that a row may have changed: `POST /signal/<name>[/<id>]`.
@@ -1204,6 +1229,10 @@ import (
 	scheme?: =~"^[A-Za-z][A-Za-z0-9-]*$"
 	secret:  #SecretName
 }
+
+// A frame's host-source with a wildcard (CSP host-source): any name under a
+// domain (https://*.example.com), or any port of a host (https://localhost:*).
+#FrameSource: =~"^https://(\\*\\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)*[a-z]([a-z0-9-]*[a-z0-9])?(:([0-9]{1,5}|\\*))?$"
 
 // An environment variable an effect declares, never one the cluster's own
 // services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
@@ -1418,7 +1447,10 @@ import (
 	// Who the route's entry document may be shown to without a session,
 	// in the browser-applicable subset of #Access.scope: #App defaults it to
 	// "private" when capabilities.auth.required is true or when every top-level
-	// live region on the screen is restricted, and "public" otherwise.
+	// live region on the screen is restricted, and "public" otherwise. In an
+	// app behind a sign-in, a screen declared "public" is open to visitors:
+	// the terminal shows it to whoever arrives with a guest session, no
+	// sign-in, and asks for one on the way to any other screen.
 	access: "public" | "private"
 	// Rendering strategy:
 	//   ssg: a document per locale written at generate (prerender: true)
@@ -1758,7 +1790,9 @@ import (
 			}}
 		}
 		// Each also a Dapr output binding of the airlock's, and a handler the
-		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
+		// program writes at effects/<name>.js, which derive bundles with the
+		// modules it imports into services/airlock/effects/<name>.js, the one
+		// module the airlock loads (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
 		// An Airlock-facing endpoint of a declared container hatch.
 		// A bridge runs as its simulator in the local stack and as its container
@@ -1780,6 +1814,16 @@ import (
 		// 900_seed.sql beside the stated ones. An entity's rows have one home:
 		// stated or held, never both.
 		seed?: {src: string}
+		// Rows for tests alone: SQL beside the program (by convention
+		// tests/fixtures/visual.sql) that a test database holds and a released
+		// one never does. The writer copies it into
+		// services/database/migrations/950_fixture.sql, so it is the last step
+		// of a fresh database's initdb wherever the app runs it for a test (the
+		// local stack, compose's integrate, a gcp preview); a gcp release and a
+		// k8s release skip it. What it is for: a route with a `:param` the
+		// visual lint fills from a row the running cluster serves, which a
+		// test database holds only when something wrote one.
+		fixture?: {src: string}
 	}
 
 	// What state.seed.src must satisfy, for `cue vet -d`: a server entity's
@@ -1798,11 +1842,18 @@ import (
 
 	capabilities: {
 		// Browser fetches outside the app are authored authority. Script sources
-		// remain the terminal's; only reader-supplied images may name a scheme.
+		// remain the terminal's; only reader-supplied images may name a scheme,
+		// and only a frame a host-source with a wildcard: the pages an app
+		// embeds may live on a name it makes (a preview under its own domain)
+		// or a port it is given (a stack on this machine). A frame is the
+		// browser's alone, so the single-label host mecha refuses to dial
+		// (localhost) is a frame's to name.
 		resources?: [string]: {
 			kind: "img" | "font" | "media" | "frame" | "connect"
-			source: mechaCluster.#Origin | "https:"
-			if kind != "img" {source: mechaCluster.#Origin}
+			source: string
+			if kind == "img" {source: mechaCluster.#Origin | "https:"}
+			if kind == "frame" {source: mechaCluster.#Origin | #FrameSource}
+			if kind != "img" && kind != "frame" {source: mechaCluster.#Origin}
 			note: string & !=""
 		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
@@ -1824,11 +1875,65 @@ import (
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
 			promote: *false | bool
+			// The flag (pronto-flags, the app's flags_spec.cue) that keeps a
+			// guest across visits in this browser: while it is on, the terminal
+			// keeps a minted guest in the browser's storage and a later visit
+			// is that guest, its games and progress with it, until its token
+			// expires. A session otherwise lives in the tab, so every visit is a
+			// new, empty guest. Off, or unanswered, nothing is kept.
+			keepGuest?: string & =~"^[a-z][a-z0-9_-]{0,63}$"
+			// The flag (the app's flags_spec.cue) that has a provider's sign-in
+			// keep the guest it starts from: while it is on, the terminal hands
+			// the guest to the auth service before the provider's link leaves the
+			// page (POST {service}/oidc/adopt), and the account the provider makes
+			// is that guest, its rows and progress with it (a returning subject
+			// signs in as itself). Off, or unanswered, a provider's sign-in
+			// makes a new account as it always did.
+			adoptGuest?: string & =~"^[a-z][a-z0-9_-]{0,63}$"
+			// The image the cluster's auth service runs in place of mecha's: a
+			// target of the program's cluster unification (`{ref: ":<target>"}`)
+			// built FROM mecha's, or a pinned name. The service keeps mecha's
+			// entrypoint, environment and route, so the image answers mecha's
+			// token contract; the cluster's, not the terminal's, so shell.yaml
+			// never carries it.
+			image?: {ref: string & =~"^:[a-z][a-z0-9-]*$"} | {name: string & !=""}
+			// Env files, app-relative, compose reads beside mecha's environment
+			// for the auth service, each optional: an image's settings, and a
+			// secret kept in a file git ignores rather than in any emitted one.
+			envFiles?: [...(string & =~"^[A-Za-z0-9_][A-Za-z0-9._/-]*\\.env$" & !~"\\.\\.")]
 			// The providers a person may sign in through besides a passkey,
-			// each one the terminal offers (#emit): a way in at the gate and in
+			// each one the terminal offers, or one whose issuer the program
+			// names below, labelled chrome_signin_<name> (#emit): a way in at the gate and in
 			// a guest's strip, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()
+			// The app's Android builds whose passkeys the door admits, by the
+			// SHA-256 fingerprints of the certificates that sign them for
+			// release (keytool's `AB:CD:...`, 32 bytes): the cluster's
+			// capabilities.android, the auth service's WEBAUTHN_ANDROID_ORIGINS
+			// default and the release's. Never the terminal's.
+			android?: [string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$", ...string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$"] & list.UniqueItems()
+			// Whether a signed-in account may hold API keys and exchange one for
+			// a short token that carries the key's scopes (mecha-fork's
+			// /auth/keys, PRONTO-312): the cluster's capabilities.apiKeys, the
+			// auth service's AUTH_API_KEYS. Off unless the app says so, and a
+			// release to a node (release@k8s) never carries it. Never the terminal's.
+			apiKeys?: bool
+			// The app's per-request say over its keys (mecha-fork's apiKeysGate,
+			// PRONTO-323): a function schema.name(owner uuid) returns boolean in
+			// its database, such as one that reads a feature flag, which auth asks
+			// on every make, list and exchange. Naming one turns keys on, here and
+			// in a release to a node (AUTH_API_KEYS_GATE), and leaves the answer
+			// to the function, so a flag, not a deploy, turns them on and off.
+			apiKeysGate?: =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
+			// The app's hook on a key's exchange (mecha-fork's keyExchanged,
+			// PRONTO-316): a function schema.name(owner uuid) returns void in its
+			// database, which auth calls with the key's owner on every exchange
+			// before it signs the token, here and in a release to a node
+			// (AUTH_KEY_EXCHANGED_HOOK). If it fails the exchange answers 500 and
+			// issues no token, so what it does (marking a bot) cannot be skipped.
+			// It does not turn keys on.
+			keyExchanged?: =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client
@@ -1944,6 +2049,15 @@ import (
 			if H.kind != "container" {
 				files!: [string, ...string]
 			}
+			// A container hatch's own pages that hand a form to another site,
+			// such as an OAuth or app-registration flow that takes a POST: each
+			// page's path under the hatch's door route, and the origins it may
+			// post to. The door's policy keeps form-action 'self' everywhere
+			// else; these pages add exactly their origins to it, and nothing
+			// more of the policy changes.
+			if H.kind == "container" {
+				forms: [=~"^/\(Name)/[A-Za-z0-9_/.-]+$"]: [...(string & =~"^https://[A-Za-z0-9.-]+$")]
+			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
 		// one of `isolation`'s boundaries, touching the app only through its
@@ -2047,7 +2161,9 @@ import (
 			access: *defaultAccess | "public" | "private"
 			let defaultSsr = [
 				if S.prerender {"ssg"},
-				if S.access == "public" && authOn && len(S._publicServerReads) > 0 {"ssr"},
+				// An app behind a sign-in renders no document (#emit): a screen it
+				// opens to visitors is drawn by the terminal.
+				if S.access == "public" && authOn && !authRequired && len(S._publicServerReads) > 0 {"ssr"},
 				"spa",
 			][0]
 			ssr: *defaultSsr | "spa" | "ssg" | "ssr"
@@ -2067,6 +2183,11 @@ import (
 		// global.
 		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
+		// The fronts the door's several-sites mode serves (mecha's docs/proxy.md,
+		// "Several sites"), each by the variable the deployment lists its sites
+		// in, so a deployment names them by front. Without fronts the door reads
+		// SITES.
+		fronts?: [Name=string]: close({sites!: =~"^[A-Z][A-Z0-9_]*$"})
 		flows: [Name=string]: #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
 		// app-relative path: the one spelling every loader and lint read, and
@@ -2084,6 +2205,9 @@ import (
 		favicon?:     #Favicon
 		manifest?:    bool | #Manifest
 		social?:      #Social
+		// What a reader calls the app, where its name is a service's: shell.json's title, which omnishell
+		// titles its documents and its sign-in by. Without it they say the name, as they always have.
+		title?: string & !=""
 		llms?:        bool | #Llms
 		wellKnown?:   [string]: #WellKnownItem
 		preconnect?:  string | #PreconnectItem | [...(string | #PreconnectItem)]
@@ -2094,9 +2218,32 @@ import (
 		ladder: *[] | [...string] // composed journal/ and ir/ files served under /srv/docs/
 		domain?: string
 		ssrOrigin?: string
+		// Services beside the door that a host launch runs too and the door
+		// proxies to at their host addresses, by name and port: a plugin's
+		// (pronto-billing's billing, pronto-flags' flagd). The renderer is
+		// pronto's own (#DefaultCluster), so a plugin's join it.
+		hostPeers?: [=~"^[a-z][a-z0-9-]*$"]: int & >0
+		// The database's schemas (mecha's cluster meta.schema): `app` the one the
+		// program's tables, views and API functions live in and PostgREST serves,
+		// `floor` the tenancy floor's functions, `mecha` the floor's lists. Unset,
+		// `public`, `public` and `mecha`. An app whose database lends it no
+		// `public` names its own, and keeps the floor out of the served schema.
+		let schemaName = mechaCluster.#SchemaName
+		schemas?: {
+			app?:   schemaName
+			floor?: schemaName
+			mecha?: schemaName
+			// The app's own functions whose first argument, a literal, names a table or a function,
+			// so a `'public.x'` handed to one is renamed with the schema (schema-names.ts).
+			resolvers?: [...=~"^[a-z_][a-z0-9_]{0,62}$"]
+		}
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"
+		// The most bytes, gzipped, a pages page's first load may weigh: its
+		// document and the module chunks that document imports. The bundle
+		// fails past it, in the release and in the gate's test.
+		firstLoad?: int & >0
 		cloudflare: workersPaid: *false | bool
 		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
@@ -2219,9 +2366,6 @@ import (
 	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
 
 	_screenAccessViolations: list.Concat([
-		[if A.capabilities.auth != _|_ if A.capabilities.auth.required for sn, screen in A.surface.screens if screen.access == "public" {
-			"screen \(sn) declares access: \"public\" in an app behind a sign-in"
-		}],
 		[for sn, screen in A.surface.screens if len(screen._topLive) > 0 && len(screen._topRestricted) == len(screen._topLive) if screen.access == "public" {
 			"screen \(sn) declares access: \"public\" over \(strings.Join(screen._topRestricted, ", ")); every top-level region is restricted"
 		}],
@@ -2514,9 +2658,6 @@ import (
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
 		}],
-		[if len(_authProviders) > 0 for target in A.meta.targets if target == "cloudflare" {
-			"cloudflare release target does not yet support social sign-in providers; use guest sessions or deploy to container/cloud tiers (gcp, k8s, docker)"
-		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true
 
@@ -2729,8 +2870,8 @@ import (
 				"effect \(n) names more than one of origin, bridge and ai as its default sink"
 		}],
 		[for n, x in _effects if x.sink.targets != _|_ for t, at in x.sink.targets
-			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) != 1 {
-				"effect \(n) names one of origin and bridge for target \(t)"
+			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) + len([if at.service != _|_ {1}]) != 1 {
+				"effect \(n) names one of origin, bridge and service for target \(t)"
 		}],
 		[for n, x in _effects if x.sink.origin == _|_ if x.sink.bridge != _|_ || x.sink.ai != _|_ if x.sink.credential != _|_ || x.sink.contentType != _|_ {
 			"effect \(n) declares a credential or content type for a sink that is no origin"

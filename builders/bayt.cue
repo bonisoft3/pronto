@@ -22,6 +22,7 @@ import (
 	deno "github.com/bonisoft3/bayt/stacks/deno"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
+	"github.com/bonisoft3/pronto/distribution"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
@@ -69,6 +70,11 @@ import (
 	// with bare names, lowered into this project by mecha's own #Runtime.
 	cluster: mecha.#Cluster
 
+	// The omnishell runtime image the app's served image copies: pronto's pin,
+	// unless the app runs another omnishell (a fork's prerelease, whose copy
+	// the pinned runtime lacks) and names that one's image here.
+	omnishellRuntime: *omnishell.published.runtime | omnishell.#RuntimePin
+
 	// A stage that runs cue over the app: it starts from the image the program
 	// evaluates in and reads the app's whole tree, since its subpackages, embeds
 	// and derived sources are its own to add. The set sits in the
@@ -96,9 +102,15 @@ import (
 
 	_sayt:     "(^mise where github:bonisoft3/sayt | str trim)"
 	_prontoNu: "(run-mise where github:bonisoft3/pronto | str trim)"
+	// Generate and lint run cue a dozen times, each a short-lived process that
+	// evaluates the whole program: its garbage collector, left to its default,
+	// is a third of that CPU for a heap that peaks near 4 GiB either way.
+	_cueGC: "GOGC: off, GOMEMLIMIT: 4294967296"
 	_actions: {for verb in ["generate", "build", "lint", "test", "launch", "integrate"] {
 		(verb): [if verb == "lint" {
-			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
+			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {\(B._cueGC), PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
+		}, if verb == "generate" {
+			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {\(B._cueGC)} { task-leaf generate }'"
 		}, "^nu -I \(B._sayt) -c 'use task-leaf.nu; task-leaf \(verb)'"][0]
 	}}
 
@@ -435,10 +447,17 @@ import (
 		pin:     string
 		out:     "${MONOREPO_COMPOSE_MODE:-docker-image://\(S.pin)}${MONOREPO_COMPOSE_MODE:+:\(S.service)}"
 	}
-	// mecha's images, named by #DefaultCluster.
+	// mecha's images, named by #DefaultCluster. PRONTO_IMAGE_REGISTRY, set where
+	// the build runs, pulls each from that registry instead of its publisher's:
+	// the same name and digest, so a mirror serves the same bytes or none.
+	_registered: R={
+		pin:    string
+		_parts: strings.Split(R.pin, "/")
+		out:    "${PRONTO_IMAGE_REGISTRY:-\(strings.Join(list.Slice(R._parts, 0, len(R._parts)-1), "/"))}/\(R._parts[len(R._parts)-1])"
+	}
 	_mechaContexts: {
 		for s, pin in mecha.published {
-			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": pin}).out
+			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": (_registered & {"pin": pin}).out}).out
 		}
 		// An image mecha has not published yet builds in the monorepo alone:
 		// elsewhere a build that needs it pulls a reference that names why.
@@ -448,7 +467,7 @@ import (
 	}
 	// omnishell's runtime tree, as one image.
 	_omnishell:        omnishell.#RuntimeImage
-	_omnishellContext: (_switch & {service: _omnishell, pin: omnishell.published.runtime}).out
+	_omnishellContext: (_switch & {service: _omnishell, pin: B.omnishellRuntime}).out
 	_omnishellCopy:    "COPY --from=\(B._omnishell) / /omnishell"
 	// Monorepo trees a stage carries in the monorepo: views of the siblings'
 	// targets, which in a mirror switch to an image with no /monorepo, and
@@ -580,19 +599,30 @@ import (
 			}
 		}
 
-		files: "say.yaml": say: {for verb in ["launch", "integrate"] {
-			(verb): rulemap: {
-				builtin: {
-					stop: true
-					cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
-				}
-				host: {
-					platform: "host"
-					stop:     true
-					cmds: [{use: "./bayt-task.nu", do: "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}]
+		files: "say.yaml": say: {
+			for verb in ["launch", "integrate"] {
+				(verb): rulemap: {
+					builtin: {
+						stop: true
+						cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+					}
+					host: {
+						platform: "host"
+						stop:     true
+						cmds: [{use: "./bayt-task.nu", do: "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}]
+					}
 				}
 			}
-		}}
+			// integrate@local, beside the builtin rather than among the loop's
+			// checks: sayt's loop closes integrate's rulemap over them, and a check
+			// names no platform. launch@local is the loop's (emit.cue).
+			integrate: rulemap: local: {
+				platform: "local"
+				priority: -1
+				stop:     true
+				cmds: [{do: distribution.#IntegrateLocal.out}]
+			}
+		}
 		// The host tier serves omnishell from `mise where`, and its data-plane
 		// bundle is a build product (omnishell's bayt `bundle`): in the
 		// monorepo, where the switch is set, the host verbs build it from the

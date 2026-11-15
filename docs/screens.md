@@ -292,6 +292,16 @@ with no `:param` in any locale's spelling, with its locale alternates where the
 app declares locales, since an address invented for a row id is a 404 or
 somebody's row and a `private` route is not for crawlers.
 
+What is not a page is `noindex, nofollow` at the door (`X-Robots-Tag`, assets/Caddyfile): the
+shell's fragments and catalogs, `/messages`, `/docs`, `/omnishell`, `/.well-known`, `/electric`,
+`/blobs`, `/img` and every `_immutable-` file, which Google finds through the importmap each
+document carries. They are not `Disallow`ed, since Google fetches them to render the pages and
+reads the header after; the entry's address, which redirects to the page, carries none. A `spa`
+route the sitemap offers answers each locale's address with the entry whose head is that
+address's: `lang`, the screen's `title`, the canonical and the sitemap's alternates, spelled
+after the door's origin (`_spaDocument`, `indexing.test.ts`). The static entry and the Pages
+build keep the generic head.
+
 The shell takes the served screen over in place, its rows brought to the
 store's by key. Every document names the template it was rendered from
 (`pronto-cas`); where that is not the worker's copy of the template, the shell

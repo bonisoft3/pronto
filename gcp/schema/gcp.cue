@@ -11,10 +11,10 @@ import (
 )
 
 // #Release is an app on GCP: Cloud SQL for its database, and caddy, crud, auth
-// and electric (plus optional render, airlock, and tsbifrost) as containers of
-// one Cloud Run service, sharing localhost the way mecha's bundled unit does
-// (docs/deployment.md#the-bundled-unit), beside the Cloud SQL Auth Proxy. One
-// instance at most, since electric is one; none while nobody plays.
+// and electric as containers of one Cloud Run service, sharing localhost the way
+// mecha's bundled unit does (docs/deployment.md#the-bundled-unit), beside the
+// Cloud SQL Auth Proxy. One instance at most unless maxScale says more, each then
+// running an electric replica of its own; none while nobody plays.
 #Release: R={
 	// The app's compose project name, which names its database, secrets and images.
 	name: =~"^[a-z]([-a-z0-9]{0,28}[a-z0-9])?$"
@@ -50,6 +50,24 @@ import (
 	// run beside the release.
 	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
+	// The gate's checks run in a Cloud Run job of the previews project against the rc preview, in
+	// Cloud Build's place for the drivers `replaces` names, and none runs on the machine
+	// releasing: no integrate@local, and no earlier pass skips the preview. The infrastructure
+	// makes the job (runJobs: its size and command, and its image to be replaced at each run);
+	// each run swaps in the image of the compose driver `driver`, sets `env` beside APP_URL, and
+	// is timed and priced into the release's record at `price`, Cloud Run's instance-based
+	// tier 1 rates in USD a second.
+	rehearsal?: {
+		job:    =~"^[a-z][a-z0-9-]{0,48}[a-z0-9]$"
+		driver: string & !=""
+		replaces: [string, ...string]
+		env: [string]: string
+		price: {
+			vcpu: *0.000018 | number
+			gib:  *0.000002 | number
+		}
+	}
+
 	// Identity-Aware Proxy in front of the service: only the people the project's
 	// owner admits (roles/iap.httpsResourceAccessor on it) reach the app, for an
 	// app that acts for its owner alone. A preview has none, so the gate's
@@ -58,6 +76,22 @@ import (
 	// The instance's CPU unthrottled between requests, for work that runs while
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
+	// Instances kept at rest, so a visit after a quiet spell does not wait for a
+	// cold start; at most maxScale. A preview keeps none.
+	minScale: *0 | int & >=0 & <=R.maxScale
+	// Instances at most. Past 1, each runs its own electric on a temporary replication
+	// slot of a random name (so none waits for another's advisory lock, keyed on the
+	// slot name) beside the shared publication, and a client's requests stay on one
+	// instance (session affinity), the one holding its shapes. A preview keeps 1.
+	maxScale: *1 | int & >=1
+	// maxScale as the release runs it.
+	_replicas: [if R.preview != _|_ {1}, R.maxScale][0]
+	// The database of replicas: a slot and a WAL sender for each of a rollout's old and
+	// new instances and the admin's, the connections of every instance of both and of
+	// the schema job, and a bound on the WAL a hung but connected replica retains (MB;
+	// the disk is 10 GB).
+	_connections:     (#Pools.crud+R.electric.pool+#PerInstanceExtra)*2*R.maxScale + 10
+	_replicaSqlFlags: "cloudsql.logical_decoding=on,max_connections=\(_connections),max_replication_slots=\(2*R.maxScale+2),max_wal_senders=\(2*R.maxScale+2),max_slot_wal_keep_size=1024"
 
 	// Electric's share of the instance. Its memory holds every shape it keeps
 	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
@@ -96,9 +130,9 @@ import (
 	// and optional tiered AI routing through tsbifrost (proxying to Gemini / Imagen
 	// on GCP via GEMINI_API_KEY in Secret Manager).
 	airlock: {
-		enabled:   *false | bool
-		tsbifrost: *false | bool
-		aiModels:  *"" | string
+		enabled:  *false | bool
+		tsbifrost:  *false | bool
+		aiModels: *"" | string
 		// Provider API keys (e.g. GEMINI_API_KEY) mounted into tsbifrost/airlock
 		// from Secret Manager, keyed by environment variable name.
 		secrets: *{} | {[=~"^[A-Z][A-Z0-9_]*$"]: string}
@@ -109,13 +143,22 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
-
+	// The app's own migrations (rawMigrations), replayed on a built database.
+	database: replays: *[] | [...string]
+	// Where the app's tables and the floor's functions are (.pronto/cluster.json; the release fills it).
+	database: schemas: {app: *"public" | #SchemaName, floor: *"public" | #SchemaName, mecha: *"mecha" | #SchemaName}
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
 	// by the release. The ticker runs as one more container of the service, and
 	// Cloud Scheduler is its clock (mecha's services/ticker, the cloud clock).
 	ticker?: env: [string]: string
+
+	// Present where the app turns the blob plane on (capabilities.blobs): the
+	// store is the same rclone, serving a Cloud Storage bucket as the S3 bucket
+	// every app names (mecha-objects), and imgproxy reads it, both containers of
+	// the service. Filled by the release.
+	blobs?: {}
 
 	// Containers of the app's own beside the cluster's: each names a service of
 	// the app's compose project, built and pushed as the cluster's images are,
@@ -139,6 +182,17 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Secrets of the app's own, none of the cluster's: each key an
+		// environment variable read from the Secret Manager secret named, in the
+		// release's project (a preview's, for a preview), in place of anything env
+		// or compose gives it. The secret is made outside the release (infra), which
+		// refuses to start without it; its account is granted it, secret by secret.
+		secrets: *{} | {[=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-zA-Z0-9_-]{1,255}$"}
+		// The path its server answers 2xx on once it can serve, in place of the
+		// bare port a TCP probe checks. In the instance the door then waits for
+		// it too (container-dependencies), so a sidecar whose own dependency is
+		// not up yet never takes a reader.
+		probe?: =~"^/"
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
@@ -152,8 +206,28 @@ import (
 		// none (a worker polling the gateway) keeps minScale instances.
 		apart?: {
 			minScale: *0 | int & >=0
+			// The most instances its service runs. Above 1 so that a replacement
+			// can start beside an instance Cloud Run is retiring: with 1, requests
+			// in that gap wait for an instance and are aborted (429), which the
+			// door turns into 500s. A sidecar apart must then be stateless (its
+			// state per instance, lost with it). One kept at rest (minScale > 0) is
+			// a worker whose timers must not run twice, so it defaults to 1.
+			maxScale: *[if minScale > 0 {1}, 2][0] | int & >=1 & >=minScale
+			// Its service's CPU, in millicpu; absent, Cloud Run's whole one.
+			// Below 1000 Cloud Run takes it only on request-based billing, one
+			// request at a time, in the first generation environment: the
+			// service is so, and its CPU throttled outside requests even with
+			// minScale instances kept (they are billed at the idle rate). Its
+			// memory is then at most 512Mi below 500, and 1Gi below 1000.
+			cpu?: int & >=80 & <=8000
 		}
 	}
+	// The sidecars apart on less than a whole CPU, and those refused for
+	// asking more memory than that CPU takes.
+	_fractional: {for n, c in R._apart if c.apart.cpu != _|_ if c.apart.cpu < 1000 {(n): c}}
+	_overMemory: [for n, c in R._fractional if c.memory != _|_
+		let mi = [if strings.HasSuffix(c.memory, "Gi") {1024 * strconv.Atoi(strings.TrimSuffix(c.memory, "Gi"))}, strconv.Atoi(strings.TrimSuffix(c.memory, "Mi"))][0]
+		if mi > [if c.apart.cpu < 500 {512}, 1024][0] {n}]
 	// The sidecars in the cluster's instance, and those running apart.
 	_inside: {for n, c in R.sidecars if c.apart == _|_ {(n): c}}
 	_apart: {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
@@ -170,9 +244,11 @@ import (
 		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
 		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
 		"render:8090":    "127.0.0.1:\(#Ports.render)"
-		"tsbifrost:8090": "127.0.0.1:\(#Ports.tsbifrost)"
+		"tsbifrost:8090":   "127.0.0.1:\(#Ports.tsbifrost)"
 		"airlock:9997":   "127.0.0.1:\(#Ports.airlock)"
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
+		"rclone-s3:3900": "127.0.0.1:\(#Ports.rcloneS3)"
+		"imgproxy:8080":  "127.0.0.1:\(#Ports.imgproxy)"
 		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
 	}
 	// What a sidecar apart reaches its peers by, as compose names them: the
@@ -180,6 +256,8 @@ import (
 	// Nothing else of the cluster's is reachable from outside its instance.
 	_remote: {
 		"http://crud:3000": "https://\(R.runHost)/crud"
+		// The door itself, which the terminal's renderer reads the app through.
+		"http://caddy:8080": "https://\(R.runHost)"
 		for n, c in R._apart {"http://\(n):\(c.port)": "https://\(R._apartHost[n])"}
 	}
 	_sidecarPorts: [for _, c in R._inside for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
@@ -207,6 +285,9 @@ import (
 		// The auth service's own settings compose gives it (mecha's AUTH_*, such as
 		// its statement bound), filled by the release.
 		env: *{} | {[=~"^AUTH_[A-Z0-9_]+$"]: string}
+		// The SHA-256 fingerprints of the app's Android release certificates,
+		// comma-separated (compose's WEBAUTHN_ANDROID_ORIGINS), filled by the release.
+		android: *"" | string
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
@@ -236,6 +317,9 @@ import (
 		migrateJob: "\(R._id)-migrate"
 		// The Cloud Scheduler job that pokes the ticker.
 		clock: "\(R._id)-clock"
+		// The blob plane's bucket, named for the project too: bucket names are
+		// global.
+		bucket: "\(R._project)-\(R._id)-blobs"
 		// What the Managed Prometheus sidecar scrapes, as a secret it mounts.
 		scrapeConfig: "\(R._id)-gmp-config"
 		// Each sidecar apart's service, and what its own collector scrapes.
@@ -266,24 +350,17 @@ import (
 
 // Ports inside the shared instance: compose's own, except electric (whose 3000
 // is crud's) and render (8091, so tsbifrost keeps 8090).
-#Ports: {
-	caddy:       8080
-	crud:        3000
-	crudAdmin:   3001
-	auth:        9999
-	electric:    3002
-	render:      8091
-	ticker:      9998
-	tsbifrost:   8090
-	airlock:     9997
-	database:    5432
-	proxyHealth: 9090
-}
+#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, render: 8091, ticker: 9998, tsbifrost: 8090, airlock: 9997, database: 5432, proxyHealth: 9090, rcloneS3: 3900, imgproxy: 8081}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
-#SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+
+// An instance's other connections: auth's pool, electric's replication and lock, and
+// the proxy's margin.
+#PerInstanceExtra: 10
+#SqlFlags:         "cloudsql.logical_decoding=on,max_connections=50"
+
 // A preview's database is the smallest tier and its tests open every shape at once: electric
 // fell behind the replication stream there for over a minute, Postgres's default
 // wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
@@ -331,29 +408,36 @@ import (
 				}
 			}
 		}
+		// Every release sends all traffic to the revision it deploys, back from wherever a
+		// rollback (release.nu --rollback) pinned it.
+		spec: traffic: [{percent: 100, latestRevision: true}]
 		spec: template: {
+			// The schema a revision was released with, its schema image's digest (the
+			// database's, where the app has no migrations): a rollback goes back only to
+			// a revision with the same one.
+			let schemaImage = [if R.migrate != _|_ {"schema"}, "database"][0]
+			if R.image.pushed[schemaImage] != _|_ {
+				metadata: labels: "pronto-schema": strings.SliceRunes(strings.TrimPrefix(R.image.pushed[schemaImage].digest, "sha256:"), 0, 40)
+			}
 			metadata: annotations: {
-				"autoscaling.knative.dev/minScale": "0"
-				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
-				"autoscaling.knative.dev/maxScale":         "1"
+				"autoscaling.knative.dev/minScale": [if R.preview != _|_ {"0"}, "\(R.minScale)"][0]
+				"autoscaling.knative.dev/maxScale": "\(R._replicas)"
+				if R._replicas > 1 {"run.googleapis.com/sessionAffinity": "true"}
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				// A preview keeps its CPU between requests too: electric reads the replication
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
-				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
+				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}], [for n, c in R._inside if c.probe != _|_ {n}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
+					if R.render.enabled {render: ["crud", "auth", "electric"]}
+					if R.airlock.enabled {airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.tsbifrost {"tsbifrost"}]])}
+					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
-					if R.render.enabled {
-						render: ["crud", "auth", "electric"]
-					}
-					if R.airlock.enabled {
-						airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.tsbifrost {"tsbifrost"}]])
-					}
 				})
 			}
 			spec: {
@@ -378,6 +462,8 @@ import (
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
 						if R.render.enabled {{name: "PRONTO_UPSTREAM_RENDER", value: "127.0.0.1:\(P.render)"}},
 						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 					], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
 						// One apart is dialed over TLS: the app's route to it sets the
@@ -390,9 +476,11 @@ import (
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
-						{name: "PGRST_DB_SCHEMA", value: "public"},
+						{name: "PGRST_DB_SCHEMA", value: R.database.schemas.app},
 						{name: "PGRST_DB_ANON_ROLE", value: "anon"},
-						{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+						{name: "PGRST_DB_PRE_REQUEST", value: "\(R.database.schemas.floor).app_pre_request"},
+						// As mecha's cluster states them (meta.schema).
+						if R.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: "\(R.database.schemas.floor),public"}},
 						// Cloud Run probes the instance's address, not loopback.
 						{name: "PGRST_SERVER_HOST", value: "*"},
 						{name: "PGRST_DB_POOL", value: "\(#Pools.crud)"},
@@ -408,10 +496,14 @@ import (
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
 						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
 						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
+						if R.auth.android != "" {{name: "WEBAUTHN_ANDROID_ORIGINS", value: R.auth.android}},
 					],
 						// The service refuses to start without its statement bound: compose's
 						// where it gives one, else resilience's client statement, in ms.
 						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
+						// Where the tables, the floor and its lists are, as mecha's cluster states them.
+						[for k, v in {MECHA_DB_SCHEMA: R.database.schemas.app, MECHA_FLOOR_SCHEMA: R.database.schemas.floor, MECHA_SCHEMA: R.database.schemas.mecha}
+							if R.auth.env[k] == _|_ {{name: k, value: v}}],
 						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
@@ -427,9 +519,16 @@ import (
 						// which a bucket mounted over FUSE cannot lock. A new
 						// instance rebuilds its shapes from Postgres.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
+						// Electric 1.8.1 names the slot and the lock behind it by the stream id, shared
+						// by every instance; a temporary slot of a random name is the instance's own,
+						// dropped with its connection. The publication keeps the default stream's.
+						if R._replicas > 1 {{name: "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN", value: "true"}},
+						if R._replicas > 1 {{name: "ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME", value: "true"}},
 					]
 					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
+					// One of several replicas that hangs is restarted; the only one is not, as before.
+					if R._replicas > 1 {livenessProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6}}
 				}], [
 					if R.render.enabled {{
 						name:  "render"
@@ -487,6 +586,44 @@ import (
 						} ]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "250m"
+				}, if R.blobs != _|_ {
+					// mecha's blob plane over the bucket: a combine remote names its root
+					// mecha-objects, and the service's account reaches it with no key.
+					name: "rclone-s3"
+					image: (imageOf & {svc: "rclone-s3"}).out
+					command: ["rclone"]
+					args: ["serve", "s3", "--addr=0.0.0.0:\(P.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
+					env: [
+						{name: "RCLONE_CONFIG_OBJECTS_TYPE", value: "combine"},
+						{name: "RCLONE_CONFIG_OBJECTS_UPSTREAMS", value: "mecha-objects=gcs:\(R.names.bucket)"},
+						{name: "RCLONE_CONFIG_GCS_TYPE", value: "google cloud storage"},
+						{name: "RCLONE_CONFIG_GCS_ENV_AUTH", value: "true"},
+						{name: "RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.rcloneS3, periodSeconds: 2, failureThreshold: 60}
+				}, if R.blobs != _|_ {
+					name: "imgproxy"
+					image: (imageOf & {svc: "imgproxy"}).out
+					env: [
+						{name: "IMGPROXY_USE_S3", value: "true"},
+						{name: "IMGPROXY_S3_ENDPOINT", value: "http://127.0.0.1:\(P.rcloneS3)"},
+						// The store takes any key pair; imgproxy's S3 client insists on one.
+						{name: "AWS_ACCESS_KEY_ID", value: "GK000000000000000000000000"},
+						{name: "AWS_SECRET_ACCESS_KEY", value: "0000000000000000000000000000000000000000000000000000000000000000"},
+						{name: "AWS_REGION", value: "rclone"},
+						{name: "IMGPROXY_BIND", value: ":\(P.imgproxy)"},
+						{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
+						// The store and Google's photo host, as mecha's #ImgproxySources.
+						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/,https://lh3.googleusercontent.com/"},
+						// mecha's presets alone (its #ImgproxyPresets), as compose's imgproxy: no
+						// key signs a URL.
+						{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
+						{name: "IMGPROXY_PRESETS", value: "thumb=rs:fill:128:128/f:webp,avatar=rs:fill:256:256/f:webp,picture=rs:fit:1024:1024/f:webp"},
+						{name: "IMGPROXY_MAX_RESULT_DIMENSION", value: "1024"},
+						{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
+						{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.imgproxy, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "cloud-sql-proxy"
 					image: #Proxy
@@ -504,21 +641,28 @@ import (
 		}
 	}
 
-	// A sidecar's container, in the cluster's instance or its own service.
+	// A sidecar's container, in the cluster's instance or its own service. Apart, it is
+	// its service's ingress, whose PORT and K_* Cloud Run sets itself and refuses from
+	// the spec ("reserved env names"): PORT is its containerPort, the sidecar's port.
 	let sidecarOf = {
-		n: string
-		c: _
+		n:     string
+		c:     _
+		apart: bool | *false
+		let reserved = [if apart for k in ["PORT", "K_SERVICE", "K_REVISION", "K_CONFIGURATION"] {k}]
 		out: {
 			name: n
 			image: (imageOf & {svc: n}).out
-			if len(c.env) > 0 {
-				env: [for k, v in c.env {[
+			if len(c.env)+len(c.secrets) > 0 {
+				env: list.Concat([[for k, v in c.env if c.secrets[k] == _|_ if !list.Contains(reserved, k) {[
 					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
 					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
 					{name: k, value: v},
-				][0]}]
+				][0]}], [for k, s in c.secrets {(secretOf & {env: k, secret: s}).out}]])
 			}
-			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+			startupProbe: [
+				if c.probe != _|_ {httpGet: {path: c.probe, port: c.port}, periodSeconds: 2, failureThreshold: 60},
+				{tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60},
+			][0]
 		}
 	}
 	let gmpCollector = {
@@ -541,25 +685,30 @@ import (
 				labels: "cloud.googleapis.com/location":   R.region
 				annotations: "run.googleapis.com/ingress": "all"
 			}
+			spec: traffic: [{percent: 100, latestRevision: true}]
 			spec: template: {
 				metadata: annotations: {
-					"autoscaling.knative.dev/minScale":         "\(c.apart.minScale)"
-					"autoscaling.knative.dev/maxScale":         "1"
-					"run.googleapis.com/execution-environment": "gen2"
+					"autoscaling.knative.dev/minScale": "\(c.apart.minScale)"
+					"autoscaling.knative.dev/maxScale": "\(c.apart.maxScale)"
+					"run.googleapis.com/execution-environment": [if R._fractional[n] != _|_ {"gen1"}, "gen2"][0]
 					// One kept at rest works between requests: its CPU is not
-					// throttled outside them.
-					if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
+					// throttled outside them, unless it is less than a whole one,
+					// which Cloud Run gives only to requests.
+					if R._fractional[n] != _|_ {"run.googleapis.com/cpu-throttling": "true"}
+					if R._fractional[n] == _|_ if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
 					if scraped {"run.googleapis.com/container-dependencies": json.Marshal({"gmp-collector": [n]})}
 				}
 				spec: {
 					serviceAccountName: R.names.serviceAccount
+					if R._fractional[n] != _|_ {containerConcurrency: 1}
 					if scraped {
 						volumes: [{name: "gmp-config", secret: {secretName: R.names.sidecarScrapeConfigs[n], items: [{key: "latest", path: "config.yaml"}]}}]
 					}
 					containers: list.Concat([[{
-						(sidecarOf & {"n": n, "c": c}).out
+						(sidecarOf & {"n": n, "c": c, apart: true}).out
 						ports: [{name: "http1", containerPort: c.port}]
 						if c.memory != _|_ {resources: limits: memory: c.memory}
+						if c.apart.cpu != _|_ {resources: limits: cpu: "\(c.apart.cpu)m"}
 					}], [if scraped {gmpCollector}]])
 				}
 			}
@@ -597,40 +746,74 @@ import (
 			labels: "cloud.googleapis.com/location": R.region
 		}
 		spec: template: {
+			// No execution environment: a job runs only on the second generation, and Cloud Run
+			// refuses a job that names the first ("not supported on resources of kind Execution").
 			metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
 			spec: {
 				taskCount: 1
 				template: spec: {
 					serviceAccountName: R.names.serviceAccount
 					maxRetries:         0
-					timeoutSeconds:     600
+					// No limit of ours: a pgroll start walks its history, and at 6,180 rows each walk took
+					// minutes, so 10 minutes killed Bonk Chess's job mid-start and left a migration in
+					// progress (2026-11-04). 86400 s (24 h) is the longest this file asks of Cloud Run;
+					// the release waits on the job however long it takes.
+					timeoutSeconds:     86400
 					containers: [{
 						name: "initdb"
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
-							# Validation migrations and machine writers run as this owner
-							# under forced RLS; switched roles still meet every policy.
-							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
+							# On before bash reads the if below, whose glob it is.
+							shopt -s extglob
+							# pgroll records any DDL run outside it as an "inferred" migration, a link
+							# in the chain its previous_migration walks; every release replaying these
+							# steps added hundreds, and at 8,353 that walk ran past the job's timeout
+							# (Bonk Chess, 2026-10-29). These steps are no migrations: psql tells it so, in
+							# the one spelling pgroll's trigger takes (= 'TRUE': `true` recorded 6,149 more).
+							export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
-							  # entity's table, every policy, trigger and publication, and the mecha
-							  # machines' code run again, keeping every row; that step is found by its
-							  # suffix, wherever the program places it.
-							  for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do
-							    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+							  # entity's table and a new field's column, every policy, trigger and
+							  # publication, the status charts' triggers (010_machines), the mecha machines' code (found by its
+							  # suffix, wherever the program places it), and the app's own
+							  # migrations, each idempotent, run again, keeping every row. Live traffic
+							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
+							  # SECURITY); being idempotent, the step is run again, up to three times.
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(R.database.replays, " ")); do
+							    f=/docker-entrypoint-initdb.d/$step
+							    if [ -f "$f" ]; then echo "initdb: replaying $step"
+							      for try in 1 2 3; do
+							        # 010 drops and recreates triggers and constraints: one transaction, so no
+							        # write slips between them and a failure leaves the old ones in force.
+							        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+							        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
+							        if [ "$try" = 3 ]; then exit 1; fi
+							        echo "initdb: $step failed, again in 10s"; sleep 10
+							      done
+							    fi
 							  done
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
-							  docker_process_init_files /docker-entrypoint-initdb.d/*
+							  # Cloud SQL's postgres is no superuser, and the tables it owns are under FORCE
+							  # ROW LEVEL SECURITY: a seed (900_seed.sql) would meet their policies. It
+							  # bypasses them before the files run, as it does after (below).
+							  psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
+							  # A test's rows (#App.state.fixture) are a preview's alone.
+							  docker_process_init_files /docker-entrypoint-initdb.d/\([if R.preview != _|_ {"*"}, "!(950_fixture.sql)"][0])
 							  psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
 							fi
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
-							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+							# It also owns the tables under FORCE ROW LEVEL SECURITY and the
+							# SECURITY DEFINER functions that write them, which a superuser
+							# bypasses; BYPASSRLS gives it that back. Sessions that switch
+							# roles still meet every policy.
+							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks, which pgroll records itself.\nunset PGOPTIONS\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
 						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
 							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
 							[for k, v in R.migrate.env {name: k, value: v}],
@@ -670,19 +853,42 @@ import (
 		})
 	}}
 
+	// Every secret the app's containers read, each env's secretKeyRef and each secret mounted, in
+	// the service, its job and each sidecar apart: what its account is granted, secret by secret,
+	// so an app beside others in one project reads its own secrets and none of theirs.
+	let podSecrets = {
+		pod: _
+		out: list.Concat([
+			[for c in pod.containers if c.env != _|_ for e in c.env if e.valueFrom != _|_ {e.valueFrom.secretKeyRef.name}],
+			[if pod.volumes != _|_ for v in pod.volumes if v.secret != _|_ {v.secret.secretName}],
+		])
+	}
+	_readSecrets: {for s in list.Concat([
+		(podSecrets & {pod: B.service.spec.template.spec}).out,
+		(podSecrets & {pod: B.job.spec.template.spec.template.spec}).out,
+		for _, s in B.sidecarServices {(podSecrets & {pod: s.spec.template.spec}).out},
+	]) {(s): true}}
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
+		// The app's name, which names its release records.
+		app:        R.name
 		project:    R._project
 		region:     R.region
 		repository: R.repository
 		registry:   R._registry
 		service:    R._service
 		if R.preview != _|_ {preview: R.preview}
-		names:    R.names
-		sqlTier:  R.sqlTier
-		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
+		names:   R.names
+		sqlTier: R.sqlTier
+		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, if R._replicas > 1 {R._replicaSqlFlags}, #SqlFlags][0]
+		minScale: R.minScale
+		if R._replicas > 1 && (R.sqlTier == "db-f1-micro" || R.sqlTier == "db-g1-small") {
+			sqlTier: error("maxScale \(R.maxScale) needs a database above the shared-core tiers (\(R.sqlTier) has 614 MiB or 1.7 GiB): \(R.maxScale+1) to \(2*R.maxScale+2) WAL senders decoding and about \(R._connections) connections do not fit; give sqlTier such as db-custom-1-3840")
+		}
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
+		if R.rehearsal != _|_ {rehearsal: R.rehearsal}
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
 
@@ -701,6 +907,10 @@ import (
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
 		oidcSecretKeys: list.Concat([[for _, v in R.auth.oidcSecrets {v}], [for _, v in R.airlock.secrets {v}]])
+		// The sidecars' own secrets, which the release finds made before it starts.
+		sidecarSecretKeys: list.SortStrings([for s, _ in {for _, c in R.sidecars for _, v in c.secrets {(v): true}} {s}])
+		// The secrets its account reads, each granted on the secret alone.
+		readSecrets: list.SortStrings([for s, _ in B._readSecrets {s}])
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
 		// Where each peer compose names is in the instance, which the release
@@ -718,6 +928,7 @@ import (
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
 		if len(B.service.spec.template.spec.containers) > 10 {containers: error("the service has \(len(B.service.spec.template.spec.containers)) containers, over Cloud Run's 10 a revision: run some of GCP.sidecars apart (apart: {})")}
 		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
+		if len(R._overMemory) > 0 {memory: error("\(strings.Join(R._overMemory, ", ")) apart ask more memory than Cloud Run gives their CPU: at most 512Mi below 500 millicpu, 1Gi below 1000")}
 		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
 	// A container with no limit is given a whole CPU.
@@ -726,3 +937,8 @@ import (
 	}])
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
 }
+
+// A schema's name, as the app's .pronto/cluster.json states it: generate took it from the cluster,
+// which refuses keywords and the names its services keep (mecha's meta.schema). Read here without
+// mecha's module, which the release does not otherwise import.
+#SchemaName: =~"^[a-z_][a-z0-9_]{0,62}$" & !~"^pg_"

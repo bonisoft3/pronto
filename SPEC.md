@@ -184,6 +184,17 @@ via `<link rel="import" href="ir/...">` or `![[ir/...]]`; the compiler composes
 them, renders cards and neighbourhoods into each fragment in place, and hashes
 every fragment alongside `ir.html`.
 
+### ir.md: the same document as Markdown
+
+Every `generate` writes `ir.md` beside it (`ir-md.ts`, from `write.ts`): the
+whole of ir.html, the author's prose and the compiler's cards both, as
+Markdown, for where HTML is not rendered (a repository page, a diff, a model's
+context). It is derived, never edited, and says so in its first line. Each
+design object keeps its anchor (`<a id="Game"></a>`, its kind beside it), a
+card reads as its chips on one line and its JSON indented, `<details>` fold as
+GitHub folds them, mermaid stays a mermaid block, and a drawn picture keeps its
+caption with a link to it in ir.html. ir.html stays the source the lints read.
+
 ### Head metadata
 
 | Meta | Content |

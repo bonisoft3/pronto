@@ -17,7 +17,7 @@
 // each application already linked.
 import { Refused, randomToken, verifyIdToken } from "../oidc.ts";
 import { callbackOf, pairwiseKey, pairwiseSubject, tenantOf } from "../broker/core.ts";
-import { esc, google, hmacKey, json, page, type Provider, seal, unseal } from "../broker/main.ts";
+import { esc, google, hmacKey, json, page, type Provider, seal, unlisted, unseal } from "../broker/main.ts";
 import { fakeGoogle } from "./fake.ts";
 
 export interface Hydra {
@@ -171,7 +171,11 @@ export async function front(p: {
         alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce: leg.pn as string, keys: provider.keys,
       }));
     } catch (e) {
-      if (!(e instanceof Refused)) throw e;
+      // The provider's keys out of reach is no refusal of the person: 503, which they may retry.
+      if (!(e instanceof Refused)) {
+        console.error(`front: ${name}'s keys: ${e instanceof Error ? e.message : String(e)}`);
+        return json(503, { error: "provider unavailable" });
+      }
       return await refuse(`${name}'s id token refused: ${e.message}`);
     }
     // Hydra holds the challenge to the tenant it was issued for, so the subject
@@ -198,7 +202,7 @@ export async function front(p: {
     return go(redirect_to as string);
   }
 
-  return async function handler(req: Request): Promise<Response> {
+  return unlisted(async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
@@ -220,7 +224,7 @@ export async function front(p: {
       console.error(e);
       return json(500, { error: "internal error" });
     }
-  };
+  });
 }
 
 if (import.meta.main) {

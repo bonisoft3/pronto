@@ -18,10 +18,26 @@ app: capabilities: resources: {
   assertStringIncludes(caddy, "script-src-attr 'none';");
 });
 
+Deno.test("a frame may name every name under a domain or every port of a host, as a CSP host-source", async () => {
+  const caddy = (await emitFiles(paymentProgram() + `
+app: capabilities: resources: {
+  hosted: {kind: "frame", source: "https://*.example.com", note: "previews under the app's own domain"}
+  local: {kind: "frame", source: "https://localhost:*", note: "a preview on a stack of this machine"}
+}
+`))["docker/Caddyfile"].text;
+  assertStringIncludes(caddy, "frame-src 'self' https://*.example.com https://localhost:*;");
+  assertStringIncludes(caddy, "connect-src 'self';");
+});
+
 Deno.test("resource declarations cannot relax scripts, omit a reason or broaden non-image origins", async () => {
   for (const fields of [
     'kind: "script", source: "https://example.org", note: "code"',
     'kind: "frame", source: "https:", note: "any frame"',
+    'kind: "frame", source: "https://*", note: "any host"',
+    'kind: "frame", source: "http://localhost:*", note: "plain http"',
+    'kind: "frame", source: "https://*.example.com/path", note: "a path"',
+    'kind: "connect", source: "https://*.example.org", note: "a wildcard is a frame\'s alone"',
+    'kind: "connect", source: "https://localhost:*", note: "a wildcard is a frame\'s alone"',
     'kind: "connect", source: "https://example.org/path", note: "a path"',
     'kind: "img", source: "https://example.org"',
     'kind: "img", source: "https://example.org", note: ""',
@@ -93,5 +109,26 @@ Deno.test("projected emission refuses undeclared, unserved and malformed host-DO
   ]) {
     const result = await cue(["export", "-", "-e", "out", "--out", "json"], paymentProgram() + change);
     assertEquals(result.success, false, change);
+  }
+});
+
+Deno.test("a container hatch's page that hands a form to another site adds that origin to its own form-action alone", async () => {
+  const files = await emitFiles(paymentProgram() + `
+app: capabilities: hatches: builder: {kind: "container", note: "registers an app on GitHub", forms: "/builder/github/new": ["https://github.com"]}
+`);
+  const caddy = files["docker/Caddyfile"].text;
+  assertStringIncludes(caddy, "@terminal not path /docs/* /builder/github/new\n  header @terminal Content-Security-Policy");
+  const page = caddy.split("\n").find((l) => l.startsWith("  header @form0 Content-Security-Policy")) ?? "";
+  assertStringIncludes(page, "form-action 'self' https://github.com;");
+  assertStringIncludes(page, "script-src-attr 'none';");
+  const rest = caddy.split("\n").find((l) => l.startsWith("  header @terminal Content-Security-Policy")) ?? "";
+  assertStringIncludes(rest, "form-action 'self';");
+  assertEquals(page.replace(" https://github.com", ""), rest.replace("@terminal", "@form0"));
+});
+
+Deno.test("a hatch's form page is under its own route and posts only to an https origin", async () => {
+  for (const forms of ['"/elsewhere/new": ["https://github.com"]', '"/builder/new": ["http://github.com"]', '"/builder/new": ["https://github.com/path"]']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: capabilities: hatches: builder: {kind: "container", note: "x", forms: {${forms}}}`);
+    assertEquals(res.success, false, forms);
   }
 });

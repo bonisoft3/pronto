@@ -59,8 +59,9 @@ simulator is that pattern as a declaration.
 
 `targets` names the release targets the real container is deployed on:
 `docker`, where the appliance runs it as a process, and `cloudflare`, where
-the airlock's dispatcher Worker runs it as a Cloudflare Container. k8s and gcp
-run no airlock, so naming another is refused. On a target the bridge is not
+the airlock's dispatcher Worker runs it as a Cloudflare Container. k8s runs
+the airlock and its daprd but deploys no bridge, and gcp's airlock has no daprd
+to reach one, so naming another is refused. On a target the bridge is not
 deployed on, its effects settle `failed` without a call.
 
 ### Cloudflare

@@ -4,7 +4,7 @@
 
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { fileURLToPath } from "node:url";
-import { locate, pgrollMigrations, plain, fixtureDefinitions, replacementFindings, compareCatalogs, type Column } from "./check-replay.ts";
+import { locate, pgrollMigrations, plain, fixtureDefinitions, replacementFindings, compareCatalogs, catalogQuery, dataSnapshotQuery, type Column } from "./check-replay.ts";
 
 type Row = { step: number; mig: string; rel: number; tbl: string; col: string; typ: string; ordinal: number };
 type Finding = { severity: string; path: string | null; message: string };
@@ -225,4 +225,16 @@ Deno.test("retained fixture typos cannot silently remove upgrade coverage", () =
   assertThrows(() => fixtureDefinitions([fixture, fixture]));
   assertThrows(() => fixtureDefinitions([{ ...fixture, seed: "tests/../../seed.sql" }]));
   assertThrows(() => fixtureDefinitions([{ ...fixture, replacements: { feed: { kind: "view", note: "" } } }]));
+});
+
+// An app on a schema of its own (cluster.json's schemas.app) is replayed there, not in public:
+// the catalog, the row snapshot and its DO block all read the app's tables where they actually live.
+Deno.test("the catalog and row-snapshot queries read the app's own schema, not public", () => {
+  for (const q of [catalogQuery("orders"), dataSnapshotQuery("orders")]) {
+    assertEquals(q.includes("public"), false, q);
+  }
+  assertEquals(catalogQuery("orders").includes("n.nspname = 'orders'"), true);
+  const snapshot = dataSnapshotQuery("orders");
+  assertEquals(snapshot.includes("n.nspname='orders'"), true);
+  assertEquals(snapshot.includes("FROM orders.%I t"), true);
 });

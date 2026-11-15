@@ -9,7 +9,7 @@ import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotCompose, snapshotSql } from './derived.ts'
-import { writeEdgeAssets } from './edge-assets.ts'
+import { hostDomAssets, writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -37,6 +37,21 @@ Deno.test('edge assets preserve lazy module and route delivery without bundling 
     assert.equal(await Deno.readTextFile(path.join(out, 'omnishell/interpreter/shell.js')), 'export const runtime = true;')
     await assert.rejects(() => writeEdgeAssets(app, terminal, out, [{ file: 'shell/index.html', target: '/srv/../escape.html' }]), /invalid static asset target/)
   } finally { await Deno.remove(scratch, { recursive: true }) }
+})
+
+Deno.test("a page carries its host-DOM hatches' files beside it, and nothing else of the terminal's", () => {
+  const held = hostDomAssets([
+    { file: 'shell/index.html', target: '/srv/shell/index.html' },
+    { file: 'shell/hatches/fala/main.js', target: '/srv/shell/hatches/fala/main.js' },
+    { file: 'shell/hatches/fala/voz/a.mp3', target: '/srv/shell/hatches/fala/voz/a.mp3' },
+    { file: 'shell/hatches/falar/main.js', target: '/srv/shell/hatches/falar/main.js' },
+    { file: 'interpreter/shell.js', target: '/omnishell/interpreter/shell.js' },
+  ], ['shell/hatches/fala/main.js'])
+  assert.deepEqual([...held], [
+    ['shell/hatches/fala/main.js', 'shell/hatches/fala/main.js'],
+    ['shell/hatches/fala/voz/a.mp3', 'shell/hatches/fala/voz/a.mp3'],
+  ])
+  assert.throws(() => hostDomAssets([{ file: 'x', target: '/srv/shell/hatches/fala/../../escape.js' }], ['shell/hatches/fala/main.js']), /invalid static asset target/)
 })
 
 Deno.test('a table follows the tables it references, and a cycle is refused', () => {
@@ -312,7 +327,8 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }))
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
-    await write('shell/screens/home.css', '')
+    // A screen's sheet importing a sheet the head links carries only its own rules.
+    await write('shell/screens/home.css', '@import url("shared/chrome.css"); .home { gap: 1px; }')
     // A comment naming the @import a screen's sheet carries is prose, not an
     // import, which the bundler refused a shared sheet for.
     // A string's `/*` opens no comment: the import after it is still inlined.
@@ -362,7 +378,14 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    assert.ok(html.includes('<style>/* shared through the @import atop each screen; was @import "./gone.css"; */ body { padding-top: 72px; } a::after { content: "/*"; } .rail { gap: 0; }</style>'))
+    // The comment is prose the first load does not carry (prose.ts).
+    assert.ok(html.includes('<style> body { padding-top: 72px; } a::after { content: "/*"; } .rail { gap: 0; }</style>'))
+    // The head carries the shared sheet it links: no screen preloads it, and
+    // the payload holds it once, in the head.
+    const shipped = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
+    assert.ok(!('shell/shared/chrome.css' in shipped.files) && !('shell/shared/chrome.css' in shipped.same))
+    assert.deepEqual(JSON.parse(shipped.files['shell/shell.json']).routes[0].files.shared, ['shell/shared/rail.css'])
+    assert.equal(shipped.files['shell/screens/home.css'], ' .home { gap: 1px; }')
     assert.ok(!/<link rel="stylesheet"/.test(html))
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
 
@@ -383,9 +406,13 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       import { createPageDatabase } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'database.ts'))))}
       import { createCluster } from ${JSON.stringify(String(pathToFileURL(path.join(browser, 'cluster.ts'))))}
       const html = await Deno.readTextFile(Deno.args[0])
-      const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
-      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
-      globalThis.fetch = () => { throw new Error('the bundled database must boot offline') }
+      const payload = JSON.parse(/<script type="application\\/json" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1])
+      // PGlite's files come from beside the page, and nothing from elsewhere.
+      const dir = Deno.args[0].replace(/index\\.html$/, '')
+      globalThis.fetch = async (href) => {
+        if (!String(href).startsWith('/pronto/')) throw new Error('the bundled database must boot from its own files')
+        return new Response(await Deno.readFile(dir + String(href).slice(1)))
+      }
       const db = await createPageDatabase(payload.cluster.assets)
       const cluster = await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, drains: payload.cluster.drains, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
       await cluster.drains.idle()
@@ -525,8 +552,7 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    const encoded = /<script type="application\/octet-stream" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1]
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))))
+    const payload = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
     assert.deepEqual(JSON.parse(payload.files['shell/shell.json']).routes.map((route: { ssr: string }) => route.ssr), ['spa', 'spa'])
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
     // The boot runs first and installs the policy; only the module runs under it.
@@ -581,7 +607,7 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
     const preloads = [...html.matchAll(/<link rel="preload" href="([^"]+)"/g)].map((m) => m[1])
     assert.deepEqual(preloads, ['https://fonts.example/a.woff2'])
-    assert.match(html, /preload: false/)
+    assert.match(html, /preload:\s*(?:false|!1)/)
   } finally {
     await Deno.remove(app, { recursive: true })
   }
@@ -656,7 +682,7 @@ Deno.test('a bundled page carries its realm units inlined beside the boot, its a
     assert.match(doc, /<style>body\{color:red\}<\/style>/)
     assert.match(doc, /<script>window\.lib = "<\\\/script><\\!--"<\/script>/)
     assert.match(doc, /São Paulo/)
-    const payload = JSON.parse(new TextDecoder().decode(Buffer.from(/id="pronto-payload">([^<]*)</.exec(html)![1], 'base64')))
+    const payload = JSON.parse(/id="pronto-payload">([^<]*)</.exec(html)![1])
     assert.equal(payload.files['shell/units/geocoder/unit.js'], 'postMessage({type:"pronto:ready"})')
     assert.equal(JSON.parse(payload.files['shell/shell.json']).units.map.self, true)
     assert.equal(JSON.parse(payload.files['shell/shell.json']).units.geocoder.self, undefined)
@@ -675,5 +701,57 @@ Deno.test('a bundled page carries its realm units inlined beside the boot, its a
     assert.match(new TextDecoder().decode(presenter.stderr), /presenter units are not bundled yet: painter/)
   } finally {
     await Deno.remove(app, { recursive: true })
+  }
+})
+
+// Regression: Cloudflare Pages answered every unknown path with the entry at
+// 200 (aprende's cd check for a missing asset read HTTP 200), because a build
+// with no 404.html is a single-page app to it. A page at the root of a site
+// carries its routes as proxy rules and the document as 404.html, so a route
+// loads and a missing file is a 404; under --base, a project site that reads no
+// _redirects, only 404.html.
+Deno.test('a page bundled at the root of a site carries its routes as _redirects, and 404.html', async () => {
+  const stub = await Deno.makeTempDir({ prefix: 'cue-stub-' })
+  const bundle = async (extra: string[]) => {
+    const app = await Deno.makeTempDir({ prefix: 'pages-bundle-test-' })
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    await write('shell/shell.json', JSON.stringify({ routes: [], migrations: [], tables: [] }))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/boot.js', '')
+    await write('shell/index.html', '<!doctype html><html><head><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    await write('cue.mod/module.cue', 'module: "example.test/app@v0"\n')
+    const bundled = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'), ...extra,
+      ],
+      env: { PATH: `${stub}:${Deno.env.get('PATH')}` },
+      stdout: 'inherit',
+      stderr: 'inherit',
+    }).output()
+    assert.deepEqual(bundled.success, true, 'bundle.ts failed')
+    return app
+  }
+  const apps: string[] = []
+  try {
+    // The program's own export, which an app's program.cue names `out`, and whose content emit's tests hold.
+    await Deno.writeTextFile(path.join(stub, 'cue'), `#!/bin/sh\n[ "$4" = out.pagesRedirects ] || exit 1\ncat <<'JSON'\n"/regras / 200\\n/regras/ / 200\\n"\nJSON\n`, { mode: 0o755 })
+    const root = await bundle([])
+    apps.push(root)
+    const html = await Deno.readTextFile(path.join(root, 'dist/browser/index.html'))
+    assert.equal(await Deno.readTextFile(path.join(root, 'dist/browser/404.html')), html)
+    assert.equal(await Deno.readTextFile(path.join(root, 'dist/browser/_redirects')), '/regras / 200\n/regras/ / 200\n')
+
+    const project = await bundle(['--base', '/truco'])
+    apps.push(project)
+    assert.equal(await Deno.readTextFile(path.join(project, 'dist/browser/404.html')), await Deno.readTextFile(path.join(project, 'dist/browser/index.html')))
+    await assert.rejects(Deno.stat(path.join(project, 'dist/browser/_redirects')), Deno.errors.NotFound)
+  } finally {
+    for (const app of apps) await Deno.remove(app, { recursive: true })
+    await Deno.remove(stub, { recursive: true })
   }
 })

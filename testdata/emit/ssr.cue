@@ -26,6 +26,20 @@ import pronto "github.com/bonisoft3/pronto"
 }
 
 #ssrView: #ssrCase & {reads: [_view]}
+// The services beside the door a host launch runs: those the program names (a plugin's,
+// code.meta.hostPeers); the renderer is a peer of the door's own variable, not listed here;
+// an app whose plugin states the list itself, as one did before, keeps it.
+#peersCase: {
+	peers: [string]: int
+	ssr: *true | bool
+	stated: *null | [...string]
+	_base: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}}
+	_ssr: #ssrCase & {reads: []}
+	_app: [if ssr {_ssr._app}, _base][0] & {meta: hostPeers: peers}
+	_statics: [if ssr {(pronto.#DefaultTerminal & {code: _app}).out.surface.statics}, []][0]
+	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _statics}).out & {if stated != null {meta: hostPeers: stated}}
+	hostPeers: _cluster.meta.hostPeers
+}
 
 // A route rendered before any request (#Screen.prerender): a document per
 // address, which the door answers as a template naming the origin, and
@@ -47,7 +61,9 @@ import pronto "github.com/bonisoft3/pronto"
 	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
 	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
 	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
-	_files: (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
+	_emit: pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}
+	_files: _emit.files
+	pagesRedirects: _emit.pagesRedirects
 	caddyfile: _files["docker/Caddyfile"].text
 	entry: _terminal.surface.entry
 	routes: {
@@ -71,12 +87,14 @@ import pronto "github.com/bonisoft3/pronto"
 #accessCase: {
 	reads: [...pronto.#Read]
 	extra?: {...}
+	// An app behind a sign-in, where a public screen is one open to visitors.
+	signIn: *false | bool
 	_base: (#readCase & {
 		"reads": reads
 		route:   "/jogos"
 		goal: {table: "goal", durability: "live", access: {scope: "public"}}
 	}).app & {
-		capabilities: auth: {required: false, service: "/auth"}
+		capabilities: auth: {required: signIn, service: "/auth"}
 		surface: screens: jogo: {files: {handlers: [], adapters: []}, [if extra != _|_ {extra}, {}][0]}
 	}
 	_terminal: (pronto.#DefaultTerminal & {code: _base}).out

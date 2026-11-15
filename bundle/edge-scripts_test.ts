@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { releaseFiles, releaseScripts } from './edge-scripts.ts'
+import { FIXTURE, releaseFiles, releaseScripts } from './edge-scripts.ts'
 import { emitFiles, paymentProgram } from '../effects-fixtures.ts'
 import { browserTier } from '../../../libraries/mecha/packages/mecha-browser/fence.ts'
 
@@ -149,6 +149,23 @@ Deno.test('release scripts are the files then the pgroll set, whatever their nam
     assert.deepEqual(await applyScripts(db, release.scripts, () => {}), [])
   } finally {
     await db.close()
+    await Deno.remove(app, { recursive: true })
+  }
+})
+
+// A release's files are what the edge and the page are built from: a test's
+// rows (950_fixture.sql) never reach them, as a gcp release's initdb skips them.
+Deno.test('an edge release carries every migration but the test fixture', async () => {
+  const app = await Deno.makeTempDir()
+  try {
+    const dir = path.join(app, 'services/database/migrations')
+    await Deno.mkdir(dir, { recursive: true })
+    const names = ['001_schema.sql', FIXTURE]
+    for (const n of names) await Deno.writeTextFile(path.join(dir, n), `-- ${n}`)
+    const files = (await releaseFiles(app, mecha, names.map((n) => `services/database/migrations/${n}`))).map((f) => f.name)
+    assert.ok(files.includes('001_schema.sql'), files.join(' '))
+    assert.ok(!files.includes(FIXTURE), files.join(' '))
+  } finally {
     await Deno.remove(app, { recursive: true })
   }
 })

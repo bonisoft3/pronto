@@ -6,6 +6,7 @@ package emit
 
 import (
 	"list"
+	"strings"
 	pronto "github.com/bonisoft3/pronto"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishellTerminal "github.com/bonisoft3/pronto/terminals:omnishell"
@@ -43,7 +44,11 @@ installedImageDir:  _installedProject.imageDir & "${MONOREPO_COMPOSE_MODE:+apps/
 
 installedImageName: _installedCluster.meta.images.database & {name: "libraries_mecha-database-image"}
 installedFrom:    _installedProject.targets.database.dockerfile.from.name & "libraries_mecha-database-image"
-installedContext: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://\(mecha.published.database)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"
+installedContext: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://${PRONTO_IMAGE_REGISTRY:-bonitao}/\(strings.TrimPrefix(mecha.published.database, "bonitao/"))}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"
+// PRONTO_IMAGE_REGISTRY swaps only the registry: the image's name and digest
+// stay, and a pin under a deeper path (ghcr.io/<owner>/) keeps all of it as
+// the default.
+installedRegistryDefault: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & =~"docker-image://\\$\\{PRONTO_IMAGE_REGISTRY:-bonitao\\}/mecha-database:[^/]+@sha256:[0-9a-f]{64}\\}"
 installedIncludes: _installedProject.compose.includes & ["monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
 // The switch's file names the monorepo's targets at the paths the checkout
 // keeps them, spelled out: no variable relocates them. It is the checkout's,
