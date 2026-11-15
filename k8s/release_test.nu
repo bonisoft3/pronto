@@ -33,6 +33,7 @@ use release.nu [
 	render-manifests
 	read-environment
 	auth-provider-environment
+	crud-schemas
 	auth-provider-secret
 	runtime-services
 	schema-copy-steps
@@ -71,6 +72,7 @@ def run-tests [] {
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
+	test_crud_schemas
 	test_auth_providers
 	test_auth_provider_secrets
 	test_release_tree
@@ -314,6 +316,24 @@ def test_auth_provider_secrets [] {
 		assert ($err.msg | str contains "field not allowed")
 		true
 	})
+	rm $data
+	assert $refused
+}
+
+# PostgREST serves public alone unless the app's compose gives crud more (PRONTO-320): a node's
+# release names the same schemas the app's compose does, so /api/v1 is not a PGRST106.
+def test_crud_schemas [] {
+	print "test crud serves the schemas compose gives it, public alone by default..."
+	assert equal (crud-schemas {}) "public"
+	assert equal (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"}) "public,api_v1"
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let schema_of = {|rendered| $rendered | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers.0.env | where name == "PGRST_DB_SCHEMA" | first | get value }
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind")) "public"
+	let data = (mktemp -t crud.XXXXXX.json | str trim)
+	{App: {crud: {schemas: (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"})}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "public,api_v1"
+	{App: {crud: {schemas: "api_v1"}}} | to json | save -f $data
+	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch { true })
 	rm $data
 	assert $refused
 }

@@ -1336,6 +1336,11 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 	}
 }
 
+# The schemas PostgREST serves, as compose gives crud (PGRST_DB_SCHEMA): public, then an app's API schemas.
+export def crud-schemas [environment: record]: nothing -> string {
+	$environment.PGRST_DB_SCHEMA? | default "public"
+}
+
 export def auth-provider-secret [name: string, namespace: string, values: record]: nothing -> record {
 	{
 		apiVersion: "v1", kind: "Secret"
@@ -1659,9 +1664,10 @@ export def main [
 	# What release.cue sets is the release's, over compose's, as gcp/release.nu's auth.oidc is.
 	let fixed = (^cue export --expression App.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment | reject -o ...$fixed))
+	let crud_schemas = (crud-schemas (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get -o services.crud.environment | default {}))
 	let own_env = (app-services-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues), crud: {schemas: $crud_schemas}} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file | if $is_tenant { tenant-manifests $tenant } else { $in })
 	rm $pushed_file
 

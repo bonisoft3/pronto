@@ -819,7 +819,7 @@ import (
 								name:  "PGRST_DB_URI"
 								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.id)"
 							},
-							{name: "PGRST_DB_SCHEMA", value: "public"},
+							{name: "PGRST_DB_SCHEMA", value: release.crud.schemas},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 							{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
 							{
