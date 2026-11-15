@@ -77,7 +77,10 @@ let omnishell = (^mise where github:bonisoft3/omnishell | str trim); deno test -
 The test imports `@bonisoft3/omnishell/test/screen-harness.ts` as omnishell's
 own tests do, and `./platform.ts` re-exports what an app takes from the
 harness. A test that imports mecha runs under mecha's cluster config the same
-way (`#Platform & {tree: "mecha"}`). omnishell's test lock is the harness's
+way (`#Platform & {tree: "mecha"}`); a check that spans more than one platform
+tree runs under `#Platforms`, which synthesizes a `data:application/json`
+import map from each installed tree's `mise where` path and locks external
+specifiers in `tests/deno.lock`. omnishell's test lock is the harness's
 environment: an app test's `npm:` or `jsr:` import that the lock lacks is
 added there, since omnishell owns the harness. A test that imports no
 platform runs under the app's own `tests/deno.json` and `tests/deno.lock`,
