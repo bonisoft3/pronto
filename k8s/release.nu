@@ -753,15 +753,18 @@ export def database-base []: string -> any {
 # database's is (CloudNativePG reads it), the digest the one it has everywhere: crane copies it as it is, so the image
 # the primary runs is the same on every release until the base itself is moved. The node's registry is reached through a
 # port-forward, as buildkit-images does. Answers the image's `{tag, digest}`.
-export def database-base-copy [base: record, app: string]: nothing -> record {
+export def database-base-copy [base: record, app: string, --registry: string = ""]: nothing -> record {
 	let digest = ($base.ref | split row "@" | last)
 	let major = (^crane config $base.ref | from json | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last)
-	let reg = (port-forward pronto-registry registry $node_registry_port)
+	# `registry`: where the release already reaches the node's registry (build.by "node": its SSH tunnel's local port);
+	# else a port-forward through the cluster's API, as buildkit-images reaches it.
+	let reg = if ($registry | is-empty) { port-forward pronto-registry registry $node_registry_port } else { null }
+	let host = if ($registry | is-empty) { $"127.0.0.1:($reg.port)" } else { $registry }
 	try {
-		^crane copy --insecure $base.ref $"127.0.0.1:($reg.port)/($app)-database-base:($major)" | ignore
-		stop-port-forward $reg
+		^crane copy --insecure $base.ref $"($host)/($app)-database-base:($major)" | ignore
+		if ($reg | is-not-empty) { stop-port-forward $reg }
 	} catch {|e|
-		stop-port-forward $reg
+		if ($reg | is-not-empty) { stop-port-forward $reg }
 		error make {msg: $e.msg}
 	}
 	{tag: $major, digest: $digest}
@@ -1693,7 +1696,7 @@ export def main [
 		if ($base | is-empty) { $images } else { $images | insert "database-base" (database-base-copy $base $app_info.name) }
 	} else {
 		let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
-		$build_svcs | each {|svc|
+		let built = ($build_svcs | each {|svc|
 			let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 			# The database's tag is its Postgres major, which CloudNativePG reads; the
 			# official postgres base the image derives from states it as PG_MAJOR.
@@ -1708,7 +1711,11 @@ export def main [
 			}
 			let digest = (docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
 			{svc: $svc, ref: {tag: $tag, digest: $digest}}
-		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+		# A node's build (Docker here, pushed through the SSH tunnel) gives the primary the base as well (PRONTO-537):
+		# only the buildkit build did, so Bonk Chess's primary was recreated by every release that changed a replayed file.
+		let base = if $target_env.build.by == "node" and ($push_registry | is-not-empty) { (do { cd $app_source_dir; docker compose --profile "*" config } | database-base) } else { null }
+		if ($base | is-empty) { $built } else { $built | insert "database-base" (database-base-copy $base $app_info.name --registry $push_registry) }
 	}
 	# What compose gives the migrate service beyond the database it names.
 	let migrate = if $has_migrate {
