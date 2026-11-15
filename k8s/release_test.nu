@@ -483,6 +483,7 @@ def test_render_manifests_kind [] {
 	let db = ($yaml | from yaml | where kind == "Cluster" | first)
 	assert equal $db.spec.stopDelay 120 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
 	assert equal $db.spec.smartShutdownTimeout 15
+	assert ("primaryUpdateMethod" not-in ($db.spec | columns)) "one instance has no standby to switch over to"
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
 	for svc in ["database" "crud" "electric" "auth" "caddy" "render"] {
@@ -1653,11 +1654,13 @@ def test_database_ha [] {
 	assert equal $one.instances 1
 	for f in [enablePDB replicationSlots] { assert ($f not-in ($one | columns)) $"one instance renders no ($f), as before" }
 	assert ("synchronous" not-in ($one.postgresql | columns)) "nor synchronous replication"
+	assert ("primaryUpdateMethod" not-in ($one | columns)) "nor a switchover"
 	let three = (do $cluster {database: {instances: 3, parameters: {max_slot_wal_keep_size: "2GB"}}})
 	assert equal $three.instances 3
 	assert equal $three.postgresql.synchronous {method: "any", number: 1, dataDurability: "preferred"}
 	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
 	assert equal $three.enablePDB true
+	assert equal [$three.primaryUpdateMethod $three.primaryUpdateStrategy] ["switchover" "unsupervised"] "a primary change promotes a standby first"
 	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
 	let strict = (do $cluster {database: {instances: 3, synchronous: {dataDurability: "required"}, haSlots: false, enablePDB: false}})
 	assert equal $strict.postgresql.synchronous.dataDurability "required"

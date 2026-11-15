@@ -223,6 +223,14 @@ import (
 				if release.database.instances > 1 {
 					postgresql: synchronous: release.database.synchronous
 				}
+				// A change the primary must restart for (a new image, a parameter) promotes a synchronised
+				// standby first and restarts the old primary after it (PRONTO-537): CloudNativePG's default,
+				// restart, took the primary down for about a minute while two standbys sat idle
+				// (release 853292bc, 2026-11-15 20:01 BRT). One instance has no standby to promote.
+				if release.database.instances > 1 {
+					primaryUpdateStrategy: "unsupervised"
+					primaryUpdateMethod:   "switchover"
+				}
 				if release.database.haSlots {
 					replicationSlots: highAvailability: enabled: true
 				}
