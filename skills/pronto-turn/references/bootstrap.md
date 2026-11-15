@@ -7,9 +7,10 @@ Use Pronto **1.1.2** through CUE module **1.1.5**, and Sayt **0.49.1**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
-A finish CUE release carries previously published tool self-pins so its shipped
-lock is complete. Keep the generated tool versions even when they differ from
-the CUE module versions.
+A finish CUE module (for example `v1.1.5`) pins and locks the preceding Pronto
+source distribution (`1.1.2`). Generated `.mise.toml` and `mise.lock` agree on
+every tool version; keep `"github:bonisoft3/pronto" = "1.1.2"` rather than
+rewriting it to the CUE module tag.
 
 Bootstrap is the agent's to run, first, in the app's directory: everything it
 installs lands there and in mise's cache. A checkout of pronto on disk does not

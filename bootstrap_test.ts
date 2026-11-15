@@ -67,6 +67,17 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     for (const [, name, source] of modules) {
       const mirror = join(scratch, name);
       await copy(source, mirror);
+      // A sibling's CUE tag is cut before its GitHub release exists, so its
+      // published toolchain/tools.cue lags by one release; Pronto's adapter
+      // must still emit the version bootstrap/mise.lock locks.
+      if (name === "mecha" || name === "omnishell") {
+        const tc = join(mirror, "toolchain/tools.cue");
+        const lagged = (await Deno.readTextFile(tc)).replace(
+          new RegExp(`("github:bonisoft3/${name}":\\s*)"[^"]+"`),
+          '$1"0.0.1"',
+        );
+        await Deno.writeTextFile(tc, lagged);
+      }
       await Deno.mkdir(join(mirror, "cue.mod"), { recursive: true });
       await Deno.copyFile(join(source, ".mirror/cue.mod/module.cue"), join(mirror, "cue.mod/module.cue"));
       await cue(mirror, ["mod", "edit", "--source=self"]);
@@ -108,11 +119,14 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     }
     const d2 = tools["github:terrastruct/d2"];
     assert(typeof d2 === "string" && /^v\d+\.\d+\.\d+$/.test(d2), "D2 must have an exact release pin");
-    // A finish tag may update the CUE module while retaining an already
-    // published tool self-pin; the source declarations own the runtime roster.
+    // A finish tag may update Pronto's CUE module while retaining an already
+    // published tool self-pin; Pronto's adapters own the runtime roster and
+    // hold image digests, CUE module deps, and sibling toolchains in lockstep.
     const declaredPins = await Promise.all([
       ["mecha", "libraries/mecha/toolchain", '#Tools["github:bonisoft3/mecha"]'],
+      ["mecha", "plugins/pronto/clusters:mecha", "#Version"],
       ["omnishell", "plugins/omnishell/toolchain", '#Tools["github:bonisoft3/omnishell"]'],
+      ["omnishell", "plugins/pronto/terminals:omnishell", "#Version"],
       ["pronto", "plugins/pronto/distribution", "#Version"],
       ["sayt", "plugins/pronto/distribution", "#SaytVersion"],
       ["bayt", "plugins/pronto/builders:bayt", '#Toolchain.tools["github:bonisoft3/bayt"]'],
@@ -122,8 +136,22 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     }));
     for (const { name, source, expression, version } of declaredPins) {
       assert(/^\d+\.\d+\.\d+$/.test(version), `${source} ${expression}: tool self-pin must be an exact release version`);
-      assert(tools[`github:bonisoft3/${name}`] === version, `${name}: bootstrap tool version differs from ${source} ${expression}`);
+      assert(tools[`github:bonisoft3/${name}`] === version, `${name}: bootstrap tool version (${tools[`github:bonisoft3/${name}`]}) differs from ${source} ${expression} (${version})`);
     }
+    const prontoDeps = JSON.parse(await cue(repo, ["export", join(repo, "plugins/pronto/.mirror/cue.mod/module.cue"), "--out", "json"])).deps as Record<string, { v: string }>;
+    for (const sibling of ["bayt", "mecha", "omnishell", "sayt"]) {
+      const want = `v${tools[`github:bonisoft3/${sibling}`]}`;
+      const got = prontoDeps[`github.com/bonisoft3/${sibling}@v0`]?.v;
+      assert(got === want, `plugins/pronto/.mirror/cue.mod/module.cue pins ${sibling} at ${got}, expected ${want}`);
+    }
+    const mechaImages = JSON.parse(await cue(repo, ["export", "./plugins/pronto/clusters:mecha", "-e", "#Images", "--out", "json"])) as string[];
+    const mechaPublished = JSON.parse(await cue(repo, ["export", "./plugins/pronto/clusters:mecha", "-e", "published", "--out", "json"])) as Record<string, string>;
+    assert(JSON.stringify(Object.keys(mechaPublished).sort()) === JSON.stringify([...mechaImages].sort()), `clusters/mecha.cue published keys (${Object.keys(mechaPublished).sort().join(",")}) do not cover #Images (${[...mechaImages].sort().join(",")})`);
+    for (const [svc, ref] of Object.entries(mechaPublished)) {
+      assert(ref.startsWith(`bonitao/mecha-${svc}:${tools["github:bonisoft3/mecha"]}@sha256:`), `clusters/mecha.cue published.${svc} (${ref}) does not match mecha ${tools["github:bonisoft3/mecha"]}`);
+    }
+    const omnishellRuntime = (await cue(repo, ["export", "./plugins/pronto/terminals:omnishell", "-e", "published.runtime", "--out", "text"])).trim();
+    assert(omnishellRuntime.startsWith(`bonitao/omnishell:${tools["github:bonisoft3/omnishell"]}@sha256:`), `terminals/omnishell.cue published.runtime (${omnishellRuntime}) does not match omnishell ${tools["github:bonisoft3/omnishell"]}`);
     const duckdb = tools["http:duckdb"];
     const assets: Record<string, string> = {
       "linux-x64": "linux-amd64",

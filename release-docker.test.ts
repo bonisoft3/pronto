@@ -434,14 +434,13 @@ Deno.test("the appliance's build refuses a bridge on a port an appliance process
   assertStringIncludes(guard, "/.bayt/process-compose.yaml");
 });
 
-// The extensions image mecha has not published yet stood in compose as a
-// `${MONOREPO_COMPOSE_MODE:?…}` context: every compose command loading the file
-// failed outside the monorepo (golaberto's archive tools), not only the build.
-Deno.test("an unpublished mecha image refuses only the build that needs it", async () => {
+// Outside the monorepo, compose resolves the appliance's extensions context to
+// mecha's published image rather than failing every compose command with `:?`.
+Deno.test("release-docker resolves the published mecha extensions image outside the monorepo", async () => {
   const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]')) as Target & { compose: { build: { additional_contexts: Record<string, string> } } };
   const ctx = rd.compose.build.additional_contexts["libraries_mecha-extensions-image"];
   assert(!ctx.includes(":?"), `compose refuses to load the file: ${ctx}`);
-  assertStringIncludes(ctx, "${MONOREPO_COMPOSE_MODE:-docker-image://unpublished.invalid/mecha-publishes-no-extensions-image-yet}");
+  assertStringIncludes(ctx, "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/mecha-extensions:");
 });
 
 // One container serving several bridges (one per action) was two processes of

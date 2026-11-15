@@ -51,33 +51,6 @@ whose layer it needs, which files it into every app's `.say.yaml`
 ([checks and verbs](docs/component-contracts.md#checks-and-verbs)).
 Findings are `{severity, path, message}` JSON ([SPEC](SPEC.md#lints)).
 
-## Releasing
-
-A release is the tag `plugins/pronto/vX.Y.Z` on a main merge commit that
-changed pronto; `cd.yml`'s `propagate-tag` mirrors that commit to
-bonisoft3/pronto and tags it there. The release PR carries:
-
-- **The version**: `#Version` in `distribution/config.cue` and both places
-  [bootstrap](skills/pronto-turn/references/bootstrap.md) names it. Lint's
-  `shared` rule holds them equal.
-- **The siblings, each already published**: `#SaytVersion` with bootstrap's
-  sayt lines, and the `sayt`, `omnishell` and `mecha` pins in
-  `.mirror/cue.mod/module.cue`.
-- **The runtime images, by digest**: `published: runtime:` in
-  `terminals/omnishell.cue` and the eight `bonitao/mecha-*` in
-  `clusters/mecha.cue`, re-pinned with
-  `docker buildx imagetools inspect bonitao/<image>:<version>` after an
-  omnishell or mecha release. No check ties them to `cue.mod`: stale pins
-  shipped v0.13.0 a caddy without the cortex interpreter.
-- **The idioms regenerated**: their generated `.github/workflows/cd.yml`
-  pins sayt.
-
-Before tagging, `just generate-all` on the merge commit must leave the tree
-clean, since `verify-generated` runs it on the tagged commit. After the
-mirror has the tag, bootstrap an empty directory from bootstrap and run the
-four verbs. An installed pronto is `plugins/pronto` alone: a stale image pin
-fails there and nowhere in the monorepo.
-
 ## The subsystems
 
 **The compiler** turns a brief into an app through three artifacts, two model
@@ -125,7 +98,7 @@ policy pronto owns over omnishell's mechanism: [screens.md](docs/screens.md).
 **Release targets** project each target a program declares into a sayt
 `release@<target>` rule on one tier: [release-targets.md](docs/release-targets.md).
 
-The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/index.md),
-the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.23.0/docs/index.md), and what is argued
+The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.24.0/docs/index.md),
+the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.23.1/docs/index.md), and what is argued
 and not built is [`PENDING.md`](PENDING.md). Everything else:
 [docs/index.md](docs/index.md).

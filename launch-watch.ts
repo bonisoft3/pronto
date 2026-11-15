@@ -1,4 +1,4 @@
-import { basename, dirname, resolve } from "node:path";
+import { basename, delimiter, dirname, resolve } from "node:path";
 import { exists, ifMissing } from "./missing.ts";
 import { type LiveStatic, prepareLiveTree } from "./live-tree.ts";
 
@@ -140,7 +140,7 @@ async function launch(args: string[]): Promise<void> {
   const sayt = new TextDecoder().decode(where.stdout).trim();
   // The stubs' lock sits beside sayt's .mise.toml; mise reads it only from a
   // trusted config.
-  const trusted = [sayt, Deno.env.get("MISE_TRUSTED_CONFIG_PATHS")].filter(Boolean).join(":");
+  const trusted = [sayt, Deno.env.get("MISE_TRUSTED_CONFIG_PATHS")].filter(Boolean).join(delimiter);
   if (!args.includes("--watch")) {
     const run = await new Deno.Command("mise", {
       args: [
