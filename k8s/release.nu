@@ -716,6 +716,57 @@ export def node-registry-pg-major [registry: string, repo: string, digest: strin
 	do $get $"blobs/($manifest.config.digest)" | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
 }
 
+# The image the database's Dockerfile stage starts from, when the stage only copies files onto it: `{ref, name}` (the
+# pinned docker-image:// reference of its additional context, and that context's name), else null. `compose` is the app's
+# `docker compose config`. The primary then runs the base and the schema Jobs the full image (k8s.cue's imageName), so the
+# app's own SQL, which the image carries for them to replay, cannot recreate the primary; and the base has every
+# extension the full image's postgres needs, since the stage adds none: a RUN, an ADD, a copy from any other stage or a
+# base that is not pinned by digest gives null, and the cluster keeps running the full image.
+export def database-base []: string -> any {
+	let build = ($in | from yaml | get -o services.database.build)
+	if ($build | is-empty) { return null }
+	let target = ($build | get -o target | default "")
+	let file = ($build.context | path join ($build | get -o dockerfile | default "Dockerfile"))
+	if not ($file | path exists) { return null }
+	# One instruction a line, each with its continuation lines, comments gone.
+	let steps = (open --raw $file | str replace --all --regex '\\\n' ' ' | lines | each { str trim } | where {|l| $l != "" and not ($l | str starts-with "#") })
+	let stages = ($steps | enumerate | where {|s| $s.item =~ '(?i)^FROM\s' })
+	let stage = ($stages | where {|s| ($s.item | parse --regex '(?i)\sAS\s+(?<n>\S+)\s*$' | get -o n.0 | default "") == $target } | get -o 0)
+	if ($stage | is-empty) { return null }
+	let from = ($stage.item | split row " " | where $it != "" | get 1)
+	let upto = ($stages | where {|s| $s.index > $stage.index } | get -o 0.index | default ($steps | length))
+	let body = ($steps | skip ($stage.index + 1) | first (($upto - $stage.index - 1) | into int))
+	let ctx = ($build | get -o additional_contexts | default {} | get -o $from | default "")
+	if not ($ctx | str starts-with "docker-image://") or not ($ctx | str contains "@sha256:") { return null }
+	for line in $body {
+		let op = ($line | split row " " | first)
+		if not ($op =~ '(?i)^(ARG|WORKDIR|ENTRYPOINT|CMD|HEALTHCHECK|EXPOSE|ENV|LABEL|USER|STOPSIGNAL|COPY)$') { return null }
+		if ($op =~ '(?i)^COPY$') {
+			let src = ($line | parse --regex '--from=(?<f>\S+)' | get -o f.0)
+			if ($src | is-not-empty) and $src != $from { return null }
+		}
+	}
+	{ref: ($ctx | str replace "docker-image://" ""), name: $from}
+}
+
+# `database-base`'s image put in the node's registry as `<app>-database-base`, tagged with its Postgres major as the
+# database's is (CloudNativePG reads it), the digest the one it has everywhere: crane copies it as it is, so the image
+# the primary runs is the same on every release until the base itself is moved. The node's registry is reached through a
+# port-forward, as buildkit-images does. Answers the image's `{tag, digest}`.
+export def database-base-copy [base: record, app: string]: nothing -> record {
+	let digest = ($base.ref | split row "@" | last)
+	let major = (^crane config $base.ref | from json | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last)
+	let reg = (port-forward pronto-registry registry $node_registry_port)
+	try {
+		^crane copy --insecure $base.ref $"127.0.0.1:($reg.port)/($app)-database-base:($major)" | ignore
+		stop-port-forward $reg
+	} catch {|e|
+		stop-port-forward $reg
+		error make {msg: $e.msg}
+	}
+	{tag: $major, digest: $digest}
+}
+
 # The node's registry through the release's SSH connection, on a free local
 # port: Docker pushes to localhost without TLS, as Kind's own registry has it.
 export def forward-node-registry [target: string, socket: string] {
@@ -1635,7 +1686,11 @@ export def main [
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
 	} else if $target_env.build.by == "buildkit" {
 		ensure-node-buildkit
-		buildkit-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs $app_info.name $app_meta.image.tag --platform ($target_env.platform? | default "")
+		let compose = (do { cd $app_source_dir; docker compose --profile "*" config })
+		let images = (buildkit-images $app_source_dir $compose $build_svcs $app_info.name $app_meta.image.tag --platform ($target_env.platform? | default ""))
+		# The primary runs the database's base where its stage only copies files onto it (k8s.cue's imageName).
+		let base = ($compose | database-base)
+		if ($base | is-empty) { $images } else { $images | insert "database-base" (database-base-copy $base $app_info.name) }
 	} else {
 		let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
 		$build_svcs | each {|svc|

@@ -34,6 +34,7 @@ use release.nu [
 	read-environment
 	auth-provider-environment
 	crud-schemas
+	database-base
 	auth-provider-secret
 	runtime-services
 	schema-copy-steps
@@ -73,6 +74,7 @@ def run-tests [] {
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
 	test_crud_schemas
+	test_database_base
 	test_auth_providers
 	test_auth_provider_secrets
 	test_release_tree
@@ -336,6 +338,59 @@ def test_crud_schemas [] {
 	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch { true })
 	rm $data
 	assert $refused
+}
+
+def test_database_base [] {
+	print "test the primary runs the database's base image, so the app's SQL cannot recreate it..."
+	let base = $"bonitao/mecha-database:0.22.0@sha256:('a' | fill --character a --width 64)"
+	let dir = (mktemp -d)
+	let stage = "FROM libraries_mecha-database-image AS database
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY services/database/migrations/000_extensions.sql services/database/migrations/680_flags.sql \\
+  services/database/migrations/685_army.sql /docker-entrypoint-initdb.d/
+COPY --from=libraries_mecha-database-image /usr/share/mecha/initdb/899_role_passwords.sh /docker-entrypoint-initdb.d/899_role_passwords.sh
+ENTRYPOINT [\"docker-entrypoint.sh\",\"postgres\",\"-c\",\"wal_level=logical\"]
+HEALTHCHECK --interval=1s CMD [\"pg_isready\"]
+"
+	let tail = "\nFROM busybox:musl AS database_ctxs\nRUN touch /x\n"
+	let compose = {|ctx| {services: {database: {build: {context: $dir, dockerfile: "Dockerfile.database", target: "database", additional_contexts: {libraries_mecha-database-image: $ctx}}}}} | to yaml }
+	let with = {|stage_text| $"($stage_text)($tail)" | save -f ($dir | path join Dockerfile.database); do $compose $"docker-image://($base)" | database-base }
+	# A stage that only copies files onto the base: the base is the primary's, whatever it copies.
+	assert equal (do $with $stage) {ref: $base, name: "libraries_mecha-database-image"}
+	# Anything that could add an extension the full image has and the base lacks keeps the primary on the full image.
+	assert ((do $with $"($stage)RUN apt-get install -y postgresql-16-pgvector\n") | is-empty) "a RUN"
+	assert ((do $with $"($stage)ADD https://example.com/ext.so /usr/lib/\n") | is-empty) "an ADD"
+	assert ((do $with $"($stage)COPY --from=database_ctxs /x /x\n") | is-empty) "a copy from another stage"
+	# A base that is not pinned by digest, or not an image, is no base.
+	$"($stage)($tail)" | save -f ($dir | path join Dockerfile.database)
+	assert (do $compose "docker-image://bonitao/mecha-database:0.22.0" | database-base | is-empty) "no digest"
+	assert (do $compose "libraries_mecha-database-image" | database-base | is-empty) "not an image"
+	assert ({services: {database: {build: {context: $dir, dockerfile: "Dockerfile.database", target: "nope"}}}} | to yaml | database-base | is-empty) "no such stage"
+	assert ({services: {crud: {}}} | to yaml | database-base | is-empty) "no database"
+	rm -r $dir
+	# The cluster's image does not move with the full image: a release that only changes a replayed SQL file pushes
+	# another database digest, and the primary, which CloudNativePG recreates for a changed image, keeps its own.
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let digest = {|c| $"sha256:($c | fill --character $c --width 64)" }
+	let render = {|full base|
+		let data = (mktemp -t base.XXXXXX.json | str trim)
+		let pushed = ({database: {tag: "16", digest: (do $digest $full)}} | merge (if $base == "" { {} } else { {"database-base": {tag: "16", digest: (do $digest $base)}} }))
+		{App: {image: {pushed: $pushed}}} | to json | save -f $data
+		let yaml = (render-manifests $app.cue_path "kind" --data $data | from yaml)
+		rm $data
+		{
+			cluster: ($yaml | where kind == "Cluster" | first | get spec.imageName)
+			initdb: ($yaml | where kind == "Job" and metadata.name == "sample-initdb" | first | get spec.template.spec.containers.0.image)
+		}
+	}
+	let before = (do $render "1" "2")
+	let after = (do $render "3" "2")
+	assert equal $before.cluster $"localhost:5001/sample-database-base:16@(do $digest '2')"
+	assert equal $after.cluster $before.cluster "a changed replayed SQL file leaves the primary's image as it was"
+	assert equal $before.initdb $"localhost:5001/sample-database:16@(do $digest '1')"
+	assert equal $after.initdb $"localhost:5001/sample-database:16@(do $digest '3')" "and the Jobs replay it from the full image"
+	assert equal (do $render "1" "").cluster $"localhost:5001/sample-database:16@(do $digest '1')" "without a base the primary runs the full image, as before"
 }
 
 def test_schema_jobs [] {

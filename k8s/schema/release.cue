@@ -97,6 +97,8 @@ import (
 		// Filled by the release from what it pushed, so a deployment names the
 		// exact image. CloudNativePG refuses `latest` and a bare digest: it reads
 		// the database's tag as the Postgres major version.
+		// `database-base` is the image the database's own stage starts from, when the stage only
+		// copies files onto it: the cluster runs it, the Jobs run `database`.
 		pushed: [string]: {tag: string, digest: =~"^sha256:[0-9a-f]{64}$"}
 	}
 

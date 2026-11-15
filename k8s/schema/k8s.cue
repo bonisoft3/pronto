@@ -238,7 +238,13 @@ import (
 				stopDelay:            120
 				// prontoMonitoringObj's queries; the operator adds its default ones beside them.
 				monitoring: customQueriesConfigMap: [{name: prontoMonitoringName, key: "queries"}]
-				imageName: (#appImage & {svc: "database"}).out
+				// The cluster runs the database's base image where the release pushed one (release.nu's
+				// database-base): the app's own SQL is replayed by the schema Jobs from the full image,
+				// so a change to it must not change the image CloudNativePG recreates the primary for.
+				imageName: [
+					if release.image.pushed["database-base"] != _|_ {(#appImage & {svc: "database-base"}).out},
+					(#appImage & {svc: "database"}).out,
+				][0]
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
 				postgresUID: 999
