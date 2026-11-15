@@ -1175,13 +1175,17 @@ import (
 	// `targets` overrides the sink per release target, as ai.targets does the
 	// models: the entry wins, the rest take the default, and a target left with
 	// neither is refused. docker is the compose stack every app launches and
-	// integrates on, simulators included. Sandbox or live is the app's own value.
+	// integrates on, simulators included. Sandbox or live is the app's own
+	// value, or, on cloudflare, each deployment's: `origin: {secret: NAME}`
+	// is read from the dispatcher's secret at each run, as the credential is,
+	// so one release reaches a vendor's sandbox from staging and its live API
+	// from production.
 	sink: {
-		origin?: mechaCluster.#Origin
+		origin?: mechaCluster.#Origin | #NamedOrigin
 		bridge?: string
 		ai?:     mechaCluster.#AiModality
 		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
-		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin | #NamedOrigin, bridge?: string}
 		credential?:  #Credential
 		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
 	}
@@ -1248,6 +1252,10 @@ import (
 	scheme?: =~"^[A-Za-z][A-Za-z0-9-]*$"
 	secret:  #SecretName
 }
+
+// Only the edge's airlock reads its environment per call; a daprd endpoint's
+// baseUrl is fixed when the stack starts.
+#NamedOrigin: close({secret: #SecretName})
 
 // An environment variable an effect declares, never one the cluster's own
 // services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
@@ -1958,11 +1966,19 @@ import (
 		// with per-tier and per-release-target model overrides. Backend tiers
 		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the
 		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
+		// On cloudflare a backend tier may be `{secret: NAME, routes: {...}}`:
+		// each deployment's NAME selects a route at each call, so staging and
+		// production differ by a setting, not a build. NAME is a dispatcher
+		// secret the publish carries or finds held, and verify asks for; a
+		// route's provider key is required only where it is selected.
 		ai?: {
 			text?:   *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
 			image?:  *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
 			models?: mechaCluster.#AiTierOverrides
-			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
+			targets?: {
+				[("browser" | "pages" | "docker" | "local" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
+				cloudflare?: mechaCluster.#AiEdgeOverrides
+			}
 		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
@@ -2047,9 +2063,10 @@ import (
 			// terminal's `hatch.realm.grants` offer; only a realm's frame carries
 			// them, and the reader is asked in the app's name.
 			grants: *[] | [...("geolocation" | "camera" | "payment")]
-			// A dedicated subdomain label (`https://<subdomain>.<domain>`) for a
-			// realm unit that embeds a third-party provider requiring a non-opaque
-			// origin while remaining cross-origin isolated from the app's origin.
+			// A dedicated subdomain label, served at `https://<subdomain>.<domain>`
+			// under the domain a release names, for a realm unit that embeds a
+			// third-party provider requiring a non-opaque origin while remaining
+			// cross-origin isolated from the app's origin.
 			subdomain?: =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
 			// Derived, never authored: a question asks and its answer lands in
 			// the memo; a presenter shows. An agent presenter paints the frames
@@ -2971,6 +2988,11 @@ import (
 		[for n, x in _effects for t in list.Concat([["docker"], [for t in A.meta.targets if t != "docker" && t != "pages" {t}]])
 		if (#SinkAt & {sink: x.sink, target: t}).out == null {
 			"effect \(n) names no sink for target \(t)"
+		}],
+		[for n, x in _effects for t in list.Concat([["docker"], [for t in A.meta.targets if t != "docker" && t != "pages" && t != "cloudflare" {t}]])
+		let at = (#SinkAt & {sink: x.sink, target: t}).out
+		if at != null if at.origin != _|_ if at.origin.secret != _|_ {
+			"effect \(n) names its origin by the secret \(at.origin.secret), which only cloudflare reads: give target \(t) an origin or a bridge"
 		}],
 		[for b, _ in _declaredBridges if len(list.Concat([[for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}], [for _, x in _effects if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ if at.bridge == b {x}]])) == 0 {
 			"bridge \(b) is reached by no effect"

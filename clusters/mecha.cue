@@ -203,6 +203,8 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AiProvider:      impl.#AiProvider
 #AiModelSpec:     impl.#AiModelSpec
 #AiTierOverrides: impl.#AiTierOverrides
+#AiRouted:        impl.#AiRouted
+#AiEdgeOverrides: impl.#AiEdgeOverrides
 #AiCapability:    impl.#AiCapability
 
 #ConduitSlot:      impl.#ConduitSlot

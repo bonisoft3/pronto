@@ -6,6 +6,7 @@
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { bridgeBuild, bridgeDockerfile, bridgeNames, clusterBridges, onCloudflare } from './edge-bridges.ts'
+import { dispatcherSecrets } from '../verify/secrets.ts'
 
 interface Config {
   name: string
@@ -18,13 +19,16 @@ interface Config {
 
 /** What publish-edge.ts reads: the queue to create, the dispatcher's config,
  * the secrets only the dispatcher holds: those the effects declare, each
- * required, and the keys their AI providers read, a group per provider any of
- * whose names serves; and the bridges whose containers the deploy builds. */
+ * required, the AI settings among them; the keys their AI providers read, a
+ * group per provider any of whose names serves; the keys each AI setting's
+ * routes read, needed only where the deployment selects that route; and the
+ * bridges whose containers the deploy builds. */
 export interface AirlockRelease {
   queue: string
   deployment: 'airlock/wrangler.jsonc'
   secrets: string[]
   providers: string[][]
+  routes: Record<string, Record<string, string[][]>>
   containers: string[]
 }
 
@@ -57,12 +61,15 @@ export async function writeEdgeDispatcher(out: string, mecha: string, app: strin
   await Deno.writeTextFile(hostFile, JSON.stringify(host, null, 2) + '\n')
 
   const front = await read(main)
-  const manifest = JSON.parse(await Deno.readTextFile(path.join(app, 'services/airlock/effects.json'))) as { effects: Record<string, { secrets?: string[]; credential?: { secret: string } }> }
-  const secrets = [...new Set(Object.values(manifest.effects).flatMap(e => [...(e.secrets ?? []), ...(e.credential ? [e.credential.secret] : [])]))].sort()
   // The keys are tsbifrost's own resolution of the release's models on
   // cloudflare, global overrides and key aliases included.
-  const { providerKeyGroups } = await import(String(pathToFileURL(path.join(mecha, 'services/airlock/ai-models.ts')))) as { providerKeyGroups: (config: unknown, target: 'cloudflare') => string[][] }
+  const { providerKeyGroups, routedSettings } = await import(String(pathToFileURL(path.join(mecha, 'services/airlock/ai-models.ts')))) as {
+    providerKeyGroups: (config: unknown, target: 'cloudflare') => string[][]
+    routedSettings: (config: unknown, target: 'cloudflare') => Record<string, Record<string, string[][]>>
+  }
   const providers = providerKeyGroups(ai, 'cloudflare')
+  const routes = routedSettings(ai, 'cloudflare')
+  const secrets = dispatcherSecrets(await Deno.readTextFile(path.join(app, 'services/airlock/effects.json')), routes)
   const mechaEdge = (file: string) => {
     const rel = path.relative(path.join(out, 'src'), path.join(mecha, 'packages/mecha-edge/src', file)).replaceAll('\\', '/')
     return rel.startsWith('.') ? rel : `./${rel}`
@@ -123,7 +130,7 @@ ${classes.join('')}`)
       exports: Object.fromEntries(bridges.map(b => [bridgeNames(b.name).className, { type: 'durable-object', storage: 'sqlite' }])),
     } : {}),
   }, null, 2) + '\n')
-  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, containers: bridges.map(b => b.name) }
+  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, routes, containers: bridges.map(b => b.name) }
   await Deno.writeTextFile(path.join(out, 'src/airlock.json'), JSON.stringify(release))
   return release
 }

@@ -41,7 +41,7 @@ type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
   checkout: Record<string, EmitFile>;
-  terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string; statics: { file: string; target: string }[] } };
+  terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string; entry: string; statics: { file: string; target: string }[] } };
   build?: { meta?: { dir?: string } };
   cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] } };
   development?: { statics: { file: string; target: string }[] };
@@ -602,6 +602,10 @@ async function generate(): Promise<void> {
     statics.set(s.target, { source: resolve(s.target.startsWith("/omnishell/") ? runtimeRoot : appDir, s.file), target: s.target });
   }
   statics.set("/srv/shell/shell.json", { source: resolve(appDir, ".pronto/development/shell.json"), target: "/srv/shell/shell.json" });
+  // The development door's entry carries its realm frames (emit.cue's _doorPolicy).
+  if (!currentEmission.terminal.surface.entry) fail("the emission names no terminal entry");
+  const entry = `/srv/${currentEmission.terminal.surface.entry}`;
+  statics.set(entry, { source: resolve(appDir, ".pronto/development/index.html"), target: entry });
   const live = `${appDir}/.pronto/live`;
   await Deno.mkdir(`${live}/caddy`, { recursive: true });
   await Deno.writeTextFile(`${live}/.gitignore`, "*\n");

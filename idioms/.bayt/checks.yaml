@@ -166,9 +166,10 @@ say:
             use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
             str trim); run-mise exec -- deno run -A --config ($pronto | path join deno.json)
             ($pronto | path join verify verify.ts) . --platform pages ...(if
-            ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target',
-            $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier',
-            $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { []
-            } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if
-            ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session',
-            $env.SAY_VERIFY_ARGS_SESSION] })
+            ('SAY_VERIFY_ARGS_DOMAIN' in $env) { [$'--default-domain=($env.SAY_VERIFY_ARGS_DOMAIN)'] } else
+            { [] }) ...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else {
+            ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty)
+            { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if
+            ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless',
+            $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else {
+            ['--session', $env.SAY_VERIFY_ARGS_SESSION] })

@@ -26,7 +26,7 @@ import { gzipSync } from 'node:zlib'
 import { SEED_TYPES } from './edge-blobs.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { migrateKeptDirectory, previousDeployment, rollbackRefusedMigration } from './publish-edge-state.ts'
-import { keptJwtSecrets, validateJwtMode } from './publish-edge-secrets.ts'
+import { keptJwtSecrets, selectedRouteKeys, validateJwtMode } from './publish-edge-secrets.ts'
 import { prepareStorage } from './publish-edge-storage.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
 import { requireLocalCluster } from './edge-deployment.ts'
@@ -184,7 +184,7 @@ await refuseMissingHatchSecrets({
 })
 // The airlock's dispatcher (edge-dispatcher.ts): its queue exists before the
 // object's script names it, and the effects' secrets are the dispatcher's alone.
-let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; containers: string[] } | undefined
+let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; routes: Record<string, Record<string, string[][]>>; containers: string[] } | undefined
 try { airlock = JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))) }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (airlock) {
@@ -212,9 +212,11 @@ if (airlock) {
   // A secret the environment does not carry must already be the deployed
   // dispatcher's, as an edge hatch's is (edge-hatches.ts): a release never
   // invents one, and a first deploy without it would run every effect keyless.
-  // A provider's key is any one of the names tsbifrost reads for it.
+  // A provider's key is any one of the names tsbifrost reads for it; a routed
+  // one's, only where the AI setting this publish carries selects its route.
   const absent = airlock.secrets.filter(name => !Deno.env.get(name))
-  const unkeyed = airlock.providers.filter(names => !names.some(name => Deno.env.get(name)))
+  const keyed = [...airlock.providers, ...selectedRouteKeys(airlock.routes, name => Deno.env.get(name))]
+  const unkeyed = keyed.filter(names => !names.some(name => Deno.env.get(name)))
   if (absent.length || unkeyed.length) {
     const dispatcher = path.join(out, airlock.deployment)
     const held = await previousVersion(dispatcher) === null ? [] : (JSON.parse(await runWrangler(['secret', 'list', '--config', dispatcher, '--format', 'json'])) as { name: string }[]).map(b => b.name)
@@ -362,7 +364,7 @@ if (airlock) {
   const dispatcherDir = await Deno.makeTempDir({ prefix: 'publish-edge-airlock-' })
   try {
     const dispatcherSecrets = path.join(dispatcherDir, 'airlock.json')
-    const names = [...airlock.secrets, ...airlock.providers.flat()]
+    const names = [...airlock.secrets, ...airlock.providers.flat(), ...selectedRouteKeys(airlock.routes, name => Deno.env.get(name)).flat()]
     await Deno.writeTextFile(dispatcherSecrets, JSON.stringify(Object.fromEntries(names.flatMap(name => Deno.env.get(name) ? [[name, Deno.env.get(name)!]] : []))), { mode: 0o600 })
     console.log(await deploy(path.join(out, airlock.deployment), '--secrets-file', dispatcherSecrets))
   } finally {

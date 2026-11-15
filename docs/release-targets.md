@@ -323,6 +323,26 @@ Social sign-in providers are currently refused (`_authTargetRefusal`): the edge
 cluster runs guest sessions, passkey ceremonies and shape tokens in its Durable Object,
 leaving social provider integration to container and cloud tiers (`gcp`, `k8s`, `docker`).
 
+The deployment is the release's argument, so one generated tree releases to
+any of them: `sayt release@cloudflare --domain=<host> --ssr-origin=<origin>`
+names it, and `meta.domain` and `meta.ssrOrigin` are the defaults
+(`sayt verify --domain=<host>` likewise). `--name=<worker>` names its
+Workers, `meta.name` by default: the app Worker is `<worker>`, and every
+other piece is named after it — `<worker>-airlock` and its queue, the R2
+bucket `<worker>-mecha-objects`, `<worker>-database`, the renderer, reader,
+query and compute Workers — so two names are two deployments with their own
+data. `sayt verify@cloudflare --name=<worker>` asks that deployment's airlock
+for its secrets. A name given empty or outside `^[a-z0-9][a-z0-9-]{0,62}$` is
+refused by `edge.ts` and `verify.ts` before they read the app. An app names its
+deployments as platforms of its own, in a hand-written `.say.cue` beside the
+generated `.say.yaml` that runs the cloudflare rule's commands with these
+flags set (`release@staging`, say). The tree names no realm subdomain's
+host: each door adds the unit's label under its own hosts to every document's
+`frame-src`, `https://<subdomain>.<domain>` here (and so in `_headers`), and
+`<subdomain>.localhost` and `<subdomain>.caddy` where the container door's
+tree is addressed and in the development entry. A realm subdomain released
+without a domain is refused.
+
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
 from `_headers`, answer `/` from a copy of the entry, and are given addressed

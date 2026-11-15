@@ -133,6 +133,24 @@ Deno.test("capabilities.ai with model overrides and agent browser unit compiles 
   assertEquals(shell.ai.models.text.heavy.model, "gemma4:26b-custom");
 });
 
+// Only the edge's dispatcher reads its environment per call, so a routed tier
+// is a cloudflare override alone: a stack's would be fixed at its start, and
+// a local target keeps its compiled model.
+Deno.test("a routed AI tier is a cloudflare override, emitted as declared, and refused elsewhere", async () => {
+  const routed = `{secret: "AI_IMAGE_HEAVY", routes: {google: {provider: "google", model: "gemini-3.1-flash-lite-image"}, cloudflare: "@cf/black-forest-labs/flux-1-schnell"}}`;
+  const code = aiProgram({ ai: `{text: ["cheap"], image: ["cheap", "heavy"], targets: cloudflare: image: heavy: ${routed}}` });
+  const vet = await cue(["vet", "-c", "-"], code);
+  assert(vet.success, vet.stderr);
+  const shell = (await emitFiles(code))["shell/shell.yaml"].data as { ai: { targets: { cloudflare: { image: { heavy: unknown } } } } };
+  assertEquals(shell.ai.targets.cloudflare.image.heavy, {
+    secret: "AI_IMAGE_HEAVY",
+    routes: { google: { provider: "google", model: "gemini-3.1-flash-lite-image" }, cloudflare: "@cf/black-forest-labs/flux-1-schnell" },
+  });
+  const docker = await cue(["vet", "-c", "-"], aiProgram({ ai: `{text: ["cheap"], image: ["cheap", "heavy"], targets: docker: image: heavy: ${routed}}` }));
+  assertEquals(docker.success, false);
+  assertStringIncludes(docker.stderr, "targets.docker.image.heavy");
+});
+
 Deno.test("an AI effect without capabilities.ai or with an undeclared tier is refused", async () => {
   const noCap = await cue(["vet", "-c", "-"], aiProgram({ ai: "" }));
   assertEquals(noCap.success, false);

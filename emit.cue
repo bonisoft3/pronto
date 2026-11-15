@@ -48,6 +48,33 @@ _caddyfileAsset:   _ @embed(file="assets/Caddyfile", type=text)
 _cdcTypesAsset:    _ @embed(file="assets/cdc-types.blobl", type=text)
 _cdcCarriersAsset: _cdcTypesAsset
 
+// A container door's own hosts, each answered by a realm subdomain's site
+// block. No tree names a realm host: each door adds its label under its own
+// hosts to its documents' frame-src, as the edge release does under its
+// domain (bundle/edge-addresses.ts).
+_doorHosts: ["localhost", "caddy"]
+#doorFrames: {
+	vendored: _
+	labels: list.SortStrings([for s, _ in {
+		for _, v in vendored if v.isolation == "realm" if v.subdomain != _|_ {(v.subdomain): true}
+	} {s}])
+	out: [for s in labels for h in _doorHosts {"https://\(s).\(h):*"}]
+}
+
+// `policy` with `frames` added to its frame-src, which it must have
+// (omnishell's admitFrames, at a release).
+#admitFrames: {
+	policy: string
+	frames: [...string]
+	let parts = strings.Split(policy, "; ")
+	if len(frames) > 0 if !list.Contains([for part in parts {strings.Split(part, " ")[0]}], "frame-src") {
+		_refused: error("the terminal's Content-Security-Policy has no frame-src to admit \(strings.Join(frames, " "))")
+	}
+	out: [if len(frames) == 0 {policy}, strings.Join([for part in parts {
+		[if strings.Split(part, " ")[0] == "frame-src" {strings.Join(list.Concat([[part], frames]), " ")}, part][0]
+	}], "; ")][0]
+}
+
 // The type a bus row's column is converted to, by its label: the physical
 // labels a program may still use name their type, and a tsvector is an
 // index, not a value anyone states, so it passes through.
@@ -1339,6 +1366,7 @@ _sqlType: {
 		_exempt: "private with per-object grants: finer than tenancy, guarded by its own policies"
 	}
 	if P.e.access.scope == "private" if !P._isShared {_exempt: ""}
+
 	// A membership row's scope is its member's, so the floor delivers each
 	// subject their own and the list syncs as any scoped table does.
 	if P.e.access.scope == "group" {_exempt: ""}
@@ -1400,30 +1428,33 @@ _sqlType: {
 		]
 	}
 
-	e:        {access: #Access, ...}
-	entities: _ // parent lookup for folder scope
-	_t:       P.e.table
-	_isShared: (#isShared & {a: P.e.access}).out
+	e:            {access: #Access, ...}
+	entities:     _ // parent lookup for folder scope
+	_t:           P.e.table
+	_isShared:    (#isShared & {a: P.e.access}).out
 	_underShared: bool
 	if P.e.access.scope == "folder" {_underShared: (#isShared & {a: P._p.access}).out}
 	if P.e.access.scope != "folder" {_underShared: false}
+
 	// The membership list a group grant is read against: the program's one
 	// scope "group" entity.
 	_members: [for _, x in P.entities if x.access != _|_ if x.access.scope == "group" {x}]
 	_grouped: bool
 	if P.e.access.scope == "private" {_grouped: P.e.access.groups != _|_}
 	if P.e.access.scope != "private" {_grouped: false}
+
 	// Whether the entity's grant table names groups beside users.
 	_granted: bool
 	if P.e.access.scope == "private" {_granted: P.e.access.shared != _|_ && P.e.access.shared.group != _|_}
 	if P.e.access.scope != "private" {_granted: false}
 	_ok: true
 	if P._grouped || P._granted {_ok: (len(P._members) == 1) & true}
+
 	// The groups a composition's parent names by a column of its own: the
 	// child carries each as the same column, so a shape over it is keyed alike.
 	_above: [if P._underShared if P._p.access.groups != _|_ for g in P._p.access.groups if g.of != _|_ {g.group}]
 	if P.e.access.scope == "private" {
-		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
+		_using:  (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
 		_pkType: [for f in P.e.fields if f.pk {f.type}][0]
 		_pkOf:   [for f in P.e.fields if f.pk {f.name}][0]
 		_owner:  P.e.access.owner
@@ -1476,15 +1507,16 @@ _sqlType: {
 		// The grant row a handover writes: the grant table's key where it has
 		// no default, the row, the previous owner, and the role where it has one.
 		if P.e.access.shared != _|_ {
-			_s: P.e.access.shared
+			_s:         P.e.access.shared
 			_viaFields: [for _, x in P.entities if x.table == P._s.via {x.fields}][0]
-			_viaCast: [for f in P._viaFields if f.name == P._s.on if f.type != P._pkType {"::\(_sqlType[f.type])"}, ""][0]
+			_viaCast:   [for f in P._viaFields if f.name == P._s.on if f.type != P._pkType {"::\(_sqlType[f.type])"}, ""][0]
 			_handed: list.Concat([
 				[for f in P._viaFields if f.pk if f.default == _|_ if f.name != P._s.on if f.name != P._s.user {column: f.name, value: "gen_random_uuid()"}],
 				[{column: P._s.on, value: "NEW.\(P._pkOf)\(P._viaCast)"}, {column: P._s.user, value: "OLD.\(P._owner)"}],
 				[if P._s.role != _|_ {column: P._s.role, value: "'writer'"}],
 			])
 		}
+
 		// The helpers run as the migration superuser, so their read of the
 		// grant and membership tables bypasses RLS — the cycle-break
 		// #ownedUsing relies on. auth_uid() still reads the caller's session
@@ -1572,12 +1604,13 @@ _sqlType: {
 				(#policy & {name: "\(P._t)_app_user_all", table: P._t, rest: "FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr))"}).out,
 			]
 		}
+
 		// Under a shared parent the child has the parent's role: a reader reads
 		// it and a writer changes it, the parent's own grant table included
 		// unless the parent keeps its grants to its owner.
 		if P._underShared {
-			_role:  "\(P._parent.table)_role(\(P._t).\(P.e.access.on)\(P._onCast))"
-			_may:   [if P._parent.access.shared != _|_ if P._parent.access.shared.via == P._t if P._parent.access.shared.writersCanShare != _|_ if !P._parent.access.shared.writersCanShare {"= 'owner'"}, "IN ('owner', 'writer')"][0]
+			_role: "\(P._parent.table)_role(\(P._t).\(P.e.access.on)\(P._onCast))"
+			_may:  [if P._parent.access.shared != _|_ if P._parent.access.shared.via == P._t if P._parent.access.shared.writersCanShare != _|_ if !P._parent.access.shared.writersCanShare {"= 'owner'"}, "IN ('owner', 'writer')"][0]
 			_pre: [
 				"""
 					CREATE OR REPLACE FUNCTION \(P._t)_write_guard() RETURNS trigger
@@ -1632,6 +1665,7 @@ _sqlType: {
 			]
 		}
 	}
+
 	// A member reads the rows addressed to them, which is how their terminal
 	// learns its groups; nobody but the service writes one, or a subject
 	// could grant themself whatever a group reads.
@@ -2161,12 +2195,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if e.access.shared != _|_ {
 					shared: {
 						e.access.shared
+
 						// The membership list a group's grant is read against.
 						if e.access.shared.group != _|_ for _, m in S.code.state.entities if m.access != _|_ if m.access.scope == "group" {
 							members: {table: m.table, group: m.access.group, user: m.access.user}
 						}
 					}
 				}
+
 				// Each group grant with what the terminal reads it against:
 				// the row's column naming the group's owner, the column a
 				// shape is keyed on where that is not the row's key, and the
@@ -2177,6 +2213,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						role:  g.role
 						of:    [if g.of != _|_ {g.of}, for f in e.fields if f.pk {f.name}][0]
 						if g.of != _|_ {column: "group_\(g.group)"}
+
 						// The key's type, where the group is named over it: the
 						// terminal tells a row's group from another that ends alike.
 						if g.of == _|_ for f in e.fields if f.pk {key: f.type}
@@ -2705,6 +2742,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		launchCommand: {do: distribution.#Project.launch, use: "./tools.nu"}
 		surface: {
 			_distribution: distribution.#Project & {
+				workerName: D.code.meta.name
 				if D.code.meta.domain != _|_ {
 					domain: "\(D.code.meta.domain)"
 				}
@@ -3196,6 +3234,8 @@ _pgrollDir: "services/database/pgroll"
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
 					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
+					let doorFrames = (#doorFrames & {vendored: D.code.capabilities.vendored}).out
+					let frames = [if len(doorFrames) > 0 {" --frames '\(json.Marshal(doorFrames))'"}, ""][0]
 
 					// The tree a container door serves carries each door hatch's
 					// public attributes, rewritten before it is addressed; one no
@@ -3204,7 +3244,7 @@ _pgrollDir: "services/database/pgroll"
 						"find '\(omnishell.#Address.tree)' -name '*.html' -exec sed -i -E 's/([[:space:]])\(k)=\"[^\"]*\"/\\1\(k)=\"\(v)\"/g' {} +; grep -rqE '[[:space:]]\(k)=\"\(v)\"' '\(omnishell.#Address.tree)' --include='*.html' || { echo 'no document carries \(k) for door hatch \(hn)' >&2; exit 1; }; "
 					}]
 					let separator = [if len(strings.Join(place, "; ")) > 60000 {"; \\\n  "}, "; "][0]
-					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(strings.Join(doors, ""))\(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
+					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(strings.Join(doors, ""))\(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)\(frames)"]
 				}
 				compose: {}
 			}
@@ -4167,15 +4207,33 @@ _pgrollDir: "services/database/pgroll"
 	]
 	// A presenter's pinned scripts are fetched by the terminal against their
 	// integrity, so the page connects to each file and to nothing else there.
-	// A realm unit with a subdomain is framed at its subdomain origin.
 	_resources: list.Concat([
 		[if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}],
 		[for _, v in E.code.capabilities.vendored for u in v.scripts {kind: "connect", source: u}],
-		[for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).localhost:*"}],
-		[for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).caddy:*"}],
-		[if E.code.meta.domain != _|_ for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).\(E.code.meta.domain)"}],
 	])
 	_resourceSources: {for r in _resources {(r.kind): (r.source): true}}
+	// The entry document, the policy it carries as its meta.
+	_entry: {
+		_policy: string
+		let _parts = strings.Split(E.terminal.surface.assets.html, "<link rel=\"icon\" href=\"data:,\">")
+		_markerCheck: [if !E._envelope._hasEnvelopeInjections || len(_parts) == 2 {true}, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts)-1)"][0] & true
+		format:       "text"
+		_html: [
+			if E._envelope._hasEnvelopeInjections if len(_parts) == 2 {
+				_parts[0] + E._envelope.headLinks + _parts[1]
+			},
+			E.terminal.surface.assets.html,
+		][0]
+		// The meta travels in the release's hashed bytes, including offline
+		// navigation, so changing resource authority changes its identity.
+		_escaped: strings.Replace(strings.Replace(_policy, "&", "&amp;", -1), "\"", "&quot;", -1)
+		text: [if _policy != "" {
+			strings.Replace(_html, "<head>", "<head>\n<meta http-equiv=\"Content-Security-Policy\" content=\"\(_escaped)\">", 1)
+		}, _html][0]
+	}
+	// A door's: the terminal's with its realm frames under the door's own hosts.
+	_doorFrames: (#doorFrames & {vendored: E.code.capabilities.vendored}).out
+	_doorPolicy: [if E._browserPolicy != "" {(#admitFrames & {policy: E._browserPolicy, frames: E._doorFrames}).out}, ""][0]
 	_browserPolicy: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 		[if len(_resources) == 0 {E.terminal.surface.contentSecurityPolicy},
 			if len(_resources) > 0 {strings.Join([for part in strings.Split(E.terminal.surface.contentSecurityPolicy, "; ") {
@@ -5365,9 +5423,7 @@ _pgrollDir: "services/database/pgroll"
 				for _, v in E.code.capabilities.vendored if v.isolation == "realm"
 				for f in v.files {(f): true}
 			} {"/\(f)"}])
-			_subdomains: list.SortStrings([for s, _ in {
-				for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {(v.subdomain): true}
-			} {s}])
+			_subdomains: (#doorFrames & {vendored: E.code.capabilities.vendored}).labels
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
@@ -5385,7 +5441,7 @@ _pgrollDir: "services/database/pgroll"
 
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
-				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
+				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._doorPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._doorPolicy][0]
 
 				// A realm's document is isolated by the seat's sandbox; loaded any
 				// other way it would run at this origin under no policy. So it
@@ -5453,7 +5509,7 @@ _pgrollDir: "services/database/pgroll"
 					"""
 			}], "")
 			_subdomainBlocks: strings.Join([for s in _subdomains {
-				"\nhttps://\(s).localhost:{$CADDY_DOOR_PORT:8443}, https://\(s).caddy:{$CADDY_DOOR_PORT:8443} {\n  tls {$CADDY_TLS:internal}\n  import app\n}\n"
+				"\n\(strings.Join([for h in _doorHosts {"https://\(s).\(h):{$CADDY_DOOR_PORT:8443}"}], ", ")) {\n  tls {$CADDY_TLS:internal}\n  import app\n}\n"
 			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
 			text:          resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _rewriteDoors + _doorAnchor, 1) + _subdomainBlocks
@@ -5607,23 +5663,10 @@ _pgrollDir: "services/database/pgroll"
 			format: "json"
 			data:   E._shell
 		}
-		"\(E.terminal.surface.entry)": {
-			let _parts = strings.Split(E.terminal.surface.assets.html, "<link rel=\"icon\" href=\"data:,\">")
-			_markerCheck: [if !E._envelope._hasEnvelopeInjections || len(_parts) == 2 {true}, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts)-1)"][0] & true
-			format:       "text"
-			_html: [
-				if E._envelope._hasEnvelopeInjections if len(_parts) == 2 {
-					_parts[0] + E._envelope.headLinks + _parts[1]
-				},
-				E.terminal.surface.assets.html,
-			][0]
-			// The meta travels in the release's hashed bytes, including offline
-			// navigation, so changing resource authority changes its identity.
-			_escaped: strings.Replace(strings.Replace(E._browserPolicy, "&", "&amp;", -1), "\"", "&quot;", -1)
-			text: [if E._browserPolicy != "" {
-				strings.Replace(_html, "<head>", "<head>\n<meta http-equiv=\"Content-Security-Policy\" content=\"\(_escaped)\">", 1)
-			}, _html][0]
-		}
+		"\(E.terminal.surface.entry)": E._entry & {_policy: E._browserPolicy}
+		// What the development door serves for the entry: its policy carries
+		// the door's realm frames, which no release's entry does.
+		".pronto/development/index.html": E._entry & {_policy: E._doorPolicy}
 		"\(E.terminal.surface.css)": {
 			format: "text"
 			text:   E.terminal.surface.assets.css

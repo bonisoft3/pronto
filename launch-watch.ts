@@ -122,7 +122,7 @@ export function developmentCompose(
   if (render !== undefined) {
     render.environment = {
       ...render.environment,
-      ENTRY: "/render/shell/index.html",
+      ENTRY: "/render/.pronto/development/index.html",
       PRONTO_PRESENTATION_WATCH: "1",
     };
     render.develop = develop("render");

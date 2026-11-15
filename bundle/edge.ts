@@ -24,7 +24,7 @@ import { readEdgeHatches, applyHatchAttributes } from './edge-hatches.ts'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
-import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, realmSubdomains, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { databaseScript, writeEdgeSsr } from './edge-ssr.ts'
@@ -65,6 +65,14 @@ const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names t
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 let out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
+if ('--domain' in flags && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) fail(`--domain ${JSON.stringify(domain)} is no host name`)
+const WORKER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/
+const workerNameRefusal = '--name must be lowercase letters, digits and hyphens, at most 63 characters'
+if ('--name' in flags && !WORKER_NAME.test(flags['--name'])) fail(`${workerNameRefusal}, not ${JSON.stringify(flags['--name'])}`)
+if ('--ssr-origin' in flags) {
+  const origin = URL.parse(flags['--ssr-origin'])
+  if (origin?.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
+}
 const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
 const addresses = await releaseAddresses(omnishell)
 // The target's, from distribution's #IceServers: the release rule names them.
@@ -87,13 +95,16 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   presenter?: { policy: string; scripted: string[] }
 }
 const clustered = shell.migrations.length > 0
+// Asked before anything is cleared, as addressEdgeAssets would refuse it.
+const subdomains = realmSubdomains(shell.units)
+if (subdomains.length && !domain) fail(`realm subdomains ${subdomains.join(', ')} are hosts under the release's domain: --domain names it`)
 if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'])) fail('a release without a cluster cannot use --derived, --from, or --ssr-origin')
 // A unit's per-unit security headers ride in _headers (edge-addresses.ts): a
 // realm's document carries the seat's sandbox, a presenter's worker script its
 // own policy, with the refusal of its scripted fetches below; an agent is a
 // static file the seat starts from a blob: under the document's policy.
 const name = flags['--name'] ?? shell.app ?? path.basename(app)
-if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail('worker name must be lowercase letters, digits and hyphens, at most 63 characters')
+if (!WORKER_NAME.test(name)) fail(`the worker name ${JSON.stringify(name)} is refused: ${workerNameRefusal}`)
 const hatches = await readEdgeHatches(app)
 if (hatches.length && flags['--ssr-origin']) fail('edge hatches are not packaged for SSR releases')
 if (hatches.length && !clustered) fail('edge hatches run in the cluster, which an app with no migration does not have')
@@ -198,7 +209,6 @@ if (seedBlobs) {
 const realmDocuments = realmDocumentsOf(shell)
 const subdomainRealms = subdomainRealmsOf(shell)
 const subdomainArgs = Object.keys(subdomainRealms).length ? `, ${JSON.stringify(subdomainRealms)}` : ''
-const subdomains = [...new Set(Object.values(shell.units ?? {}).flatMap((unit) => unit.isolation === 'realm' && unit.subdomain ? [unit.subdomain] : []))].sort()
 const customDomains = domain ? [domain, ...subdomains.map((sub) => `${sub}.${domain}`)].map((pattern) => ({ pattern, custom_domain: true })) : undefined
 if (!clustered) {
   const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
@@ -429,7 +439,6 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
 }, null, 2) + '\n')
 if (flags['--ssr-origin']) {
   const origin = new URL(flags['--ssr-origin'])
-  if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
   const mise = Deno.env.get('SAYT_MISE_BIN') ?? fail('SAYT_MISE_BIN is required to install the renderer with its pinned Node')
   await run(mise, ['exec', '--', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
   await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)

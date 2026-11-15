@@ -19,9 +19,19 @@ factsPriority:    _loop.surface.sayYaml.say.lint.rulemap.facts.priority & 1
 compilerFromMise: strings.Contains(_loop.surface.checks.types.cmds[0], "../../plugins") & false
 externalBuild:    _loop.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
-clientOnlyEdge: strings.Contains(_project.edge, "--ssr-origin") & false
-nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "--ssr-origin \"https://example.com\"") & true
-terminalCommand:          (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
+clientOnlyEdge: strings.Contains(_project.edge, "else { [] })") & true
+nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "else { [\"--ssr-origin\" \"https://example.com\"] })") & true
+// Regression: the release's domain was written into the command, so one tree
+// released to one deployment; the verb's --domain names another, and
+// meta.domain is the default.
+releaseDomain: strings.Contains((dist.#Project & {domain: "app.example"}).edge, "...(if ('SAY_RELEASE_ARGS_DOMAIN' in $env) { ['--domain' $env.SAY_RELEASE_ARGS_DOMAIN] } else { [\"--domain\" \"app.example\"] })") & true
+verifyDomain: strings.Contains((dist.#Project & {domain: "app.example"}).verifyEdge, "...(if ('SAY_VERIFY_ARGS_DOMAIN' in $env) { [$'--default-domain=($env.SAY_VERIFY_ARGS_DOMAIN)'] } else { [\"--default-domain=app.example\"] })") & true
+// Regression: every Worker, queue and bucket was named after the app, so a
+// second deployment of the tree replaced the first; the verb's --name names
+// another, and the app's name is the default.
+releaseName: strings.Contains((dist.#Project & {workerName: "app"}).edge, "...(if ('SAY_RELEASE_ARGS_NAME' in $env) { ['--name' $env.SAY_RELEASE_ARGS_NAME] } else { [\"--name\" \"app\"] })") & true
+verifyName: strings.Contains((dist.#Project & {workerName: "app"}).verifyEdge, "...(if ('SAY_VERIFY_ARGS_NAME' in $env) { [$'--name=($env.SAY_VERIFY_ARGS_NAME)'] } else { [\"--name=app\"] })") & true
+terminalCommand:         (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal:   strings.Contains(_project.write, "omnishell") & false
 _externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
@@ -86,6 +96,9 @@ _releasing: pronto.#App & {
 	}
 }
 _releasingBuild: (pronto.#DefaultBuild & {code: _releasing, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
+// The app's own release and verify name its Worker after the app.
+_releasingSay: (pronto.#DefaultLoop & {code: _releasing, terminal: _terminal, cluster: _cluster}).out.surface.sayYaml.say
+emittedName: strings.Contains(strings.Join([for c in _releasingSay.release.rulemap.cloudflare.cmds {c.do}], "\n"), "[\"--name\" \"\(_code.meta.name)\"]") & strings.Contains(strings.Join([for c in _releasingSay.verify.rulemap.cloudflare.cmds {c.do}], "\n"), "[\"--name=\(_code.meta.name)\"]") & true
 externalVerbsBuildTheBundle: {for verb, g in _bundleGates {(verb): {
 	if g.default {default: _externalBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle"] & _bundleGate}
 	for p in g.platforms {(p): _releasingBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle-\(p)"] & _bundleGate & {platform: p}}
@@ -115,5 +128,7 @@ defaultEdgeClock: strings.Contains(_project.edge, "--clock disabled") & false
 // Explicit live targets keep the HTTP/browser runner; the default GCP check
 // runs the app's integration drivers in Cloud Build.
 gcpVerifyLiveTarget: strings.Contains(_project.verifyGcp, "SAY_VERIFY_ARGS_TARGET") & true
+// A domain alone reaches the HTTP verifier, which refuses an empty one, rather than the plan's Cloud Run service.
+gcpVerifyDomain:     strings.Contains(_project.verifyGcp, "'SAY_VERIFY_ARGS_DOMAIN' in $env") & true
 gcpVerifyHttp:       strings.Contains(_project.verifyGcp, "verify verify.ts") & true
 gcpVerifyDrivers:    strings.Contains(_project.verifyGcp, "gcp verify.nu") & true

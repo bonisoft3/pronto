@@ -1,13 +1,15 @@
 // Renders an edge release's src/effects.js: the app's external effects from
 // services/airlock/effects.json, each bound to its handler module and target
-// (tsbifrost, declared HTTPS origin, or a bridge's container) for mecha-edge's
-// airlock.ts.
+// (tsbifrost, declared HTTPS origin or the dispatcher's secret naming one, or a
+// bridge's container) for mecha-edge's airlock.ts.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { bridgeNames, CLOUDFLARE, clusterBridges, onCloudflare } from './edge-bridges.ts'
 
 export type EffectTarget =
-  | { kind: 'tsbifrost' | 'origin'; url?: string }
+  | { kind: 'tsbifrost'; url?: string }
+  | { kind: 'origin'; url: string }
+  | { kind: 'origin'; secret: string }
   | { kind: 'bridge'; bridge: string }
   | { kind: 'container'; bridge: string; binding: string }
 
@@ -43,7 +45,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
       secrets?: string[]
       credential?: { header: string; scheme?: string; secret: string }
       endowments?: string[]
-      edgeOrigin?: string
+      edgeOrigin?: string | { secret: string }
       bridge?: { name: string; targets: string[]; simulated: boolean }
     }>
   }
@@ -67,7 +69,13 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     }
     const handlerPath = path.join(appDir, decl.handler)
     await Deno.stat(handlerPath)
-    const target: EffectTarget = decl.bridge !== undefined ? bridgeTarget(name, decl.bridge, containers) : decl.edgeOrigin ? { kind: 'origin', url: decl.edgeOrigin } : { kind: 'tsbifrost' }
+    const target: EffectTarget = decl.bridge !== undefined
+      ? bridgeTarget(name, decl.bridge, containers)
+      : typeof decl.edgeOrigin === 'string'
+      ? { kind: 'origin', url: decl.edgeOrigin }
+      : decl.edgeOrigin
+      ? { kind: 'origin', secret: decl.edgeOrigin.secret }
+      : { kind: 'tsbifrost' }
     const ident = `handler_${i}`
     imports.push(`import * as ${ident} from ${JSON.stringify(fromSrc(handlerPath))}`)
     entries.push(

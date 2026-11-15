@@ -27,6 +27,10 @@ Deno.test('the object reads the effects as declarations alone, and only the disp
       assert.equal(effect.issue, undefined)
       assert.ok(Object.isFrozen(effect.declaration))
     }
+    // Prodigi's sandbox or live is each deployment's: the target names the
+    // dispatcher's secret, never a compiled URL.
+    assert.deepEqual(declared['print-quote'].target, { kind: 'origin', secret: 'PRODIGI_ORIGIN' })
+    assert.deepEqual(declared['print-fx'].target, { kind: 'origin', url: 'https://api.stripe.com' })
   } finally {
     await Deno.remove(out, { recursive: true })
   }
@@ -42,9 +46,29 @@ Deno.test("the dispatcher's provider keys are tsbifrost's resolution of the rele
     const ai = { image: ['heavy'], models: { image: { heavy: { provider: 'google', model: 'imagen-4.0-ultra-generate-001' } } } }
     const release = await writeEdgeDispatcher(out, mecha, snapcards, ai)
     assert.deepEqual(release.providers, [['GEMINI_API_KEY', 'GOOGLE_API_KEY']])
+    // A named origin is a secret the publish carries or finds held, as a key is.
+    assert.ok(release.secrets.includes('PRODIGI_ORIGIN'))
     assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))), release)
     const host = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     assert.deepEqual(host.queues.producers, [{ binding: 'AIRLOCK_QUEUE', queue: 'snapcards-airlock' }])
+  } finally {
+    await Deno.remove(out, { recursive: true })
+  }
+})
+
+// Level 3 was compiled to Gemini, so every deployment of one release needed
+// a Gemini key. Snapcards' level 3 is each deployment's AI_IMAGE_HEAVY: a
+// secret the publish carries or finds held, and the key only of its route.
+Deno.test("an AI setting is the dispatcher's secret, and its route's key is the route's", async () => {
+  const out = await Deno.makeTempDir()
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ name: 'snapcards', durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] } }))
+    const { ai } = JSON.parse(await Deno.readTextFile(path.join(snapcards, 'shell/shell.json')))
+    const release = await writeEdgeDispatcher(out, mecha, snapcards, ai)
+    assert.ok(release.secrets.includes('AI_IMAGE_HEAVY'))
+    assert.deepEqual(release.providers, [])
+    assert.deepEqual(release.routes, { AI_IMAGE_HEAVY: { cloudflare: [], google: [['GEMINI_API_KEY', 'GOOGLE_API_KEY']] } })
   } finally {
     await Deno.remove(out, { recursive: true })
   }
@@ -56,6 +80,20 @@ Deno.test("the dispatcher's provider keys are tsbifrost's resolution of the rele
 Deno.test("a dispatcher's name past Cloudflare's 63 characters is refused at build", () => {
   assert.equal(dispatcherName('a'.repeat(55)), `${'a'.repeat(55)}-airlock`)
   assert.throws(() => dispatcherName('a'.repeat(56)), /longer than Cloudflare's 63 characters/)
+})
+
+// The release's --name (SAY_RELEASE_ARGS_NAME) names every Worker, queue and
+// bucket it deploys; one Cloudflare would refuse is refused before the build
+// reads the app or clears the last release's output.
+Deno.test('edge.ts refuses a --name given empty or malformed before reading the app', async () => {
+  for (const name of ['', 'Snap', '-x', 'a'.repeat(64)]) {
+    const r = await new Deno.Command(Deno.execPath(), {
+      args: ['run', '-A', '--config', fileURLToPath(new URL('./deno.json', import.meta.url)), fileURLToPath(new URL('./edge.ts', import.meta.url)), '/nonexistent', '--omnishell', '/nonexistent', '--mecha', '/nonexistent', '--ice-servers', '[]', '--name', name],
+      stdout: 'null', stderr: 'piped',
+    }).output()
+    assert.equal(r.success, false)
+    assert.match(new TextDecoder().decode(r.stderr), /--name must be lowercase letters/)
+  }
 })
 
 // A bridge on cloudflare is a container of the dispatcher Worker: its class,

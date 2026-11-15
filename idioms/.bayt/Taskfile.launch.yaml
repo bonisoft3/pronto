@@ -103,7 +103,8 @@ tasks:
           }
           if not \$matched { error make { msg: \$d.msg } }
         }
-        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out
+        let frames = (\$ep | parse -r '--frames \\x27(?<f>[^\\x27]+)\\x27' | get f)
+        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out ...(\$frames | each {|f| [\"--frames\" \$f] } | flatten)
         glob (\$tree_dir | path join \"*\" | str replace -a (char -u 5c) \"/\") | each {|item| cp -rf \$item \$srv_dir } | ignore
         if ((\$tree_dir | path join \"omnishell\") | path exists) { cp -rf (\$tree_dir | path join \"omnishell\") \$omni_dir }
         for rdir in [\$srv_dir \$omni_dir] {

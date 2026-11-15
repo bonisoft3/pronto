@@ -12,7 +12,7 @@ const addresses = await releaseAddresses(fileURLToPath(new URL('../../omnishell'
 
 const stun = [{ urls: 'stun:stun.example:3478' }]
 
-async function fixture(changed = false, previous?: string, presenter?: { policy: string }, units?: Record<string, unknown>) {
+async function fixture(changed = false, previous?: string, presenter?: { policy: string }, units?: Record<string, unknown>, { domain, extra }: { domain?: string; extra?: Record<string, string> } = {}) {
   const out = await Deno.makeTempDir({ prefix: 'edge-addresses-' })
   const cfg = {
     ...(presenter ? { presenter } : {}),
@@ -41,13 +41,14 @@ async function fixture(changed = false, previous?: string, presenter?: { policy:
     'messages/pt-BR.json': '{}',
     'messages/en-GB.json': '{}',
     'manifest.webmanifest': '{}',
+    ...extra,
   }
   for (const [name, body] of Object.entries(files)) {
     await Deno.mkdir(path.dirname(path.join(out, name)), { recursive: true })
     await Deno.writeTextFile(path.join(out, name), body)
   }
   try {
-    const hints = await addressEdgeAssets(addresses, out, { previous, iceServers: stun })
+    const hints = await addressEdgeAssets(addresses, out, { previous, iceServers: stun, domain })
     const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'index.html')))
     const map = document.getElementById('pronto-assets')!.textContent!
     const imports = JSON.parse(map).imports as Record<string, string>
@@ -130,6 +131,29 @@ Deno.test("a realm unit's files carry the seat's sandbox and only this app may f
     assert.ok(headers.includes(`/shell/units/map/lib.js\n  Content-Security-Policy: ${sandbox}\n`))
     assert.ok(!headers.includes('/shell/units/geo/'))
   } finally { await Deno.remove(f.out, { recursive: true }) }
+})
+
+// Regression: generate concatenated the label with meta.domain, so one tree
+// released to a second deployment framed the first one's realm host.
+Deno.test("a realm subdomain is framed at its label under the release's domain, in every document and _headers, and refused without one", async () => {
+  const policy = (frames: string) => `script-src 'self'; ${frames}require-trusted-types-for 'script'`
+  const document = (frames: string) => `<html><head><meta http-equiv="Content-Security-Policy" content="${policy(frames)}"><base href="/shell/"></head><body><script type="module" src="./boot.js"></script></body></html>`
+  const units = { pay: { isolation: 'realm', subdomain: 'payments', src: 'shell/units/pay/index.html', files: ['shell/units/pay/index.html'] } }
+  const unit = `<html><head><meta http-equiv="Content-Security-Policy" content="default-src 'self'"></head><body></body></html>`
+  const local = "frame-src 'self' https://payments.localhost:*; "
+  const extra = { 'shell/index.html': document(local), 'documents/about/index.html': document(local), 'shell/units/pay/index.html': unit }
+  const f = await fixture(false, undefined, undefined, units, { domain: 'staging.example', extra })
+  try {
+    const framed = "frame-src 'self' https://payments.localhost:* https://payments.staging.example"
+    const directive = (html: string) => parseHTML(html).document.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!.split('; ').find((d: string) => d.startsWith('frame-src'))
+    assert.equal(directive(await Deno.readTextFile(path.join(f.out, 'index.html'))), framed)
+    assert.equal(directive(await Deno.readTextFile(path.join(f.out, 'documents/about/index.html'))), framed)
+    const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
+    assert.ok(headers.split('\n').find((line) => line.startsWith('  Content-Security-Policy: script-src'))!.includes(`; ${framed}; `))
+    assert.equal(await Deno.readTextFile(path.join(f.out, 'shell/units/pay/index.html')), unit)
+  } finally { await Deno.remove(f.out, { recursive: true }) }
+  await assert.rejects(fixture(false, undefined, undefined, units, { extra }), /realm subdomains payments are hosts under the release's domain, and the release names none/)
+  await assert.rejects(fixture(false, undefined, undefined, units, { domain: 'staging.example', extra: { ...extra, 'shell/index.html': document('') } }), /shell\/index.html: its Content-Security-Policy has no frame-src/)
 })
 
 Deno.test('changing a module keeps unrelated asset URLs and its importing module reusable', async () => {

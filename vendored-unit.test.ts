@@ -210,6 +210,17 @@ Deno.test("a realm with a subdomain reaches the terminal, emits subdomain CSP an
   assertStringIncludes(caddy, `@subdomain_realm_payments {\n    header_regexp Host ^payments\\.\n    path /shell/units/engine/unit.js\n  }`);
   assertStringIncludes(caddy, `header @subdomain_realm_payments Content-Security-Policy "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' {$ORIGIN}"`);
   assertStringIncludes(caddy, `https://payments.localhost:{$CADDY_DOOR_PORT:8443}, https://payments.caddy:{$CADDY_DOOR_PORT:8443} {`);
+  // Regression: the entry's policy framed `payments.<meta.domain>` and the
+  // local door's hosts, so a tree served only those; each door adds its own
+  // (the edge release under its domain, bundle/edge-addresses.ts).
+  const domained = await emitFiles(program(subRealm).replace(`name: "test-effects"`, `name: "test-effects"\n    domain: "app.example"`)) as unknown as Record<string, { text: string }>;
+  const frames = "https://payments.localhost:* https://payments.caddy:*";
+  assertStringIncludes(domained["docker/Caddyfile"].text, frames);
+  assertStringIncludes(domained[".pronto/development/index.html"].text, frames);
+  const entry = domained["shell/index.html"].text;
+  assertStringIncludes(entry, "frame-src 'self'");
+  assert(!entry.includes("payments."), "the tree's entry names no realm host");
+  assert(!domained["docker/Caddyfile"].text.includes("payments.app.example"), "the door names no deployment's realm host");
   await refused(
     program(engine().replace("note:", `subdomain: "payments"\n      note:`)),
     "unit engine is seated as agent and names subdomain payments: only a realm's frame has an origin of its own",

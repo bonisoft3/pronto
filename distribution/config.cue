@@ -109,11 +109,31 @@ import (
 	out:  "deno run --config (\(root) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\(root) | path join write.ts) ."
 }
 
+// A deployment's flag, named at the verb (`sayt release --domain=<host>`,
+// SAY_<VERB>_ARGS_<NAME>) or else by the app's declared default: a generated
+// tree names no deployment of its own. A flag given empty reaches the command,
+// which refuses it.
+#DeploymentFlag: {
+	verb:    string
+	name:    string
+	flag:    string
+	default: string
+	// How the command reads a flag's value: as the next argument, or after `=`.
+	form: *"pair" | "joined"
+	let env = "SAY_\(verb)_ARGS_\(name)"
+	let given = [if form == "pair" {"'\(flag)' $env.\(env)"}, "$'\(flag)=($env.\(env))'"][0]
+	let declared = [if default == "" {""}, if form == "pair" {"\(json.Marshal(flag)) \(json.Marshal(default))"}, json.Marshal("\(flag)=\(default)")][0]
+	out: "...(if ('\(env)' in $env) { [\(given)] } else { [\(declared)] })"
+}
+
 #Project: {
 	let P = self
 	_valid:    saycfg.say & P.say.say
 	domain:    *"" | string
 	ssrOrigin: *"" | string
+	// The edge release's Worker, whose name every Worker, queue and bucket it
+	// deploys derives from: the app's name, or `--name` at the verb.
+	workerName: *"" | string
 	edgeClock: *"ticker" | "disabled"
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
@@ -166,7 +186,7 @@ import (
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
 	_edgeData:  "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge:       (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	edge:       (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0]) \((#DeploymentFlag & {verb: "RELEASE", name: "DOMAIN", flag: "--domain", default: P.domain}).out) \((#DeploymentFlag & {verb: "RELEASE", name: "SSR_ORIGIN", flag: "--ssr-origin", default: P.ssrOrigin}).out) \((#DeploymentFlag & {verb: "RELEASE", name: "NAME", flag: "--name", default: P.workerName}).out)"}).out
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
 	// `--reset` replaces the object's data with this release's; `--temporary`
 	// deploys to a throwaway account when none is logged in.
@@ -179,11 +199,12 @@ import (
 	// The cloud tier on GCP: Cloud Run beside Cloud SQL, with gcloud alone.
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
 	// Post-release verification across live deployments.
+	let _verifyDomain = (#DeploymentFlag & {verb: "VERIFY", name: "DOMAIN", flag: "--default-domain", default: P.domain, form: "joined"}).out
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
-	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyEdge:  (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare --mecha \(P._mecha)\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyK8s:   (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyGcp:   (_run & {args: "if ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
+	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages \(_verifyDomain) \(_verifyArgs)"}).out
+	verifyEdge:  (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare --mecha \(P._mecha) \(_verifyDomain) \((#DeploymentFlag & {verb: "VERIFY", name: "NAME", flag: "--name", default: P.workerName, form: "joined"}).out) \(_verifyArgs)"}).out
+	verifyK8s:   (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s \(_verifyDomain) \(_verifyArgs)"}).out
+	verifyGcp:   (_run & {args: "if ('SAY_VERIFY_ARGS_DOMAIN' in $env) or ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp \(_verifyDomain) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// Its own tests import siblings a release of it does not carry.

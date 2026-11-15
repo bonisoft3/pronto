@@ -620,6 +620,20 @@ Deno.test("a sink's target entry wins, the rest take its default, and a target l
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: origin: "http://plain.example", idempotent: true}`)), "plain.example");
 });
 
+// Regression: the origin was compiled into effects.json, so one tree could not
+// be released to a staging deployment on a vendor's sandbox and a production
+// one on its live API. A named origin is the dispatcher's secret, read per run.
+Deno.test("an origin named by a secret reaches the edge by name, and no daprd endpoint", async () => {
+  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "ACQUIRER_ORIGIN"}, targets: docker: bridge: "mail", idempotent: true}`).replace("targets: []", 'targets: ["cloudflare"]'));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.edgeOrigin, { secret: "ACQUIRER_ORIGIN" });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl, "http://smtp:8080");
+  assertStringIncludes(
+    await refusal(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "ACQUIRER_ORIGIN"}, targets: cloudflare: bridge: "mail", idempotent: true}`)),
+    "effect charge names its origin by the secret ACQUIRER_ORIGIN, which only cloudflare reads: give target docker an origin or a bridge",
+  );
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "lower"}, targets: docker: bridge: "mail", idempotent: true}`)), "lower");
+});
+
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: true}`)), "past a bridge nothing is the platform's to promise");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}`)), "a bridge answers no query");
