@@ -76,6 +76,11 @@ type Table = { schema: string; name: string }
 export type Snapshot = { fingerprint: string; rows: Record<string, string> }
 const literal = (s: string) => "'" + s.replaceAll("'", "''") + "'"
 
+// pg_stat_user_tables omits pg_toast* only; pg_temp_* relations created by
+// concurrent DuckDB/compute sessions cannot be read from another session.
+export const SNAPSHOT_TABLES_SQL =
+  "SELECT coalesce(json_agg(json_build_object('schema', u.schemaname, 'name', u.relname)), '[]') FROM pg_stat_user_tables u JOIN pg_class c ON c.oid = u.relid WHERE c.relpersistence <> 't' AND u.schemaname !~ '^pg_temp'"
+
 /** Row JSON stays text through JavaScript so bigint and numeric stay exact. */
 export function snapshotSql(all: Table[], selected: string[] = []): string {
   const fingerprints = all.map(({ schema, name }) => `SELECT ${literal(schema)} AS schema, ${literal(name)} AS name,
@@ -271,7 +276,7 @@ async function main() {
   const window = MARGIN
 
   const snapshot = async (selected: string[] = []): Promise<Snapshot> => {
-    const all: Table[] = JSON.parse(await psql("SELECT coalesce(json_agg(json_build_object('schema', schemaname, 'name', relname)), '[]') FROM pg_stat_user_tables"))
+    const all: Table[] = JSON.parse(await psql(SNAPSHOT_TABLES_SQL))
     return JSON.parse(await psql(snapshotSql(all, selected)))
   }
 
@@ -316,7 +321,7 @@ async function main() {
     const refs = (await psql(`
       SELECT c.relname, p.relname FROM pg_constraint k
         JOIN pg_class c ON c.oid = k.conrelid JOIN pg_class p ON p.oid = k.confrelid
-      WHERE k.contype = 'f' AND c.relname IN (${names})`))
+      WHERE k.contype = 'f' AND c.relnamespace = 'public'::regnamespace AND p.relnamespace = 'public'::regnamespace AND c.relname IN (${names})`))
       .split('\n').filter((l) => l).map((l) => l.split('|') as [string, string])
     const order = dependencyOrder(tables, refs)
     const columns: Record<string, string[]> = {}
