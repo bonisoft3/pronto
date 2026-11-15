@@ -36,7 +36,7 @@ import (
 
 #Toolchain: {
 	...
-	tools:     {"github:bonisoft3/bayt": "0.71.0", ...}
+	tools:     {"github:bonisoft3/bayt": "0.72.3", ...}
 	hostTools: {"github:F1bonacc1/process-compose": "v1.122.0", ...}
 	say: say: {
 		...

@@ -7,7 +7,7 @@ import (
 )
 
 #Version:     "1.1.2"
-#SaytVersion: "0.48.0"
+#SaytVersion: "0.49.1"
 
 // Checkout-only modules: the compiler's test fixtures read omnishell beside
 // pronto, and the portable types are refreshed from the checkout's mecha

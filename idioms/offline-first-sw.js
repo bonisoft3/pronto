@@ -33,10 +33,14 @@ async function keptCopy(response) {
 self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
+  // Earlier registrations (Workbox/Nuxt) may leave navigationPreload enabled on
+  // the registration across script updates; bypassing /auth/* without consuming
+  // preloadResponse makes Chromium discard the preload and replay OAuth callbacks.
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== ADDRESSED_CACHE && k !== ENTRY_CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
+    Promise.all([
+      caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== ADDRESSED_CACHE && k !== ENTRY_CACHE).map((k) => caches.delete(k)))),
+      self.registration?.navigationPreload?.disable(),
+    ]).then(() => self.clients.claim()),
   );
 });
 

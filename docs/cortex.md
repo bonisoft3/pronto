@@ -25,7 +25,7 @@ reducer in the browser does not make it a different kind of machine.
 `rules`; `state.mecha.rows` holds transactional row machines bound by `entity`.
 These remain distinct execution bindings; Cortex composition uses their
 existing sources and sinks. Persisted SQL naming is covered by
-[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/machines.md#bounded-reducer-machines).
+[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.23.0/docs/machines.md#bounded-reducer-machines).
 
 An app's tests step a compiled machine through omnishell's test harness
 (`test/mecha-local.ts`) and walk it with `test/mecha-battery.ts`, from the
@@ -261,7 +261,7 @@ These bindings are source configuration; the machine remains XState grammar.
 ## Durable work
 
 `#CortexDurable` and `compileCortexDurable` compose server-only bounded Mecha
-machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/durex/docs/index.md). The same reducer compiler checks shapes,
+machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.23.0/services/durex/docs/index.md). The same reducer compiler checks shapes,
 guards, invariants and fuel, and emits a private PostgreSQL dispatcher. No
 browser admission or command ports are emitted. A stable invoking state names a
 task, immutable key/input expressions, completion events, release time and retry
