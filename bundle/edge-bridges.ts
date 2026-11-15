@@ -7,6 +7,8 @@
 import * as path from 'node:path'
 import { parse } from '@std/yaml'
 
+export type BridgeInstanceType = 'lite' | 'basic' | 'standard-1' | 'standard-2' | 'standard-3' | 'standard-4'
+
 /** A bridge as .pronto/cluster.json lists it (emit.cue): `build` is the
  * cluster target building the real container, whose Dockerfile and compose
  * file bayt renders at .bayt/Dockerfile.<build> and .bayt/compose.<build>.yaml. */
@@ -15,6 +17,7 @@ export interface ClusterBridge {
   container: string
   port: number
   targets: string[]
+  instance_type?: BridgeInstanceType
   build: string
 }
 

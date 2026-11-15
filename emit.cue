@@ -4471,7 +4471,8 @@ _pgrollDir: "services/database/pgroll"
 						container: b.container
 						port:      b.port
 						targets:   b.targets
-						build:     "\(b.container)-appliance"
+						if b.instance_type != _|_ {instance_type: b.instance_type}
+						build: "\(b.container)-appliance"
 					}]
 				}
 			}

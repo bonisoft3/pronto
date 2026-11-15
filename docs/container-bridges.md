@@ -67,9 +67,10 @@ deployed on, its effects settle `failed` without a call.
 
 ```cue
 code: state: bridges: crawler: {
-    container: "crawler"
-    port:      8080
-    targets:   ["cloudflare"]
+    container:     "crawler"
+    port:          8080
+    targets:       ["cloudflare"]
+    instance_type: "standard-1" // optional: "lite" | "basic" | "standard-1" .. "standard-4"
 }
 ```
 
@@ -77,7 +78,9 @@ The dispatcher Worker ([mecha-edge](https://github.com/bonisoft3/mecha/blob/v0.2
 owns the container as a Durable Object class, `Bridge<Name>` bound as
 `BRIDGE_<NAME>` (`fetch-pages` is `BridgeFetchPages`, `BRIDGE_FETCH_PAGES`;
 `bundle/edge-bridges.ts` decides both, and refuses two bridges meeting in one
-name), with one instance per bridge. An effect through the bridge calls that
+name), with one instance per bridge. `instance_type` sizes the Cloudflare
+Container (`lite`, `basic`, `standard-1` through `standard-4`, omitted for
+Wrangler's default) and is refused when `cloudflare` is not in `targets`. An effect through the bridge calls that
 binding's stub under the container's name; the class holds the bridge's
 `port`, which is the one dialed, and the stub starts the container and
 proxies to it: the container has no public origin and nothing else reaches

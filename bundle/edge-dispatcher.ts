@@ -118,7 +118,7 @@ ${classes.join('')}`)
     ...(bridges.length ? {
       containers: bridges.map(b => {
         const { args } = builds.get(b.name)!
-        return { class_name: bridgeNames(b.name).className, image: `./Dockerfile.${b.name}`, image_build_context: context, ...(Object.keys(args).length ? { image_vars: args } : {}), max_instances: 1 }
+        return { class_name: bridgeNames(b.name).className, image: `./Dockerfile.${b.name}`, image_build_context: context, ...(Object.keys(args).length ? { image_vars: args } : {}), ...(b.instance_type ? { instance_type: b.instance_type } : {}), max_instances: 1 }
       }),
       exports: Object.fromEntries(bridges.map(b => [bridgeNames(b.name).className, { type: 'durable-object', storage: 'sqlite' }])),
     } : {}),

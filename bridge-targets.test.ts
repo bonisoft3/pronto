@@ -45,6 +45,18 @@ Deno.test("a bridge on cloudflare needs a built container and no appliance form"
   const pulled = await cue(["export", "-", "-e", "out"], program('{container: "transport", targets: ["cloudflare"]}', '{activate: "", dockerfile: {from: null}, compose: image: "ghcr.io/example/transport:1"}'));
   assert(!pulled.success, "a bridge on cloudflare whose container pulls its image was accepted");
   assertStringIncludes(pulled.stderr, "builds no image from a Dockerfile");
+  const sized = await emitFiles(program('{container: "transport", targets: ["cloudflare"], instance_type: "standard-1"}')) as unknown as Record<string, { data: { bridges?: unknown } }>;
+  assertEquals(sized[".pronto/cluster.json"].data.bridges, [{
+    name: "fetch",
+    container: "transport",
+    port: 8080,
+    targets: ["cloudflare"],
+    instance_type: "standard-1",
+    build: "transport-appliance",
+  }]);
+  const dockerSized = await cue(["export", "-", "-e", "out"], program('{container: "transport", targets: ["docker"], instance_type: "standard-1", appliance: {srcs: ["/bin/fetch"], command: ["/bin/fetch", "--listen", "127.0.0.1:8090"], port: 8090}}'));
+  assert(!dockerSized.success, "a bridge without cloudflare in targets accepted instance_type");
+  assertStringIncludes(dockerSized.stderr, "instance_type");
 });
 
 // The mail action's cloudflare lowering is Email Routing, so the container a

@@ -94,6 +94,28 @@ Deno.test('a bridge on cloudflare is lowered as a container of the dispatcher', 
   }
 })
 
+Deno.test('a bridge with instance_type carries it into airlock/wrangler.jsonc', async () => {
+  const out = await Deno.makeTempDir()
+  const app = await Deno.makeTempDir()
+  try {
+    for (const rel of ['.pronto', '.bayt', 'services/airlock']) await Deno.mkdir(path.join(app, rel), { recursive: true })
+    const cluster = JSON.parse(await Deno.readTextFile(path.join(bridged, '.pronto/cluster.json')))
+    cluster.bridges[0].instance_type = 'standard-1'
+    await Deno.writeTextFile(path.join(app, '.pronto/cluster.json'), JSON.stringify(cluster))
+    for (const rel of ['.bayt/Dockerfile.transport-appliance', '.bayt/compose.transport-appliance.yaml', 'services/airlock/effects.json']) {
+      await Deno.copyFile(path.join(bridged, rel), path.join(app, rel))
+    }
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ name: 'fixture', durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] } }))
+    await writeEdgeDispatcher(out, mecha, app, undefined)
+    const config = JSON.parse(await Deno.readTextFile(path.join(out, 'airlock/wrangler.jsonc')))
+    assert.equal(config.containers[0].instance_type, 'standard-1')
+  } finally {
+    await Deno.remove(out, { recursive: true })
+    await Deno.remove(app, { recursive: true })
+  }
+})
+
 // Without a bridge on cloudflare the dispatcher declares no container, binds
 // none and imports nothing that needs workerd.
 Deno.test('a release without a bridge on cloudflare declares no container', async () => {
