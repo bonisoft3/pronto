@@ -120,6 +120,15 @@ caddySnippets: """
 	{
 	  admin off
 	  auto_https disable_redirects
+	  # The client's address, where the door is reached through a proxy of the cluster's own (a private
+	  # address: the gateway, cloudflared, a port-forward): Cloudflare's Cf-Connecting-Ip, else the
+	  # forwarded chain's nearest address no such proxy wrote (strict). Electric's placement hashes it
+	  # (PRONTO-624, PRONTO-628).
+	  servers {
+	    trusted_proxies static private_ranges
+	    trusted_proxies_strict
+	    client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+	  }
 	}
 
 	""" + strings.Join([for hop, s in resilience.timeouts.door {

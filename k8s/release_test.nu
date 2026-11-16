@@ -1747,9 +1747,12 @@ def test_electric_sticky [] {
 	assert ($door | str contains "(electric-upstream-pods) {\n  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {")
 	# A browser's first requests, cookieless and sent together, all go to one Electric, chosen by who the client is (PRONTO-624),
 	# in the door every app is written from and in the idiom's alike.
-	let policy = "lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {\n    fallback header Cf-Connecting-Ip {\n      fallback client_ip_hash\n    }\n  }"
+	let policy = "lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {\n    fallback client_ip_hash\n  }"
 	assert ($door | str contains $policy) "the door places a cookieless browser by its address"
 	assert ((open --raw ($pronto_dir | path join idioms docker Caddyfile)) | str contains $policy) "the idiom's door places it the same way"
+	# The client address it hashes is read through the cluster's own proxies, strictly, so a hostPort ingress spreads its browsers too (PRONTO-628).
+	let servers = "servers {\n\t    trusted_proxies static private_ranges\n\t    trusted_proxies_strict\n\t    client_ip_headers Cf-Connecting-Ip X-Forwarded-For\n\t  }"
+	assert ((open --raw ($pronto_dir | path join resilience resilience.cue)) | str contains $servers) "the door reads the client address through the cluster's proxies"
 }
 
 def test_electric_slots [] {
