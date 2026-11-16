@@ -506,6 +506,25 @@ import (
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
 	cel?: string
+	// What the integer counts, where it counts money: minor units of a currency
+	// the column states once or each row states in a sibling field
+	// (docs/types-and-identity.md#money). The terminal shows it with
+	// data-text-format="money", in the reader's locale.
+	money?: #FieldMoney
+	if money != _|_ {
+		type: "int32" | "int64" | "int" | "bigint"
+	}
+}
+
+// A money field's currency. The column's: an ISO 4217 code and the minor units
+// an amount counts (BRL, 2 for centavos). Or each row's: the sibling string
+// field holding `{code}_{decimals}` (BRL_2, JPY_0, USDC_6), a currency code,
+// ISO 4217's or a longer alpha one, and 0 to 18 minor units.
+#FieldMoney: {
+	currency!:   =~"^[A-Z]{3}$"
+	minorUnits!: int & >=0 & <=18
+} | {
+	currencyField!: =~"^[a-z_][a-z0-9_]*$"
 }
 
 // Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
@@ -2652,6 +2671,20 @@ import (
 		}],
 	])
 	_timerRefusal: [if len(_timerViolations) == 0 {true}, _timerViolations[0]][0] & true
+
+	// A row's currency is read off the row: a sibling that is gone, or not text,
+	// would leave every amount of the column without one.
+	_moneyViolations: list.Concat([
+		[for en, e in A.state.entities for f in e.fields if !f.retired if f.money != _|_ if f.money.currencyField != _|_
+			if len([for s in e.fields if s.name == f.money.currencyField if !s.retired {s}]) == 0 {
+			"\(en).\(f.name) reads its currency off \(f.money.currencyField), which is not a field of \(en)"
+		}],
+		[for en, e in A.state.entities for f in e.fields if !f.retired if f.money != _|_ if f.money.currencyField != _|_
+			for s in e.fields if s.name == f.money.currencyField if !s.retired if s.type != "string" if s.type != "text" {
+			"\(en).\(f.name) reads its currency off \(f.money.currencyField), whose type is \(s.type): a currency is a string, `{ISO 4217}_{decimals}`"
+		}],
+	])
+	_moneyRefusal: [if len(_moneyViolations) == 0 {true}, _moneyViolations[0]][0] & true
 
 	_authProviders: [if A.capabilities != null if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
 	_authTargetViolations: list.Concat([

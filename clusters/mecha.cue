@@ -220,7 +220,7 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 published: impl.#Published & {
 	airlock:  "bonitao/mecha-airlock:0.22.0@sha256:8b711e8ac228f49e6f0e8871cc45b7e8bd3cacbf99ab30ca224a3fa4416e3ecf"
-	auth:     "ghcr.io/bsoneca/mecha-auth:0.22.0-host.15@sha256:eed8c3e22a8af4cb845d9b11bd9c6a214b61d3cdd6fd36f433115c710ab76c75"
+	auth:     "ghcr.io/bsoneca/mecha-auth:0.22.0-host.17@sha256:97ab5f5cac0cb4ecdb3bc10a4d422f44c2f93d31b4667c044cc9d1fabad56838"
 	clock:    "bonitao/mecha-clock:0.22.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
 	compute:  "bonitao/mecha-compute:0.22.0@sha256:58f8cd581d5928feccd655a2f4d20e8ca25200cfa7438c06f1146a8427098cd7"
 	conduit:  "bonitao/mecha-conduit:0.22.0@sha256:66ff44e36bbc9e18858a56ee17c17b9a1746960c1817fec38fbf11d4c3d2eef1"

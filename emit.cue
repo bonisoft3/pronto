@@ -1866,6 +1866,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if f.cel == _|_ if column.states != _|_ {enum: column.states}
 				if e.cel.enums[f.name] != _|_ {enum: e.cel.enums[f.name]}
 				if e.cel.bounds[f.name] != _|_ {bounds: e.cel.bounds[f.name]}
+				// The terminal's money format and check-markup read the currency here.
+				if f.money != _|_ {money: f.money}
 			}]
 			if len(e.uniques) > 0 {
 				uniques: [for u in e.uniques {
