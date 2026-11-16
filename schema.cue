@@ -6,6 +6,7 @@ package pronto
 
 import (
 	"list"
+	"path"
 	"encoding/json"
 	"encoding/yaml"
 	"regexp"
@@ -1840,7 +1841,9 @@ import (
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [string]~(Name,_): #ExternalEffect & {name: Name}
-		// An Airlock-facing endpoint of a declared container hatch.
+		// An Airlock-facing endpoint of a declared container hatch, or of an
+		// isolate hatch by `isolate`, whose container, port and appliance form
+		// pronto derives ([[docs/isolate-hatches]]).
 		// A bridge runs as its simulator in the local stack and as its container
 		// on the release targets it names; elsewhere its effects fail at run time
 		// ([[docs/container-bridges#Targets]]). `docker` lowers a bridge as a
@@ -1982,7 +1985,10 @@ import (
 		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
-		// the program's cluster unification beside it. A `sql` or `proto` hatch
+		// the program's cluster unification beside it. An `isolate` hatch is a
+		// container of another shape: a module in the Workers format that
+		// pronto bundles and serves itself, from `entrypoint` among `files`
+		// ([[docs/isolate-hatches]]). A `sql` or `proto` hatch
 		// withholds files from the lint that reads every other one — squawk over
 		// the SQL, buf breaking over the protos — and `files` names them,
 		// app-relative, as exact paths.
@@ -1995,7 +2001,7 @@ import (
 		hatches: [string]~(Name,_): {
 			let H = self
 			ir:   *Name | string
-			kind: "container" | "sql" | "proto" | "host-dom"
+			kind: "container" | "isolate" | "sql" | "proto" | "host-dom"
 			note: string
 			edge?: {
 				kind:  *"worker" | "worker"
@@ -2031,6 +2037,16 @@ import (
 				note:  !=""
 				src!:  string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
 				files: [string, ...string] & [...(string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")]
+			}
+			// The module the bundle starts from, one of `files`, which hold
+			// everything it imports beside its packages (its deno.json and lock
+			// among them), and the heap the isolate may hold, in MiB, which a
+			// Cloudflare Worker caps at 128.
+			if H.kind == "isolate" {
+				note:        !=""
+				entrypoint!: string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.(ts|js|mjs)$" & !~"(^|/)\\.\\.?(/|$)"
+				files:       [string, ...string] & [...(string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$" & !~"(^|/)\\.\\.?(/|$)")]
+				memory:      *128 | int & >=16 & <=128
 			}
 
 			// A file hatch names its artifacts; host-dom serves them without
@@ -2935,11 +2951,34 @@ import (
 
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([
-		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] == _|_ {
+		[for n, b in _declaredBridges if b.isolate == _|_ if A.capabilities.hatches[b.container] == _|_ {
 			"bridge \(n) names undeclared container hatch: \(b.container)"
 		}],
-		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
+		[for n, b in _declaredBridges if b.isolate != _|_ if A.capabilities.hatches[b.isolate] == _|_ {
+			"bridge \(n) names undeclared isolate hatch: \(b.isolate)"
+		}],
+		[for n, b in _declaredBridges if b.isolate == _|_ if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
 			"bridge \(n) names hatch \(b.container), which is not a container"
+		}],
+		[for n, b in _declaredBridges if b.isolate != _|_ if b.appliance != _|_ {
+			"bridge \(n) states an appliance form, which pronto derives for an isolate"
+		}],
+		[for n, b in _declaredBridges if b.isolate != _|_ if A.capabilities.hatches[b.isolate] != _|_ if A.capabilities.hatches[b.isolate].kind != "isolate" {
+			"bridge \(n) names hatch \(b.isolate) by isolate, which is not an isolate"
+		}],
+		// The local stack bundles an isolate under .isolate/, beside the sources.
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate" for f in h.files if strings.HasPrefix(f, ".isolate/") {
+			"isolate hatch \(hn)'s \(f) is under .isolate/, where the local stack writes its bundle"
+		}],
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate" if !list.Contains(h.files, h.entrypoint) {
+			"isolate hatch \(hn)'s entrypoint \(h.entrypoint) is not one of its files"
+		}],
+		// The bundle, its WebAssembly shims and their WebAssembly land in one
+		// directory, where a shim is found by its name.
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate"
+		let names = [for f in h.files if strings.HasSuffix(f, ".wasm") || strings.HasSuffix(f, ".wasm.js") {path.Base(f, path.Unix)}]
+		for i, n in names if list.Contains(list.Drop(names, i+1), n) {
+			"isolate hatch \(hn) has two files named \(n): its WebAssembly and shims share one directory beside the bundle"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.port != 8080 {
 			"bridge \(n) must use the Activepieces port 8080"

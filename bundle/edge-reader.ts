@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 export async function writeEdgeReader(out: string, mecha: string, definitions: readonly unknown[], name: string) {
   const directory = path.join(out, 'compute/reader')
@@ -40,7 +41,7 @@ export const ComputeReader = computeReader({pgliteWasm,initdbWasm,pgliteData,icu
 export default { fetch() { return new Response(null,{status:404}) } };
 `
   const configuration = {
-    main: 'worker.ts', compatibility_date: '2026-09-01', workers_dev: false, limits: { cpu_ms: 300000 },
+    main: 'worker.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, workers_dev: false, limits: { cpu_ms: 300000 },
     durable_objects: { bindings: [{ name: 'READER', class_name: 'ComputeReader' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['ComputeReader'] }],
     rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false }, { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false }],

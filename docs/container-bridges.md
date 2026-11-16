@@ -1,7 +1,8 @@
 # Container bridges
 
 A bridge is an HTTP endpoint of a declared container hatch, selected by an
-Airlock effect. The hatch owns the implementation; the bridge role supplies
+Airlock effect, or of an [[isolate-hatches|isolate hatch]], whose container
+pronto derives. The hatch owns the implementation; the bridge role supplies
 internal addressing, startup dependencies and outbound network placement.
 
 ```cue

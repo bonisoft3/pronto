@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { startWorker } from '../../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 Deno.test({ name: 'separate render RPC retains snapshot readers after headers and releases them at completion', sanitizeOps: false, sanitizeResources: false }, async () => {
   const out = await Deno.makeTempDir({ prefix: 'edge-ssr-rpc-' })
@@ -81,9 +82,9 @@ export class Renderer extends renderObject(async(request,reader,stream)=>{
 export default {fetch(){return new Response(null,{status:404})}}
 `)
   const rendererConfig = path.join(out, 'renderer.json')
-  await Deno.writeTextFile(rendererConfig, JSON.stringify({ name: 'stream-renderer', main: 'renderer.ts', compatibility_date: '2026-09-01', durable_objects: { bindings: [{ name: 'RENDERER', class_name: 'Renderer' }] }, migrations: [{ tag: 'v1', new_sqlite_classes: ['Renderer'] }] }))
+  await Deno.writeTextFile(rendererConfig, JSON.stringify({ name: 'stream-renderer', main: 'renderer.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, durable_objects: { bindings: [{ name: 'RENDERER', class_name: 'Renderer' }] }, migrations: [{ tag: 'v1', new_sqlite_classes: ['Renderer'] }] }))
   const config = path.join(out, 'database.json')
-  await Deno.writeTextFile(config, JSON.stringify({ name: 'stream-database', main: 'database.ts', compatibility_date: '2026-09-01', durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, { name: 'RENDERER', class_name: 'Renderer', script_name: 'stream-renderer' }] }, migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }] }))
+  await Deno.writeTextFile(config, JSON.stringify({ name: 'stream-database', main: 'database.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, { name: 'RENDERER', class_name: 'Renderer', script_name: 'stream-renderer' }] }, migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }] }))
   const worker = await startWorker(new URL(`file://${config}`), path.join(out, 'state'), [new URL(`file://${rendererConfig}`)])
   try {
     const at = (pathname = '/', init?: RequestInit) => fetch(worker.origin + pathname, { signal: AbortSignal.timeout(10_000), ...init })

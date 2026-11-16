@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { bridgeBuild, bridgeDockerfile, bridgeNames, type ClusterBridge, clusterBridges, onCloudflare } from './edge-bridges.ts'
+import { bridgeBuild, bridgeDockerfile, bridgeNames, type ClusterBridge, clusterBridges, isolateWorkerName, onCloudflare } from './edge-bridges.ts'
 
 const fixture = fileURLToPath(new URL('../testdata/edge-bridge/', import.meta.url))
 
@@ -16,7 +16,25 @@ Deno.test('a bridge name with an empty segment, or two bridges meeting in one cl
   const on = (name: string): ClusterBridge => ({ name, container: name, port: 8080, targets: ['cloudflare'], build: `${name}-appliance` })
   assert.equal(bridgeNames('a-1b').className, bridgeNames('a1b').className)
   assert.throws(() => onCloudflare([on('a-1b'), on('a1b')]), /bridges a-1b and a1b are both BridgeA1b/)
+  // An isolate is no class of the dispatcher, only a binding.
+  const isolated = (name: string): ClusterBridge => ({ ...on(name), isolate: { entrypoint: 'main.ts', files: ['main.ts'], memory: 128, build: '' } })
+  assert.deepEqual(onCloudflare([isolated('a-1b'), isolated('a1b')]).map(b => b.name), ['a-1b', 'a1b'])
+  assert.deepEqual(onCloudflare([isolated('a-1b'), on('a1b')]).map(b => b.name), ['a-1b', 'a1b'])
+  // An empty segment names no class, but names a binding.
+  assert.throws(() => onCloudflare([on('fetch--pages')]), /empty segment/)
+  assert.deepEqual(onCloudflare([isolated('fetch--pages')]).map(b => b.name), ['fetch--pages'])
   assert.deepEqual(onCloudflare([on('a-1b'), on('a2b')]).map(b => b.name), ['a-1b', 'a2b'])
+})
+
+// An isolate's Worker is named after its dispatcher, within Cloudflare's 63
+// characters whatever the bridge's name.
+Deno.test("an isolate's Worker name fits Cloudflare's 63 characters", () => {
+  assert.equal(isolateWorkerName('app-airlock', 'pdf'), 'app-airlock-pdf')
+  const long = isolateWorkerName('fixture-airlock', 'a'.repeat(63))
+  const other = isolateWorkerName('fixture-airlock', `${'a'.repeat(62)}b`)
+  assert.ok(long.length <= 63 && other.length <= 63)
+  assert.match(long, /^fixture-airlock-a+-[0-9a-f]{8}$/)
+  assert.notEqual(long, other)
 })
 
 Deno.test('only the bridges naming cloudflare are containers of the dispatcher', async () => {

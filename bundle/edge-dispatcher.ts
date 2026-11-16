@@ -5,12 +5,14 @@
 // the queue's producer and the dispatcher's way back.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { bridgeBuild, bridgeDockerfile, bridgeNames, clusterBridges, onCloudflare } from './edge-bridges.ts'
+import { bridgeBinding, bridgeBuild, bridgeDockerfile, bridgeNames, clusterBridges, isolateWorkerName, onCloudflare, writeIsolateWorker } from './edge-bridges.ts'
 import { dispatcherSecrets } from '../verify/secrets.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 interface Config {
   name: string
   durable_objects?: { bindings: { name: string; class_name: string; script_name?: string }[] }
+  services?: { binding: string; service: string }[]
   queues?: { producers?: { binding: string; queue: string }[]; consumers?: unknown[] }
   r2_buckets?: { binding: string; bucket_name: string }[]
   vars?: Record<string, string>
@@ -22,7 +24,8 @@ interface Config {
  * required, the AI settings among them; the keys their AI providers read, a
  * group per provider any of whose names serves; the keys each AI setting's
  * routes read, needed only where the deployment selects that route; and the
- * bridges whose containers the deploy builds. */
+ * bridges whose containers the deploy builds, and the isolates' Workers,
+ * which the publish deploys before the dispatcher that binds them. */
 export interface AirlockRelease {
   queue: string
   deployment: 'airlock/wrangler.jsonc'
@@ -30,6 +33,7 @@ export interface AirlockRelease {
   providers: string[][]
   routes: Record<string, Record<string, string[][]>>
   containers: string[]
+  isolates: string[]
 }
 
 /** The dispatcher's Worker and queue, named after the script holding the
@@ -78,7 +82,14 @@ export async function writeEdgeDispatcher(out: string, mecha: string, app: strin
   // (edge-bridges.ts, mecha-edge's bridge.ts): one instance, asleep after ten
   // idle minutes, with the environment bayt resolved for the container and
   // the internet its hatch exists for.
-  const bridges = onCloudflare(await clusterBridges(app))
+  const onEdge = onCloudflare(await clusterBridges(app))
+  const bridges = onEdge.filter(b => b.isolate === undefined)
+  // An isolate's bridge is a Worker of its own, bound by service: its isolate
+  // bounds its memory and time, which a class of this Worker would share.
+  const isolates = await Promise.all(onEdge.filter(b => b.isolate !== undefined).map(async b => {
+    const name = isolateWorkerName(queue, b.name)
+    return { binding: bridgeBinding(b.name), service: name, deployment: await writeIsolateWorker(out, app, b, name) }
+  }))
   const builds = new Map(await Promise.all(bridges.map(async b => [b.name, await bridgeBuild(app, b)] as const)))
   const classes = bridges.map(b => `
 export class ${bridgeNames(b.name).className} extends Bridge {
@@ -102,7 +113,7 @@ ${classes.join('')}`)
   await Deno.writeTextFile(path.join(out, 'airlock/wrangler.jsonc'), JSON.stringify({
     name: queue,
     main: '../src/dispatcher.ts',
-    compatibility_date: '2026-09-01',
+    compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     workers_dev: false,
     preview_urls: false,
@@ -117,6 +128,7 @@ ${classes.join('')}`)
     // The object's lease on a run is what dispatches it again, so the queue
     // never redelivers: a retried message would be a run the ledger never counted.
     queues: { consumers: [{ queue, max_retries: 0, max_batch_size: 1 }] },
+    ...(isolates.length ? { services: isolates.map(({ binding, service }) => ({ binding, service })) } : {}),
     ...(front.r2_buckets?.length ? { r2_buckets: front.r2_buckets.filter(b => b.binding === 'BLOB_OBJECTS') } : {}),
     ...(blobUrl || origin ? { vars: { ...(blobUrl ? { BLOB_URL: blobUrl } : {}), ...(origin ? { ORIGIN: origin } : {}) } } : {}),
     // `wrangler deploy` builds each image for linux/amd64 with the publisher's
@@ -130,7 +142,7 @@ ${classes.join('')}`)
       exports: Object.fromEntries(bridges.map(b => [bridgeNames(b.name).className, { type: 'durable-object', storage: 'sqlite' }])),
     } : {}),
   }, null, 2) + '\n')
-  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, routes, containers: bridges.map(b => b.name) }
+  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, routes, containers: bridges.map(b => b.name), isolates: isolates.map(i => i.deployment) }
   await Deno.writeTextFile(path.join(out, 'src/airlock.json'), JSON.stringify(release))
   return release
 }

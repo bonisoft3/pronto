@@ -239,3 +239,7 @@ published: impl.#Published & {
 }
 
 #ActivepiecesContainer: impl.#ActivepiecesContainer
+#IsolateContainer:      impl.#IsolateContainer
+#IsolateDeadlineMs:     impl.#IsolateDeadlineMs
+#IsolateBuild:          impl.#IsolateBuild
+#BridgePort:            impl.#BridgePort

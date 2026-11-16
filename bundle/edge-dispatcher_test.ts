@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
 const mecha = path.join(root, 'libraries/mecha')
 const snapcards = path.join(root, 'apps/snapcards')
 const bridged = fileURLToPath(new URL('../testdata/edge-bridge/', import.meta.url))
+const isolated = fileURLToPath(new URL('../testdata/edge-isolate/', import.meta.url))
 
 // The object imported effects.js, every handler and what each imports: the
 // isolate the dispatcher was meant to relieve held them all.
@@ -168,6 +169,93 @@ Deno.test('a release without a bridge on cloudflare declares no container', asyn
     assert.equal(config.exports, undefined)
     assert.equal(config.durable_objects.bindings.length, 1)
     assert.doesNotMatch(await Deno.readTextFile(path.join(out, 'src/dispatcher.ts')), /Container/)
+  } finally {
+    await Deno.remove(out, { recursive: true })
+  }
+})
+
+// An isolate's bridge on cloudflare is a Worker of its own, not a class of the
+// dispatcher's: its isolate bounds its memory and time. The dispatcher binds
+// it by service, the publish deploys it first, and what deploys is the bundle
+// every release makes, with the WebAssembly beside it as modules.
+Deno.test('an isolate bridge on cloudflare is a Worker of its own, bound by service', async () => {
+  const out = await Deno.makeTempDir()
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ name: 'fixture', durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] } }))
+    const release = await writeEdgeDispatcher(out, mecha, isolated, undefined)
+    assert.deepEqual(release.containers, [])
+    assert.deepEqual(release.isolates, ['airlock/isolates/echo/wrangler.jsonc'])
+    const config = JSON.parse(await Deno.readTextFile(path.join(out, 'airlock/wrangler.jsonc')))
+    assert.deepEqual(config.services, [{ binding: 'BRIDGE_ECHO', service: 'fixture-airlock-echo' }])
+    assert.equal(config.containers, undefined)
+    assert.equal(config.exports, undefined)
+    assert.deepEqual(config.durable_objects.bindings, [{ name: 'CLUSTER', class_name: 'Cluster', script_name: 'fixture' }])
+    assert.doesNotMatch(await Deno.readTextFile(path.join(out, 'src/dispatcher.ts')), /Bridge/)
+    const worker = JSON.parse(await Deno.readTextFile(path.join(out, 'airlock/isolates/echo/wrangler.jsonc')))
+    assert.equal(worker.name, 'fixture-airlock-echo')
+    assert.equal(worker.main, 'entry.js')
+    assert.equal(worker.no_bundle, true)
+    assert.equal(worker.workers_dev, false)
+    assert.deepEqual(worker.rules, [{ type: 'ESModule', globs: ['**/*.js'] }, { type: 'CompiledWasm', globs: ['**/*.wasm'] }])
+    // The shim, imported by a relative path from lib/sum.ts and by a bare
+    // alias from main.ts, is never the bundle's: the bundle imports nothing,
+    // and the registry beside it imports the shim, which the entry loads first.
+    const dir = path.join(out, 'airlock/isolates/echo')
+    const bundle = await Deno.readTextFile(path.join(dir, 'bundle.js'))
+    assert.doesNotMatch(bundle, /^import .*;$/m)
+    assert.match(bundle, /^import x from "\.\.\/docs\/add\.wasm\.js"`/m)
+    assert.doesNotMatch(bundle, /AGFzbQ/)
+    assert.match(await Deno.readTextFile(path.join(dir, 'shims.js')), /^import shim0 from "\.\/add\.wasm\.js"$/m)
+    assert.equal(await Deno.readTextFile(path.join(dir, 'entry.js')), 'import "./shims.js"\nexport { default } from "./bundle.js"\n')
+    await Deno.stat(path.join(out, 'airlock/isolates/echo/add.wasm'))
+    await Deno.stat(path.join(out, 'airlock/isolates/echo/add.wasm.js'))
+
+    const { declarations } = await renderEffects('fixture', isolated, mecha, out)
+    await Deno.writeTextFile(path.join(out, 'src/effect-declarations.js'), declarations)
+    const { default: declared } = await import(`file://${out}/src/effect-declarations.js`)
+    assert.deepEqual(declared.echo.target, { kind: 'isolate', bridge: 'echo', binding: 'BRIDGE_ECHO' })
+  } finally {
+    await Deno.remove(out, { recursive: true })
+  }
+})
+
+// The bundle the edge deploys is the one Deno serves elsewhere: Workers-shaped,
+// its WebAssembly a module under either.
+Deno.test("an isolate's bundle serves under deno serve, its WebAssembly a module", async () => {
+  // Deno loads a source-imported .wasm by its real path: macOS's temporary
+  // directory is a symlink, from which the import is refused as unprepared.
+  const out = await Deno.realPath(await Deno.makeTempDir())
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ name: 'fixture', durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] } }))
+    await writeEdgeDispatcher(out, mecha, isolated, undefined)
+    const port = 18000 + Math.floor(Math.random() * 1000)
+    const server = new Deno.Command(Deno.execPath(), {
+      args: ['serve', '--no-config', '--allow-net', '--port', String(port), path.join(out, 'airlock/isolates/echo/entry.js')],
+      stdout: 'null', stderr: 'piped',
+    }).spawn()
+    try {
+      let answer: unknown
+      for (const deadline = Date.now() + 15000; Date.now() < deadline;) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/echo`, { method: 'POST', body: JSON.stringify({ a: 2, b: 3 }) })
+          answer = await res.json()
+          break
+        } catch {
+          await new Promise((r) => setTimeout(r, 50))
+        }
+      }
+      if (answer === undefined) {
+        try { server.kill('SIGKILL') } catch { /* it ended on its own */ }
+        throw new Error(`deno serve never answered: ${new TextDecoder().decode((await server.output()).stderr)}`)
+      }
+      assert.deepEqual(answer, { echoed: { a: 2, b: 3 }, sum: 5, twice: 5, cdn: 'https://cdn.example/parser.wasm.js', note: 'example import("./docs/add.wasm.js") 2', page: '3\nimport x from "../docs/add.wasm.js"' })
+    } finally {
+      try { server.kill('SIGKILL') } catch { /* it ended on its own */ }
+      await server.stderr.cancel().catch(() => {})
+      await server.status.catch(() => {})
+    }
   } finally {
     await Deno.remove(out, { recursive: true })
   }

@@ -38,6 +38,7 @@ import { renderEffects } from './edge-effects.ts'
 import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
 import { clusterDrains, clusterSteps, EDGE_CAPABILITIES_CUE, EDGE_STATE_CUE, hasEffects, releaseScripts } from './edge-scripts.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -219,7 +220,7 @@ if (!clustered) {
     ? `import { staticWorker as serveStatic } from '${staticWorker}'\nconst staticWorker = serveStatic(${JSON.stringify(realmDocuments)}${subdomainArgs})\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
     : `import { staticWorker } from '${staticWorker}'\nexport default staticWorker(${JSON.stringify(realmDocuments)}${subdomainArgs})\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
-    name, main: 'src/index.ts', compatibility_date: '2026-09-01',
+    name, main: 'src/index.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
     assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
     observability: { enabled: true },
     ...blobBindings,
@@ -406,7 +407,7 @@ ${shell.presenter ? `    // A presenter's module import of this origin is answer
 await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
-  compatibility_date: '2026-09-01',
+  compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
   // The object's airlock runs Graphile Worker, which needs Node's built-ins.
   compatibility_flags: ['nodejs_compat'],
   ...(compute ? { services: compute.services } : {}),

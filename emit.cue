@@ -3138,7 +3138,28 @@ _pgrollDir: "services/database/pgroll"
 				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
 				if len(_secrets) > 0 {secrets: _secrets}
 			}]
-			bridges: [if D.code.state.bridges != _|_ for _, b in D.code.state.bridges {b}]
+			// An isolate bridge's appliance form: its hatch's host serving the
+			// build the hatch's image made, and any WebAssembly beside it, as a
+			// process of the airlock's own Deno. Ports go to the hatches, which
+			// several bridges may share, from 9100 past the appliance's own
+			// (mecha.#AppliancePorts) and any a container bridge's form takes.
+			let _bridges = [if D.code.state.bridges != _|_ {D.code.state.bridges}, {}][0]
+			let _taken = [for _, b in _bridges if b.isolate == _|_ if b.appliance != _|_ {b.appliance.port}]
+			let _hatches = list.SortStrings([for hn, _ in {for _, b in _bridges if b.isolate != _|_ if list.Contains(b.targets, "docker") {(b.isolate): true}} {hn}])
+			let _free = [for p in list.Range(9100, 9100 + len(_taken) + len(_hatches), 1) if !list.Contains(_taken, p) {p}]
+			bridges: [for _, b in _bridges {
+				b
+				if b.isolate != _|_ if list.Contains(b.targets, "docker") if D.code.capabilities.hatches[b.isolate] != _|_ if D.code.capabilities.hatches[b.isolate].kind == "isolate" {
+					let h = D.code.capabilities.hatches[b.isolate]
+					let c = mecha.#IsolateContainer & {name: b.isolate, files: h.files, entrypoint: h.entrypoint, memory: h.memory}
+					let port = _free[[for i, x in _hatches if x == b.isolate {i}][0]]
+					appliance: {
+						srcs:    [for f in c.built {"\(c.workdir)/\(f)"}]
+						command: list.Concat([["airlock-deno"], c.serve, ["\(c.workdir)/\(c.host)", "\(c.workdir)/\(c.entry)", "\(port)", "\(mecha.#IsolateDeadlineMs)", "\(c.memory)"]])
+						"port":  port
+					}
+				}
+			}]
 			if D.code.state.steps != _|_ {
 				let placed = #steps & {code: D.code}
 				steps: {graphile: placed.graphile, airlock: placed.airlock, jobKey: placed.jobKey}
@@ -3194,6 +3215,12 @@ _pgrollDir: "services/database/pgroll"
 			surface: targets: (hn): expose: http: port: *h.door.port | int
 			surface: targets: launch: compose: depends_on: (hn): condition: "service_healthy"
 			surface: targets: caddy: entrypoint: env: ("PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(hn, "-", "_", -1)))"): {peer: hn, port: "http"}
+		}
+
+		// An isolate hatch's container: its module bundled and served by Deno,
+		// which its bridge reaches like any container's.
+		for hn, h in D.code.capabilities.hatches if h.kind == "isolate" {
+			surface: targets: (hn): (mecha.#IsolateContainer & {name: hn, files: h.files, entrypoint: h.entrypoint, memory: h.memory}).target
 		}
 		for hn, h in D.code.capabilities.hatches if h.activepieces != _|_ {
 			surface: targets: (hn): (mecha.#ActivepiecesContainer & {
@@ -4531,6 +4558,12 @@ _pgrollDir: "services/database/pgroll"
 						targets:   b.targets
 						if b.instance_type != _|_ {instance_type: b.instance_type}
 						build: "\(b.container)-appliance"
+						// An isolate ships as a Worker of its own: the bundle the edge
+						// makes from its entrypoint, the WebAssembly beside it.
+						if b.isolate != _|_ if E.code.capabilities.hatches[b.isolate] != _|_ if E.code.capabilities.hatches[b.isolate].kind == "isolate" {
+							let h = E.code.capabilities.hatches[b.isolate]
+							isolate: {entrypoint: h.entrypoint, files: h.files, memory: h.memory, build: mecha.#IsolateBuild}
+						}
 					}]
 				}
 			}
@@ -5655,6 +5688,11 @@ _pgrollDir: "services/database/pgroll"
 			data:   E._shell
 		}
 		".pronto/development/.gitignore": {format: "text", text: "*\n"}
+		// What an isolate hatch's build writes beside the sources on the local
+		// stack, never a source.
+		if len([for _, h in E.code.capabilities.hatches if h.kind == "isolate" {h}]) > 0 {
+			".isolate/.gitignore": {format: "text", text: "*\n"}
+		}
 		".pronto/development/shell.json": {
 			format: "json"
 			data:   E._developmentShell

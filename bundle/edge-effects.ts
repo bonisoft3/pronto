@@ -4,7 +4,7 @@
 // bridge's container) for mecha-edge's airlock.ts.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { bridgeNames, CLOUDFLARE, clusterBridges, onCloudflare } from './edge-bridges.ts'
+import { bridgeBinding, CLOUDFLARE, type ClusterBridge, clusterBridges, onCloudflare } from './edge-bridges.ts'
 
 export type EffectTarget =
   | { kind: 'tsbifrost'; url?: string }
@@ -12,17 +12,21 @@ export type EffectTarget =
   | { kind: 'origin'; secret: string }
   | { kind: 'bridge'; bridge: string }
   | { kind: 'container'; bridge: string; binding: string }
+  | { kind: 'isolate'; bridge: string; binding: string }
 
 // A bridge on cloudflare is the dispatcher's own container, reached by its
-// binding (edge-bridges.ts) on the port its class holds; any other is an
-// internal address the edge never dials, and the object settles its effect
-// failed (mecha-edge's airlock.ts).
-function bridgeTarget(name: string, bridge: { name: string; targets: string[] }, containers: Set<string>): EffectTarget {
-  const container = containers.has(bridge.name)
-  if (bridge.targets.includes(CLOUDFLARE) !== container) {
+// binding (edge-bridges.ts) on the port its class holds, or an isolate's
+// Worker, reached by its service binding; any other is an internal address
+// the edge never dials, and the object settles its effect failed (mecha-edge's
+// airlock.ts).
+function bridgeTarget(name: string, bridge: { name: string; targets: string[] }, onEdge: Map<string, ClusterBridge>): EffectTarget {
+  const deployed = onEdge.get(bridge.name)
+  if (bridge.targets.includes(CLOUDFLARE) !== (deployed !== undefined)) {
     throw new Error(`effect ${name}: effects.json and .pronto/cluster.json disagree on whether the bridge ${bridge.name} is on cloudflare: regenerate the app`)
   }
-  return container ? { kind: 'container', bridge: bridge.name, binding: bridgeNames(bridge.name).binding } : { kind: 'bridge', bridge: bridge.name }
+  if (deployed === undefined) return { kind: 'bridge', bridge: bridge.name }
+  const binding = bridgeBinding(bridge.name)
+  return deployed.isolate ? { kind: 'isolate', bridge: bridge.name, binding } : { kind: 'container', bridge: bridge.name, binding }
 }
 
 /** The release's effects twice over: `effects`, each declaration and target
@@ -55,7 +59,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
   const imports: string[] = []
   const entries: string[] = []
   const declared: string[] = []
-  const containers = new Set(onCloudflare(await clusterBridges(appDir)).map(b => b.name))
+  const onEdge = new Map(onCloudflare(await clusterBridges(appDir)).map(b => [b.name, b]))
   const srcDir = path.join(outDir, 'src')
   const fromSrc = (p: string) => {
     const rel = path.relative(srcDir, p).replaceAll('\\', '/')
@@ -70,7 +74,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     const handlerPath = path.join(appDir, decl.handler)
     await Deno.stat(handlerPath)
     const target: EffectTarget = decl.bridge !== undefined
-      ? bridgeTarget(name, decl.bridge, containers)
+      ? bridgeTarget(name, decl.bridge, onEdge)
       : typeof decl.edgeOrigin === 'string'
       ? { kind: 'origin', url: decl.edgeOrigin }
       : decl.edgeOrigin

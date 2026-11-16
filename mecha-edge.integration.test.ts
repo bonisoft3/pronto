@@ -12,6 +12,7 @@ import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } 
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";
 import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.ts";
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from "./bundle/cloudflare-runtime.ts";
 
 const root = new URL(ROOT).pathname;
 const mecha = `${root}libraries/mecha`;
@@ -101,7 +102,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
   await Deno.writeTextFile(`${tmp}/worker/wrangler.jsonc`, JSON.stringify({
     name: "pronto-mecha-edge-test",
     main: "worker.ts",
-    compatibility_date: "2026-09-01",
+    compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
     durable_objects: { bindings: [{ name: "CLUSTER", class_name: "Cluster" }] },
     migrations: [{ tag: "v1", new_sqlite_classes: ["Cluster"] }],
     version_metadata: { binding: "CF_VERSION_METADATA" },

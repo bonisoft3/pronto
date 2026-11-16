@@ -184,7 +184,7 @@ await refuseMissingHatchSecrets({
 })
 // The airlock's dispatcher (edge-dispatcher.ts): its queue exists before the
 // object's script names it, and the effects' secrets are the dispatcher's alone.
-let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; routes: Record<string, Record<string, string[][]>>; containers: string[] } | undefined
+let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; routes: Record<string, Record<string, string[][]>>; containers: string[]; isolates?: string[] } | undefined
 try { airlock = JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))) }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (airlock) {
@@ -366,6 +366,14 @@ if (airlock) {
     const dispatcherSecrets = path.join(dispatcherDir, 'airlock.json')
     const names = [...airlock.secrets, ...airlock.providers.flat(), ...selectedRouteKeys(airlock.routes, name => Deno.env.get(name)).flat()]
     await Deno.writeTextFile(dispatcherSecrets, JSON.stringify(Object.fromEntries(names.flatMap(name => Deno.env.get(name) ? [[name, Deno.env.get(name)!]] : []))), { mode: 0o600 })
+    // An isolate's Worker exists before the dispatcher whose service binding
+    // names it. Every path is checked before any deploys, so a bad one leaves
+    // no isolate of this release published.
+    const isolates = airlock.isolates ?? []
+    for (const isolate of isolates) {
+      if (!/^airlock\/isolates\/[a-z0-9-]+\/wrangler\.jsonc$/.test(isolate)) throw new Error(`invalid isolate deployment: ${isolate}`)
+    }
+    for (const isolate of isolates) console.log(await deploy(path.join(out, isolate)))
     console.log(await deploy(path.join(out, airlock.deployment), '--secrets-file', dispatcherSecrets))
   } finally {
     await Deno.remove(dispatcherDir, { recursive: true })

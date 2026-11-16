@@ -1,6 +1,7 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { computationDefinitions, computationMachine, type PackagedComputation } from './compute.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 const digest = async (bytes: Uint8Array<ArrayBuffer>) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('')
 const textDigest = (text: string) => digest(new TextEncoder().encode(text))
@@ -159,7 +160,7 @@ export default {fetch(request,env){return env.COMPUTATIONS.get(env.COMPUTATIONS.
     await Deno.remove(path.join(dir, 'entry.ts'))
   }
   const common = {
-    main: 'worker.js', compatibility_date: '2026-09-01', workers_dev: false, preview_urls: false,
+    main: 'worker.js', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, workers_dev: false, preview_urls: false,
     observability: { enabled: true }, limits: { cpu_ms: 300000 },
     rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false }],
   }

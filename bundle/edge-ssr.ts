@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { edgeRoutingRules } from './edge-addresses.ts'
 import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
 import { clusterDrains } from './edge-scripts.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
  * database object calls. */
@@ -338,7 +339,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
   },
 }
 `)
-  const common = { compatibility_date: '2026-09-01', compatibility_flags: ['nodejs_compat'], observability: { enabled: true } }
+  const common = { compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, compatibility_flags: ['nodejs_compat'], observability: { enabled: true } }
   await Deno.writeTextFile(path.join(out, 'renderer.jsonc'), JSON.stringify({
     ...common, name: renderer, main: 'src/render.ts', workers_dev: false,
     durable_objects: { bindings: [{ name: 'RENDERER', class_name: 'DocumentRenderer' }] },
