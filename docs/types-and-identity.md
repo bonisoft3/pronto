@@ -75,8 +75,11 @@ column refuses. Electric hands the terminal the value, so a handler reads
 open records: their shape depends on the event's or the open's kind, a union
 the grammar does not state.
 
-Money is not a type but what an integer counts: `money: {currency,
-minorUnits}` on an integer field. Some fields carry physical labels (`text`,
+Pronto has no money type. An app assembles money from the primitives the
+way it prefers: a `decimal` of the precision and scale its amounts need, or
+an integer of minor units, with a currency column beside it. The rules a
+currency brings, a scale no finer than its minor units and sums only within
+one currency, are the app's to check. Some fields carry physical labels (`text`,
 `int`, `bigint`, `timestamptz`, `tsvector`), which `#typeAlias` maps to their
 types; `tsvector` is an index, not a value anyone states
 ([pending](../PENDING.md#types-and-identity)).
