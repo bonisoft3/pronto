@@ -346,14 +346,12 @@ def test_crud_schemas [] {
 	assert $refused
 }
 
-# A node has no global crane, so the release runs the one it pins through mise (release-cron 2026-11-15 22:41 BRT: "No version is
-# set for shim: crane"). Run with a PATH that holds mise and the system's directories alone, so a crane of this machine's own
-# cannot answer for it.
+# A node has no global crane, so the release runs the one it pins (release-cron 2026-11-15 22:41 BRT: "No version is set for
+# shim: crane"), fetched and checked, never through a locked mise that refuses it (Studio's builder pod, PRONTO-618). Run with
+# the system's directories alone on PATH and mise locked, so neither a crane of this machine's own nor mise can answer for it.
 def test_crane_pinned [] {
-	print "test crane runs pinned through mise, with no crane on PATH..."
-	let mise = (which mise | get -o 0.path)
-	assert ($mise != null) "mise is not on PATH"
-	with-env {PATH: [($mise | path dirname) "/usr/bin" "/bin"]} {
+	print "test crane runs pinned and checked, with no crane or mise on PATH..."
+	with-env {PATH: ["/usr/bin" "/bin"], MISE_LOCKED: "1"} {
 		assert (which crane | is-empty) "a crane is on the test's PATH"
 		let v = (crane-pinned version)
 		assert ($v | str contains "0.20.2") $"the pinned crane answers 0.20.2, not ($v)"

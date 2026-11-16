@@ -761,11 +761,46 @@ export def database-base []: string -> any {
 	{ref: ($ctx | str replace "docker-image://" ""), name: $from}
 }
 
-# crane, at the version the release pins and through mise, as an app's own tools pin it (identity_signin.cue): a node has no global
-# crane, and mise's shim for it fails with "No version is set for shim: crane" (release-cron 2026-11-15 22:41 BRT, the first run on gcp.57).
-const crane_tool = "github:google/go-containerregistry[bin=crane]@v0.20.2"
+# crane, at the version the release pins, fetched and checked as sops is (fetch-verified): a node has no global crane, and
+# mise's shim for it fails with "No version is set for shim: crane" (release-cron 2026-11-15 22:41 BRT, the first run on
+# gcp.57). Not through `mise x` (gcp.58-62): an app's mise runs locked, and its lock names no crane, so a machine that has
+# not installed it already refuses it ("No lockfile URL found ... (--locked mode)": Studio's builder pod, a game's Publish,
+# 2026-11-16 15:11 BRT, PRONTO-618). The checksums are the release's checksums.txt for each archive.
+const crane_version = "v0.20.2"
+const crane_checksums = {
+	"Darwin_x86_64": "ae2677fc68b05ee3a63fe7b1d599aa4a554610b9f9da499a0c39669f446d29ed"
+	"Darwin_arm64": "b47a8291d1069656bcfb8346dc9494f03e734d7a4058961fa53f0dfc9cb41abb"
+	"Linux_x86_64": "c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b"
+	"Linux_arm64": "aff0db48825124c9331ea310057214bd4e92c01aa2e414d539e9659841d9422a"
+}
+
+export def crane-platform []: nothing -> string {
+	let os = match $nu.os-info.name { "macos" => "Darwin", "linux" => "Linux", $o => (error make {msg: $"no pinned crane for ($o)"}) }
+	let arch = match $nu.os-info.arch { "x86_64" => "x86_64", "aarch64" => "arm64", $a => (error make {msg: $"no pinned crane for ($a)"}) }
+	$"($os)_($arch)"
+}
+
+# The pinned crane's binary, extracted once beside its checked archive in the operators' cache.
+export def crane-bin []: nothing -> string {
+	let platform = (crane-platform)
+	let name = $"go-containerregistry-($crane_version).($platform)"
+	let archive = (fetch-verified {
+		name: $name, ext: "tar.gz", checksum: $"sha256:($crane_checksums | get $platform)"
+		url: $"https://github.com/google/go-containerregistry/releases/download/($crane_version)/go-containerregistry_($platform).tar.gz"
+	})
+	# Extracted from this archive, checked just now: a binary left by another archive is replaced.
+	let dir = ((get-operator-cache-dir) | path join $"($name).($crane_checksums | get $platform | str substring 0..11)")
+	let bin = ($dir | path join "crane")
+	if not ($bin | path exists) {
+		mkdir $dir
+		^tar -xzf $archive -C $dir crane
+		^chmod +x $bin
+	}
+	$bin
+}
+
 export def --wrapped crane-pinned [...args: string]: nothing -> string {
-	^mise x $crane_tool -- crane ...$args
+	^(crane-bin) ...$args
 }
 
 # `database-base`'s image put in the node's registry as `<app>-database-base`, tagged with its Postgres major as the
