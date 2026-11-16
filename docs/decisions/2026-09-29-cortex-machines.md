@@ -394,7 +394,7 @@ online game. No hatch remains on the online path; read-only SQL projections and
 relational preconditions remain in Mecha declarations.
 
 The stable contracts live in [[../cortex|Cortex machines]] and
-[Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.23.3/docs/machines.md). The
+[Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/machines.md). The
 execution proof in `apps/truco/docs/mecha-machine-proof.md` also checks
 shared local/PostgreSQL reductions and private projections. The database's
 `plv8` language is QuickJS's pljs, whose interrupt handler honours
