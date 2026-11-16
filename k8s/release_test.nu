@@ -26,6 +26,7 @@ use release.nu [
 	controller-replicas
 	kube-items
 	drop-args
+	set-cpu
 	tunnel-proxy-kubernetes
 	get-operator-cache-dir
 	fetch-verified
@@ -137,6 +138,7 @@ def run-tests [] {
 	test_preview_origin_https
 	test_preview_delete_needs_a_preview
 	test_preview_schema_from
+	test_set_cpu
 
 	print "\nAll release-k8s tests passed!"
 }
@@ -1894,4 +1896,10 @@ def test_preview_schema_from [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --schema-from brawl-chess } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "--schema-from copies a schema into a preview")
+}
+
+def test_set_cpu [] {
+	let manifest = "        resources:\n          limits:\n            cpu: 100m\n            memory: 200Mi\n          requests:\n            cpu: 100m\n            memory: 100Mi\n        securityContext:\n"
+	assert equal ($manifest | set-cpu {request: "150m", limit: "500m"}) "        resources:\n          limits:\n            cpu: 500m\n            memory: 200Mi\n          requests:\n            cpu: 150m\n            memory: 100Mi\n        securityContext:\n"
+	assert equal ($OPERATORS | where name == "cnpg" | first | get cpu) {request: "150m", limit: "500m"}
 }

@@ -42,6 +42,11 @@ export const OPERATORS = [
 		checksum: "sha256:37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb"
 		namespace: "cnpg-system"
 		check_deployments: ["cnpg-controller-manager"]
+		# The manifest gives the controller 100m for both, and it throttled at that: measured on the node
+		# (2026-11-16, 10 clusters), 32-85m a 5 s sample, bursts above 100m, a quarter of its CFS periods
+		# throttled. It renews every primary's lease, so a starved run queue costs a failover; 150m
+		# requested keeps it a share when the node is busy, 500m lets a burst finish.
+		cpu: {request: "150m", limit: "500m"}
 	},
 	# The certificates CloudNativePG's barman-cloud plugin and the operator talk through.
 	{
@@ -197,6 +202,12 @@ export def drop-args [args: list]: string -> string {
 	$args | reduce -f $text {|a, t| $t | str replace --all --regex $"\(?m\)^[ \t]*- ['\"]?($a)['\"]?[ \t]*\r?\n" "" }
 }
 
+# A manifest whose container CPU request and limit are these, as text. The operator manifests that name one set the same
+# value for both (`cpu: 100m` under limits and under requests); a manifest with other values is left as it is.
+export def set-cpu [cpu: record]: string -> string {
+	$in | str replace --regex '(?m)^(\s+limits:\n\s+)cpu: \S+(\n\s+memory: \S+\n\s+requests:\n\s+)cpu: \S+' $"${1}cpu: ($cpu.limit)${2}cpu: ($cpu.request)"
+}
+
 # The StatefulSets an apply's stderr says it refused for an immutable field.
 export def immutable-statefulsets [stderr: string]: nothing -> list<string> {
 	$stderr | lines
@@ -213,9 +224,10 @@ def install-operator [entry: record, timeout: string] {
 	}
 
 	let fetched = (fetch-verified $entry)
-	let file = if ($entry.drop_args? | default [] | is-empty) { $fetched } else {
+	let file = if ($entry.drop_args? | default [] | is-empty) and ($entry.cpu? | is-empty) { $fetched } else {
 		let out = $"($fetched).hot.yaml"
-		open --raw $fetched | drop-args ($entry.drop_args) | save --force --raw $out
+		let text = (open --raw $fetched | drop-args ($entry.drop_args? | default []))
+		(if ($entry.cpu? | is-empty) { $text } else { $text | set-cpu $entry.cpu }) | save --force --raw $out
 		$out
 	}
 	if ($entry.kind? | default "") == "helm" {
