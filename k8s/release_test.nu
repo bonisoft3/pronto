@@ -362,10 +362,18 @@ def test_crane_pinned [] {
 		let bin = (crane-bin)
 		let dir = ($bin | path dirname)
 		assert ((ls $dir | where name =~ 'partial' | length) == 0) "an extract leaves no part behind"
+		assert ((ls ($dir | path dirname) | where name =~ '\.partial$' | length) == 0) "a fetch leaves no part behind"
+		# A release killed mid-extract: a tar that writes a part of crane where it is told to, then fails.
 		rm $bin
-		mkdir ($dir | path join "partial.1")
-		"half" | save -f ($dir | path join "partial.1" "crane")
-		assert ((crane-pinned version) | str contains "0.20.2") "a part left by a killed extract is never run"
+		let stub = (mktemp -d)
+		"#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -C ] && d=\"$2\"; shift; done\nprintf half > \"$d/crane\"; exit 1\n" | save -f ($stub | path join "tar")
+		^chmod +x ($stub | path join "tar")
+		with-env {PATH: [$stub "/usr/bin" "/bin"]} {
+			assert ((try { crane-bin; false } catch { true })) "a failed extract fails the release"
+		}
+		rm -rf $stub
+		assert (not ($bin | path exists)) "a failed extract leaves no crane in place to be trusted"
+		assert ((crane-pinned version) | str contains "0.20.2") "the next release unpacks crane whole"
 	}
 	rm -rf $cache
 }
