@@ -1758,7 +1758,7 @@ def test_electric_sticky [] {
 	let strips = "(app) {\n  # The forwarded chain the door read its client from is not passed on"
 	for f in [($pronto_dir | path join assets Caddyfile) ($pronto_dir | path join idioms docker Caddyfile)] {
 		let text = (open --raw $f)
-		assert (($text | str contains $strips) and ($text | str contains "  request_header -X-Forwarded-For\n  request_header -X-Forwarded-Host\n")) $"($f) strips the forwarded chain before its upstreams"
+		assert (($text | str contains $strips) and ($text | str contains "  request_header -X-Forwarded-For\n  request_header -X-Forwarded-Host\n  request_header -X-Forwarded-Proto\n")) $"($f) strips the forwarded chain before its upstreams"
 	}
 }
 

@@ -161,10 +161,12 @@
 # this file from plugins/pronto/resilience.
 (app) {
   # The forwarded chain the door read its client from is not passed on: each upstream is sent the
-  # door's peer and Host, as before the door trusted the cluster's proxies, so a player's address
-  # never leaves in it and no client-written X-Forwarded-Host reaches one (PRONTO-628).
+  # door's peer, Host and scheme, as before the door trusted the cluster's proxies, so a player's
+  # address never leaves in it and no client-written X-Forwarded-Host or -Proto reaches one, nor
+  # changes the Electric cookie's attributes (PRONTO-628).
   request_header -X-Forwarded-For
   request_header -X-Forwarded-Host
+  request_header -X-Forwarded-Proto
   @terminal not path /docs/*
   header @terminal Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' {$PRONTO_RELEASE_SCRIPTS} 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default"
   @ladder path /docs/*

@@ -101,10 +101,12 @@
 # this file from plugins/pronto/resilience.
 (app) {
   # The forwarded chain the door read its client from is not passed on: each upstream is sent the
-  # door's peer and Host, as before the door trusted the cluster's proxies, so a player's address
-  # never leaves in it and no client-written X-Forwarded-Host reaches one (PRONTO-628).
+  # door's peer, Host and scheme, as before the door trusted the cluster's proxies, so a player's
+  # address never leaves in it and no client-written X-Forwarded-Host or -Proto reaches one, nor
+  # changes the Electric cookie's attributes (PRONTO-628).
   request_header -X-Forwarded-For
   request_header -X-Forwarded-Host
+  request_header -X-Forwarded-Proto
   # Every request is a span, the child of the traceparent it arrived with (the
   # gateway's), and every upstream is sent the span's own; the access log names
   # its traceID. The exporter reads the standard OTEL_* environment.
