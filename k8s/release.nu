@@ -164,7 +164,10 @@ export def fetch-verified [entry: record]: nothing -> string {
 		}
 	}
 
-	$data | save -f -r $cache_file
+	# Saved beside it under this process's name, then renamed: another release reading the cache sees the whole file or none.
+	let partial = $"($cache_file).($nu.pid).partial"
+	$data | save -f -r $partial
+	^mv -f $partial $cache_file
 	print $"  Verified sha256:($actual_hash)"
 	$cache_file
 }
@@ -788,13 +791,19 @@ export def crane-bin []: nothing -> string {
 		name: $name, ext: "tar.gz", checksum: $"sha256:($crane_checksums | get $platform)"
 		url: $"https://github.com/google/go-containerregistry/releases/download/($crane_version)/go-containerregistry_($platform).tar.gz"
 	})
-	# Extracted from this archive, checked just now: a binary left by another archive is replaced.
+	# Extracted from this archive, checked just now, into a folder named by its checksum. Unpacked into a folder of this
+	# process's own and renamed into place, so a release killed mid-extract, or one beside it, never leaves or runs a part of it;
+	# owned by whoever runs the release, not by the archive's uid.
 	let dir = ((get-operator-cache-dir) | path join $"($name).($crane_checksums | get $platform | str substring 0..11)")
 	let bin = ($dir | path join "crane")
 	if not ($bin | path exists) {
 		mkdir $dir
-		^tar -xzf $archive -C $dir crane
-		^chmod +x $bin
+		let tmp = ($dir | path join $"partial.($nu.pid)")
+		mkdir $tmp
+		^tar --no-same-owner -xzf $archive -C $tmp crane
+		^chmod +x ($tmp | path join "crane")
+		^mv -f ($tmp | path join "crane") $bin
+		rm -rf $tmp
 	}
 	$bin
 }

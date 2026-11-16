@@ -38,6 +38,7 @@ use release.nu [
 	crud-schemas
 	database-base
 	crane-pinned
+	crane-bin
 	auth-provider-secret
 	runtime-services
 	schema-copy-steps
@@ -351,11 +352,22 @@ def test_crud_schemas [] {
 # the system's directories alone on PATH and mise locked, so neither a crane of this machine's own nor mise can answer for it.
 def test_crane_pinned [] {
 	print "test crane runs pinned and checked, with no crane or mise on PATH..."
-	with-env {PATH: ["/usr/bin" "/bin"], MISE_LOCKED: "1"} {
+	# A cache of its own. Then what a release killed mid-extract leaves, a part of crane in its own folder, with no crane
+	# in place: the next release unpacks it whole and never takes the part.
+	let cache = (mktemp -d)
+	with-env {PATH: ["/usr/bin" "/bin"], MISE_LOCKED: "1", XDG_CACHE_HOME: $cache} {
 		assert (which crane | is-empty) "a crane is on the test's PATH"
 		let v = (crane-pinned version)
 		assert ($v | str contains "0.20.2") $"the pinned crane answers 0.20.2, not ($v)"
+		let bin = (crane-bin)
+		let dir = ($bin | path dirname)
+		assert ((ls $dir | where name =~ 'partial' | length) == 0) "an extract leaves no part behind"
+		rm $bin
+		mkdir ($dir | path join "partial.1")
+		"half" | save -f ($dir | path join "partial.1" "crane")
+		assert ((crane-pinned version) | str contains "0.20.2") "a part left by a killed extract is never run"
 	}
+	rm -rf $cache
 }
 
 def test_database_base [] {
