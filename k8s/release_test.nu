@@ -1745,9 +1745,11 @@ def test_electric_sticky [] {
 	let door = (open --raw ($pronto_dir | path join assets Caddyfile))
 	assert ($door | str contains "import electric-upstream-{$PRONTO_ELECTRIC_UPSTREAM:one}")
 	assert ($door | str contains "(electric-upstream-pods) {\n  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {")
-	assert ($door | str contains "lb_policy cookie pronto_electric {$ELECTRIC_SECRET}")
-	# A browser's first requests, cookieless and sent together, all go to one Electric (PRONTO-624).
-	assert ($door | str contains "fallback header Cf-Connecting-Ip {\n      fallback client_ip_hash")
+	# A browser's first requests, cookieless and sent together, all go to one Electric, chosen by who the client is (PRONTO-624),
+	# in the door every app is written from and in the idiom's alike.
+	let policy = "lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {\n    fallback header Cf-Connecting-Ip {\n      fallback client_ip_hash\n    }\n  }"
+	assert ($door | str contains $policy) "the door places a cookieless browser by its address"
+	assert ((open --raw ($pronto_dir | path join idioms docker Caddyfile)) | str contains $policy) "the idiom's door places it the same way"
 }
 
 def test_electric_slots [] {

@@ -38,10 +38,12 @@
     refresh 5s
   }
   # A browser with no cookie yet (its page's first requests, sent together) is placed by who it is,
-  # not at random: by Cloudflare's client address, else by its own address (a port-forward, a host
-  # stack). Placed at random, each shape of one page could start on another Electric, every long-poll
-  # after it answered 409 until the cookie caught up: over HTTP/1.1's six connections that outlasted
-  # a sign-up (the rc's kill rehearsal, PRONTO-624).
+  # not at random: by Cloudflare's client address, else by its own (a port-forward, a host stack).
+  # Placed at random, each shape of one page could start on another Electric, every long-poll after
+  # it answered 409 until the cookie caught up: over HTTP/1.1's six connections that outlasted a
+  # sign-up (the rc's kill rehearsal, PRONTO-624). Behind a hostPort ingress, with no Cloudflare, the
+  # peer is the gateway for everyone, so such browsers share one Electric until the door trusts the
+  # gateway's X-Forwarded-For (Caddy replaces it from an untrusted peer before it picks).
   lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {
     fallback header Cf-Connecting-Ip {
       fallback client_ip_hash
