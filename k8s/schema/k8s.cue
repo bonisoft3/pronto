@@ -234,6 +234,12 @@ import (
 				if release.database.haSlots {
 					replicationSlots: highAvailability: enabled: true
 				}
+				// The postgres container's own requests and limits, where the release names them
+				// (containerResources.postgres): a namespace's LimitRange default (a Studio game's 250m)
+				// throttled it. Left out where none is named, so a database already running is not restarted.
+				if release.containerResources["postgres"] != _|_ {
+					resources: release.containerResources["postgres"]
+				}
 				if release.database.instances > 1 || !release.database.enablePDB {
 					enablePDB: release.database.enablePDB
 				}

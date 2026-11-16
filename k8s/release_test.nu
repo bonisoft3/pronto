@@ -1680,6 +1680,9 @@ def test_database_ha [] {
 	assert equal $three.enablePDB true
 	assert equal [$three.primaryUpdateMethod $three.primaryUpdateStrategy] ["switchover" "unsupervised"] "a primary change promotes a standby first"
 	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
+	assert ("resources" not-in ($one | columns)) "no postgres resources unless the release names them"
+	let sized = (do $cluster {containerResources: {postgres: {requests: {cpu: "100m"}, limits: {cpu: "1"}}}})
+	assert equal $sized.resources {requests: {cpu: "100m"}, limits: {cpu: "1"}} "the postgres container's own, from containerResources.postgres"
 	let strict = (do $cluster {database: {instances: 3, synchronous: {dataDurability: "required"}, haSlots: false, enablePDB: false}})
 	assert equal $strict.postgresql.synchronous.dataDurability "required"
 	assert ("replicationSlots" not-in ($strict | columns))
