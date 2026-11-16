@@ -58,6 +58,11 @@ Deno.test("a database process of neither form is refused", () => {
 });
 
 Deno.test("the migrate step's baseline and its migrations, decoded", () => {
+  const p = { ...script(`${mecha}/migrate/host.sh 00_initdb 16_x 17_y`), environment: ["DATABASE_URL=x", `MECHA_MIGRATION_0=${btoa('{"a":1}')}`, `MECHA_MIGRATION_1=${btoa('{"b":2}')}`] };
+  assertEquals(migrations(p), { baseline: "00_initdb", files: { "16_x": '{"a":1}', "17_y": '{"b":2}' } });
+});
+
+Deno.test("a released commit's migrate step, its migrations in the command, is still read", () => {
   const p = script(`${mecha}/migrate/host.sh 00_initdb 16_x ${btoa('{"a":1}')}`);
   assertEquals(migrations(p), { baseline: "00_initdb", files: { "16_x": '{"a":1}' } });
 });

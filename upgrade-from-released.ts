@@ -123,13 +123,30 @@ export function databaseSteps(proc: Proc, srcs: string[] = []): Record<string, s
   return databaseProcess(proc, srcs).steps
 }
 
-/** `migrate/host.sh <baseline> [<name> <base64 JSON>]...`: the baseline and the pgroll migrations by name. */
+/**
+ * `migrate/host.sh <baseline> [<name>]...` with the i-th migration in base64 in its environment's
+ * MECHA_MIGRATION_<i> (a mecha that keeps them out of the command), or, as a commit released before wrote it,
+ * `migrate/host.sh <baseline> [<name> <base64 JSON>]...`: the baseline and the pgroll migrations by name.
+ */
 export function migrations(proc: Proc): { baseline: string; files: Record<string, string> } {
   const w = shellWords(scriptOf(proc))
   const at = w.findIndex((x) => x.endsWith("/migrate/host.sh"))
   if (at < 0) throw new Error("the migrate process does not run mecha's migrate/host.sh")
+  const env: Record<string, string> = {}
+  for (const e of (proc?.environment ?? []) as string[]) {
+    const eq = e.indexOf("=")
+    if (eq > 0) env[e.slice(0, eq)] = e.slice(eq + 1)
+  }
   const files: Record<string, string> = {}
-  for (let i = at + 2; i + 1 < w.length; i += 2) files[w[i]] = atob(w[i + 1])
+  if ("MECHA_MIGRATION_0" in env) {
+    w.slice(at + 2).forEach((name, i) => {
+      const b64 = env[`MECHA_MIGRATION_${i}`]
+      if (b64 === undefined) throw new Error(`the migrate process names ${name} but has no MECHA_MIGRATION_${i}`)
+      files[name] = atob(b64)
+    })
+  } else {
+    for (let i = at + 2; i + 1 < w.length; i += 2) files[w[i]] = atob(w[i + 1])
+  }
   return { baseline: w[at + 1], files }
 }
 

@@ -75,8 +75,16 @@ column refuses. Electric hands the terminal the value, so a handler reads
 open records: their shape depends on the event's or the open's kind, a union
 the grammar does not state.
 
-Money is not a type but what an integer counts: `money: {currency,
-minorUnits}` on an integer field. Some fields carry physical labels (`text`,
+Money is not a type but what an integer counts, in minor units of its currency
+(`#Field.money`). The currency is the column's, `money: {currency: "BRL",
+minorUnits: 2}`, or each row's, `money: {currencyField: "rent_currency"}`: a
+sibling string field holding `{code}_{decimals}`, a currency code and the minor
+units the amount counts, 0 to 18 (`BRL_2`, `USD_2`, `BHD_3`, `JPY_0`), so one
+table holds amounts in several currencies and scales. The code is an ISO 4217
+currency's, or a longer alpha code for what ISO does not list (a stablecoin's
+`USDC_6`). The amount is never a decimal or a float; the terminal formats it
+with `data-text-format="money"` in the reader's locale, so no row stores a
+formatted amount ([localization](localization.md)). Some fields carry physical labels (`text`,
 `int`, `bigint`, `timestamptz`, `tsvector`), which `#typeAlias` maps to their
 types; `tsvector` is an index, not a value anyone states
 ([pending](../PENDING.md#types-and-identity)).
