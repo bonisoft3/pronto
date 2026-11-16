@@ -35,6 +35,7 @@ use release.nu [
 	auth-provider-environment
 	crud-schemas
 	database-base
+	crane-pinned
 	auth-provider-secret
 	runtime-services
 	schema-copy-steps
@@ -75,6 +76,7 @@ def run-tests [] {
 	test_schema_jobs
 	test_crud_schemas
 	test_database_base
+	test_crane_pinned
 	test_auth_providers
 	test_auth_provider_secrets
 	test_release_tree
@@ -338,6 +340,20 @@ def test_crud_schemas [] {
 	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch { true })
 	rm $data
 	assert $refused
+}
+
+# A node has no global crane, so the release runs the one it pins through mise (release-cron 2026-11-15 22:41 BRT: "No version is
+# set for shim: crane"). Run with a PATH that holds mise and the system's directories alone, so a crane of this machine's own
+# cannot answer for it.
+def test_crane_pinned [] {
+	print "test crane runs pinned through mise, with no crane on PATH..."
+	let mise = (which mise | get -o 0.path)
+	assert ($mise != null) "mise is not on PATH"
+	with-env {PATH: [($mise | path dirname) "/usr/bin" "/bin"]} {
+		assert (which crane | is-empty) "a crane is on the test's PATH"
+		let v = (crane-pinned version)
+		assert ($v | str contains "0.20.2") $"the pinned crane answers 0.20.2, not ($v)"
+	}
 }
 
 def test_database_base [] {

@@ -749,19 +749,26 @@ export def database-base []: string -> any {
 	{ref: ($ctx | str replace "docker-image://" ""), name: $from}
 }
 
+# crane, at the version the release pins and through mise, as an app's own tools pin it (identity_signin.cue): a node has no global
+# crane, and mise's shim for it fails with "No version is set for shim: crane" (release-cron 2026-11-15 22:41 BRT, the first run on gcp.57).
+const crane_tool = "github:google/go-containerregistry[bin=crane]@v0.20.2"
+export def --wrapped crane-pinned [...args: string]: nothing -> string {
+	^mise x $crane_tool -- crane ...$args
+}
+
 # `database-base`'s image put in the node's registry as `<app>-database-base`, tagged with its Postgres major as the
 # database's is (CloudNativePG reads it), the digest the one it has everywhere: crane copies it as it is, so the image
 # the primary runs is the same on every release until the base itself is moved. The node's registry is reached through a
 # port-forward, as buildkit-images does. Answers the image's `{tag, digest}`.
 export def database-base-copy [base: record, app: string, --registry: string = ""]: nothing -> record {
 	let digest = ($base.ref | split row "@" | last)
-	let major = (^crane config $base.ref | from json | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last)
+	let major = (crane-pinned config $base.ref | from json | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last)
 	# `registry`: where the release already reaches the node's registry (build.by "node": its SSH tunnel's local port);
 	# else a port-forward through the cluster's API, as buildkit-images reaches it.
 	let reg = if ($registry | is-empty) { port-forward pronto-registry registry $node_registry_port } else { null }
 	let host = if ($registry | is-empty) { $"127.0.0.1:($reg.port)" } else { $registry }
 	try {
-		^crane copy --insecure $base.ref $"($host)/($app)-database-base:($major)" | ignore
+		crane-pinned copy --insecure $base.ref $"($host)/($app)-database-base:($major)" | ignore
 		if ($reg | is-not-empty) { stop-port-forward $reg }
 	} catch {|e|
 		if ($reg | is-not-empty) { stop-port-forward $reg }
@@ -1481,7 +1488,7 @@ export def tenant-images [app_dir: string, compose: string, services: list<strin
 			^tar -xf ($out | path join $"($svc).tar") -C $layout
 			let repo = (tenant-repo $tenant $app $svc)
 			let first = if $svc == "database" { $"build-($builder)" } else { $tag }
-			let ref = (^crane push --insecure $layout $"($registry)/($repo):($first)" | str trim)
+			let ref = (crane-pinned push --insecure $layout $"($registry)/($repo):($first)" | str trim)
 			let digest = ($ref | split row "@" | last)
 			let final = if $svc == "database" {
 				let major = (node-registry-pg-major $registry $repo $digest)
