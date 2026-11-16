@@ -1753,6 +1753,13 @@ def test_electric_sticky [] {
 	# The client address it hashes is read through the cluster's own proxies, strictly, so a hostPort ingress spreads its browsers too (PRONTO-628).
 	let servers = "servers {\n\t    trusted_proxies static private_ranges\n\t    trusted_proxies_strict\n\t    client_ip_headers Cf-Connecting-Ip X-Forwarded-For\n\t  }"
 	assert ((open --raw ($pronto_dir | path join resilience resilience.cue)) | str contains $servers) "the door reads the client address through the cluster's proxies"
+	assert ((open --raw ($pronto_dir | path join idioms docker Caddyfile)) | str contains ($servers | str replace --all "\t" "")) "the idiom's door reads it the same way"
+	# The chain it read is not passed on: every upstream is sent the door's peer, as before (PRONTO-628).
+	let strips = "(app) {\n  # The forwarded chain the door read its client from is not passed on"
+	for f in [($pronto_dir | path join assets Caddyfile) ($pronto_dir | path join idioms docker Caddyfile)] {
+		let text = (open --raw $f)
+		assert (($text | str contains $strips) and ($text | str contains "  request_header -X-Forwarded-For\n  request_header -X-Forwarded-Host\n")) $"($f) strips the forwarded chain before its upstreams"
+	}
 }
 
 def test_electric_slots [] {

@@ -5,7 +5,10 @@
   # The client's address, where the door is reached through a proxy of the cluster's own (a private
   # address: the gateway, cloudflared, a port-forward): Cloudflare's Cf-Connecting-Ip, else the
   # forwarded chain's nearest address no such proxy wrote (strict). Electric's placement hashes it
-  # (PRONTO-624, PRONTO-628).
+  # (PRONTO-624, PRONTO-628). Strictness guards the chain only: Cf-Connecting-Ip is as true as the
+  # ingress makes it (behind the tunnel Cloudflare writes it; on a hostPort ingress a client can),
+  # and a pod on a private address counts as a proxy, so the address places a browser and names it
+  # in the log, and decides nothing else. (app) strips the chain before any upstream.
   servers {
     trusted_proxies static private_ranges
     trusted_proxies_strict
@@ -157,6 +160,11 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
+  # The forwarded chain the door read its client from is not passed on: each upstream is sent the
+  # door's peer and Host, as before the door trusted the cluster's proxies, so a player's address
+  # never leaves in it and no client-written X-Forwarded-Host reaches one (PRONTO-628).
+  request_header -X-Forwarded-For
+  request_header -X-Forwarded-Host
   @terminal not path /docs/*
   header @terminal Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' {$PRONTO_RELEASE_SCRIPTS} 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default"
   @ladder path /docs/*

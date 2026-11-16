@@ -123,7 +123,10 @@ caddySnippets: """
 	  # The client's address, where the door is reached through a proxy of the cluster's own (a private
 	  # address: the gateway, cloudflared, a port-forward): Cloudflare's Cf-Connecting-Ip, else the
 	  # forwarded chain's nearest address no such proxy wrote (strict). Electric's placement hashes it
-	  # (PRONTO-624, PRONTO-628).
+	  # (PRONTO-624, PRONTO-628). Strictness guards the chain only: Cf-Connecting-Ip is as true as the
+	  # ingress makes it (behind the tunnel Cloudflare writes it; on a hostPort ingress a client can),
+	  # and a pod on a private address counts as a proxy, so the address places a browser and names it
+	  # in the log, and decides nothing else. (app) strips the chain before any upstream.
 	  servers {
 	    trusted_proxies static private_ranges
 	    trusted_proxies_strict
