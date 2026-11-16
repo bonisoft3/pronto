@@ -42,7 +42,16 @@
   dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {
     refresh 5s
   }
-  lb_policy cookie pronto_electric {$ELECTRIC_SECRET}
+  # A browser with no cookie yet (its page's first requests, sent together) is placed by who it is,
+  # not at random: by Cloudflare's client address, else by its own address (a port-forward, a host
+  # stack). Placed at random, each shape of one page could start on another Electric, every long-poll
+  # after it answered 409 until the cookie caught up: over HTTP/1.1's six connections that outlasted
+  # a sign-up (the rc's kill rehearsal, PRONTO-624).
+  lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {
+    fallback header Cf-Connecting-Ip {
+      fallback client_ip_hash
+    }
+  }
   lb_try_duration 5s
   fail_duration 30s
 }

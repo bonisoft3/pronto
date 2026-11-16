@@ -1746,6 +1746,8 @@ def test_electric_sticky [] {
 	assert ($door | str contains "import electric-upstream-{$PRONTO_ELECTRIC_UPSTREAM:one}")
 	assert ($door | str contains "(electric-upstream-pods) {\n  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {")
 	assert ($door | str contains "lb_policy cookie pronto_electric {$ELECTRIC_SECRET}")
+	# A browser's first requests, cookieless and sent together, all go to one Electric (PRONTO-624).
+	assert ($door | str contains "fallback header Cf-Connecting-Ip {\n      fallback client_ip_hash")
 }
 
 def test_electric_slots [] {
