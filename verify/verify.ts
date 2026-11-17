@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { verifyHttp, type EdgeHints, type EdgeRoute } from "./http-sweep.ts";
 import { verifyBrowser } from "./browser-sweep.ts";
-import { declaredSecrets, requireSecrets, wranglerSecretNames } from "./secrets.ts";
+import { dispatcherSecrets, requireSecrets, wranglerSecretNames } from "./secrets.ts";
 
 function parseArgs(args: string[]) {
   const flags: Record<string, string> = {};
@@ -100,6 +100,10 @@ async function resolveTargetUrl(
   platform: string,
   flags: Record<string, string>
 ): Promise<string> {
+  // A domain named empty or malformed is refused even where it is not read.
+  if ("default-domain" in flags && !/^(https?:\/\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d+)?$/.test(flags["default-domain"])) {
+    throw new Error(`--default-domain ${JSON.stringify(flags["default-domain"])} is no host name`);
+  }
   // 1. Explicit --target flag
   if (flags.target) {
     return flags.target;
@@ -117,8 +121,9 @@ async function resolveTargetUrl(
     return envUrl;
   }
 
-  // 4. --default-domain flag passed from emit.cue / program.cue
-  if (flags["default-domain"]) {
+  // 4. --default-domain: the verb's `--domain`, else the app's meta.domain
+  // (distribution/config.cue's #DeploymentFlag)
+  if ("default-domain" in flags) {
     const domain = flags["default-domain"];
     return domain.startsWith("http://") || domain.startsWith("https://")
       ? domain
@@ -158,19 +163,36 @@ async function resolveTargetUrl(
   );
 }
 
-/** The dispatcher Worker's secret names against those its effects declare; compose refuses
- * to start without them and the GCP release checks Secret Manager. */
 function mechaRoot(flags: Record<string, string>): string {
   if (!flags.mecha) throw new Error("--mecha names the mecha root the release published with");
   return path.resolve(flags.mecha);
 }
 
-async function verifyEdgeSecrets(appDir: string, mecha: string) {
-  const declared = await Deno.readTextFile(path.join(appDir, "services/airlock/effects.json")).then(declaredSecrets, (e) => {
-    if (e instanceof Deno.errors.NotFound) return [];
+const WORKER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** The airlock whose secrets are asked for: the one dist/cloudflare was built
+ * with when that build is this deployment's (it alone knows a separate
+ * database's `<name>-database-airlock`), else the generated release's
+ * `<name>-airlock`. A build of another deployment never names this one's. */
+export function airlockTarget(name: string, configPath: string, built: string | undefined): string[] {
+  return built === `${name}-airlock` || built === `${name}-database-airlock`
+    ? ["--config", configPath]
+    : ["--name", `${name}-airlock`];
+}
+
+/** The dispatcher Worker's secret names against those its effects declare; compose refuses
+ * to start without them and the GCP release checks Secret Manager. */
+async function verifyEdgeSecrets(appDir: string, mecha: string, name: string | undefined) {
+  const manifest = await Deno.readTextFile(path.join(appDir, "services/airlock/effects.json")).catch((e) => {
+    if (e instanceof Deno.errors.NotFound) return undefined;
     throw e;
   });
+  if (manifest === undefined) return;
+  const { routedSettings } = await import(pathToFileURL(path.join(mecha, "services/airlock/ai-models.ts")).href);
+  const { ai } = JSON.parse(await Deno.readTextFile(path.join(appDir, "shell/shell.json")));
+  const declared = dispatcherSecrets(manifest, routedSettings(ai, "cloudflare"));
   if (declared.length === 0) return;
+  if (name === undefined) throw new Error("--name names the deployment's Worker, whose airlock holds the effects' secrets");
   const workerd = path.join(mecha, "packages/pglite-workerd");
   const mise = Deno.env.get("SAYT_MISE_BIN") ?? "mise";
   await new Deno.Command(mise, { args: ["trust", "--yes", "--all"], cwd: workerd, stdin: "null" }).output();
@@ -179,13 +201,11 @@ async function verifyEdgeSecrets(appDir: string, mecha: string) {
   const { wranglerTools } = await import(pathToFileURL(path.join(workerd, "wrangler-tools.ts")).href);
   const { wrangler, env } = await wranglerTools();
   const configPath = path.join(appDir, "dist/cloudflare/airlock/wrangler.jsonc");
-  const hasConfig = await Deno.stat(configPath).then(() => true, (e) => {
-    if (e instanceof Deno.errors.NotFound) return false;
+  const built = await Deno.readTextFile(configPath).then((text) => JSON.parse(text).name as string, (e) => {
+    if (e instanceof Deno.errors.NotFound) return undefined;
     throw e;
   });
-  const targetArgs = hasConfig
-    ? ["--config", configPath]
-    : ["--name", `${JSON.parse(await Deno.readTextFile(path.join(appDir, "shell/shell.json"))).app}-airlock`];
+  const targetArgs = airlockTarget(name, configPath, built);
   const listed = await new Deno.Command(wrangler, {
     args: ["secret", "list", ...targetArgs, "--format", "json"],
     env,
@@ -195,7 +215,7 @@ async function verifyEdgeSecrets(appDir: string, mecha: string) {
   }).output();
   if (!listed.success) throw new Error(`wrangler secret list exited ${listed.code}`);
   requireSecrets(declared, wranglerSecretNames(new TextDecoder().decode(listed.stdout)));
-  console.log(`  - ${declared.length} declared effect secrets are held`);
+  console.log(`  - ${declared.length} declared dispatcher secrets are held`);
 }
 
 export async function main(argv = Deno.args) {
@@ -206,13 +226,15 @@ export async function main(argv = Deno.args) {
   if (tier !== "all" && tier !== "1" && tier !== "2") {
     throw new Error(`Invalid verification tier '${tier}'. Valid options are 'all', '1', or '2'.`);
   }
+  // A name given empty or malformed is refused before anything is asked.
+  if ("name" in flags && !WORKER_NAME.test(flags.name)) throw new Error(`--name ${JSON.stringify(flags.name)} is no Worker name`);
   const targetUrl = await resolveTargetUrl(appDir, platform, flags);
 
   console.log(`Verifying deployment at ${targetUrl} (platform: ${platform})`);
   const startTime = Date.now();
 
   if (platform === "cloudflare") {
-    await verifyEdgeSecrets(appDir, mechaRoot(flags));
+    await verifyEdgeSecrets(appDir, mechaRoot(flags), flags.name);
   }
 
   const hints = await loadHints(appDir, platform);
@@ -337,7 +359,6 @@ export async function main(argv = Deno.args) {
 
     console.log(`  - ${browserResult.journeysRun} user journeys executed`);
     console.log(`  - ${browserResult.screensChecked} unique screens verified`);
-    console.log("  - Zero-tolerance network trap: zero 4xx/5xx or request aborts");
 
     if (!browserResult.passed) {
       console.error("\nTier 2 Verification Failed:");
@@ -346,6 +367,7 @@ export async function main(argv = Deno.args) {
       }
       Deno.exit(1);
     }
+    console.log("  - Network trap: no HTTP failures, failed Electric recoveries, or transport errors");
     console.log("  ✔ Tier 2 passed cleanly.");
   }
 

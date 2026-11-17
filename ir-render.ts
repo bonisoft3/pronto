@@ -60,7 +60,8 @@ export type MechaMachine = {
   on?: Partial<Record<"insert" | "update" | "delete", Record<string, unknown> | Record<string, unknown>[]>>;
 };
 // `reentry` is declared exactly when the sink is not idempotent (#ExternalEffect).
-export type Effect = { ir: string; sink: { origin?: string; bridge?: string; ai?: string; tier?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
+// A read (`request`, a GET) states neither: a GET is safe, and its answer is its outcome.
+export type Effect = { ir: string; sink: { origin?: string | { secret: string }; bridge?: string; ai?: string; tier?: string; idempotent?: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note?: string; request?: { method: string; path: string } };
 /** A vendored unit: its boundary, its ports and, for an agent, its memo. */
 export type Unit = { isolation: string; ports: { reads: string[]; raises: Record<string, unknown> }; memo?: { entity: string; key: string[] } };
 export type Screen = { ir: string; title: string; hatches?: string[]; reads: { table: string; embeds?: string[] }[] };
@@ -81,7 +82,7 @@ const TIP: Record<string, string> = {
   id: "the entity's type id, which a schema diff keys on across renames; each field keeps a gap-free ordinal, and a retired field stays as a tombstone",
   retired: "retired: the ordinal is kept so no later field takes it; nothing writes the column",
   level: "",
-  delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once; a hatch is unspecified",
+  delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once; a read is safe; a hatch is unspecified",
   writers: "who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines, a unit's memo",
   "read by": "the vendored units handed this entity's row through their mount, read-only, with the boundary each runs behind",
   "memo of": "this entity is a question's memo: the unit's answer lands here, addressed by the key fields taken from the question, and the same question asked again is answered from the row",
@@ -405,6 +406,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context, notes: Rea
     if (level === "compensable") return "at-most-once";
     if (level !== "external") return "exactly-once";
     if (effect === null) throw new Error(`${name}: an external machine invokes no effect`);
+    if (effect.request !== undefined) return "safe";
     if (effect.sink.idempotent) return "exactly-once";
     return { reconcile: "exactly-once", unknown: "at-most-once", repeat: "at-least-once" }[reentryOf(effect)];
   };
@@ -442,7 +444,8 @@ export async function cardHtml(name: string, e: Entity, ctx: Context, notes: Rea
     items.slice(0, keep).map(one).join("") +
     (items.length > keep ? `<details class="more inline"><summary>+${items.length - keep}</summary><span class="rels">${items.slice(keep).map(one).join("")}</span></details>` : "");
   const validations = Object.entries(e.validations ?? {});
-  const peer = (x: Effect) => x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(reentryOf(x))}`;
+  const peer = (x: Effect) =>
+    x.request !== undefined ? `${esc(x.request.method)} ${esc(x.request.path)} · safe` : x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(reentryOf(x))}`;
   const machinePanels = await Promise.all(panels.map(async (m) => {
     const diagram = m.chart === null ? "" : `<div class="canvas">${await ctx.d2(chartD2(m.chart))}</div>`;
     const lifecycle = Object.entries(m.lifecycle ?? {}).map(([event, transition]) => {
@@ -462,7 +465,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context, notes: Rea
 <span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.deliveries.join(" · "), true)}</span>
 ${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>guards</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
       m.effects.map(({ src, effect, delivery }) => `
-<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? (effect.sink.ai ? `ai ${effect.sink.ai} (${effect.sink.tier ?? "cheap"})` : `bridge ${effect.sink.bridge}`))} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
+<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, effect.request !== undefined ? "a read outside the cluster, asked by the airlock; its answer is the outcome" : "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc((typeof effect.sink.origin === "object" ? `the origin in ${effect.sink.origin.secret}` : effect.sink.origin) ?? (effect.sink.ai ? `ai ${effect.sink.ai} (${effect.sink.tier ?? "cheap"})` : `bridge ${effect.sink.bridge}`))} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""}${effect.note === undefined ? "" : ` · <span class="note">${esc(effect.note)}</span>`}</p>`).join("")
     }${m.hatches.map((h) => `\n<p class="why">SQL hatch <a href="#${esc(h.ir)}">${esc(h.ir)}</a> · ${chip("delivery", "unspecified", true)} · <span class="note">${esc(h.note)}</span></p>`).join("")}
 </section>`;
   }));

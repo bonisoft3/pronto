@@ -199,6 +199,13 @@ import (
 		schemas: {app: *"public" | #SchemaName, floor: *"public" | #SchemaName, mecha: *"mecha" | #SchemaName}
 	}
 
+	// Set where the release trusts an issuer's keys (TRUSTED_JWKS): their
+	// digest, which rolls crud when they change; crud then verifies by the
+	// key set the release composed into <name>-trusted-keys.
+	trustedKeysDigest: *"" | =~"^[0-9a-f]{64}$"
+	// crud's audience, TRUSTED_AUDIENCE; empty, the origin's /crud.
+	trustedAudience: *"" | string
+
 	// The container hatches caddy's door routes to, by app id (the app's
 	// .pronto/cluster.json; the release fills it). Their own workloads are not
 	// deployed here.

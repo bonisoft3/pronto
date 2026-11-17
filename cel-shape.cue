@@ -22,7 +22,8 @@ import (
 // renderer is unrolled: #ShapeCel renders eight levels of nesting and refuses
 // a ninth, which no Shape has needed. `at` names the value, `depth` how many
 // lists enclose it.
-#ShapeCel: S={
+#ShapeCel: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -42,7 +43,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel7 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -54,7 +55,8 @@ import (
 	}
 }
 
-#ShapeCel7: S={
+#ShapeCel7: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -74,7 +76,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel6 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -86,7 +88,8 @@ import (
 	}
 }
 
-#ShapeCel6: S={
+#ShapeCel6: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -106,7 +109,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel5 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -118,7 +121,8 @@ import (
 	}
 }
 
-#ShapeCel5: S={
+#ShapeCel5: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -138,7 +142,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel4 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -150,7 +154,8 @@ import (
 	}
 }
 
-#ShapeCel4: S={
+#ShapeCel4: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -170,7 +175,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel3 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -182,7 +187,8 @@ import (
 	}
 }
 
-#ShapeCel3: S={
+#ShapeCel3: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -202,7 +208,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel2 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -214,7 +220,8 @@ import (
 	}
 }
 
-#ShapeCel2: S={
+#ShapeCel2: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -234,7 +241,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel1 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -246,7 +253,8 @@ import (
 	}
 }
 
-#ShapeCel1: S={
+#ShapeCel1: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -266,7 +274,7 @@ import (
 		out: "\(S.at) == int(\(S.at)) && \(S.at) >= \(S.shape.min) && \(S.at) <= \(S.shape.max)"
 	}
 	if S.shape.type == "array" {
-		let e = "e\(S.depth + 1)"
+		let e = "e\(S.depth+1)"
 		out: "type(\(S.at)) == list && size(\(S.at)) <= \(S.shape.maxItems) && \(S.at).all(\(e), \((#ShapeCel0 & {shape: S.shape.items, at: e, depth: S.depth + 1}).out))"
 	}
 	if S.shape.type == "object" {
@@ -278,7 +286,8 @@ import (
 	}
 }
 
-#ShapeCel0: S={
+#ShapeCel0: {
+	let S = self
 	shape: _
 	at:    *"this" | string
 	depth: *0 | int
@@ -305,7 +314,8 @@ import (
 // A command's request: the envelope the terminal writes around an event,
 // which the reducer reads whole. The payload is left to the step, which
 // checks it against the event's own shape.
-#RequestCel: R={
+#RequestCel: {
+	let R = self
 	events: [...string]
 	out: strings.Join([
 		"type(this) == map && size(this) == 3",

@@ -21,7 +21,9 @@ module, which is the monorepo. It holds:
 - **`path:` overrides** for the five tools, pointing at `../../plugins/pronto`,
   `../../plugins/omnishell`, `../../libraries/mecha`, `../../plugins/bayt`
   and `../../plugins/sayt`. mise layers the file over `.mise.toml`, and its
-  `path:` versions win.
+  `path:` versions win. bayt's fingerprint takes each tree as an input of
+  every target that reads the file, so an edit to the platform reruns an
+  app's `generate` as a pin bump does.
 - **`MONOREPO_COMPOSE_MODE=service`**, the one switch for what cannot run a
   command (see [the switch](#images-the-switch)).
 - **`BAYT_RUNTIME` and `COMPOSE_PROJECT_NAME`**: the checkout's bayt runtime
@@ -75,7 +77,10 @@ let omnishell = (^mise where github:bonisoft3/omnishell | str trim); deno test -
 The test imports `@bonisoft3/omnishell/test/screen-harness.ts` as omnishell's
 own tests do, and `./platform.ts` re-exports what an app takes from the
 harness. A test that imports mecha runs under mecha's cluster config the same
-way (`#Platform & {tree: "mecha"}`). omnishell's test lock is the harness's
+way (`#Platform & {tree: "mecha"}`); a check that spans more than one platform
+tree runs under `#Platforms`, which synthesizes a `data:application/json`
+import map from each installed tree's `mise where` path and locks external
+specifiers in `tests/deno.lock`. omnishell's test lock is the harness's
 environment: an app test's `npm:` or `jsr:` import that the lock lacks is
 added there, since omnishell owns the harness. A test that imports no
 platform runs under the app's own `tests/deno.json` and `tests/deno.lock`,
@@ -84,8 +89,10 @@ frozen.
 What an app's tests take from pronto is what pronto emitted: the compilers'
 inputs in `.pronto/check-inputs.json`, each Mecha machine's step compiled as
 PostgreSQL runs it in `.pronto/mecha-reducers.json`, stepped through
-omnishell's `test/mecha-local.ts` and walked by `test/mecha-battery.ts`, and
-the cluster's database image in `.pronto/cluster.json`.
+omnishell's `test/mecha-local.ts` and walked by `test/mecha-battery.ts`, each
+database function's module with its fuel in `.pronto/functions.json`, run
+through `test/function-local.ts`, and the cluster's database image in
+`.pronto/cluster.json`.
 
 The platform's trees reach one another the same way. omnishell pins mecha in
 its `.mise.toml` like any consumer, and `mise.local.toml` points the pin at the
@@ -93,14 +100,15 @@ checkout; its data-plane bundle, `interpreter/vendor/mecha-client.js`, is a
 build product of bayt's `bundle` target (`bundle:mecha-client` in
 `package.json`), bundled from mecha's own `packages/client/omnishell-entry.ts`
 under mecha's config at `mise where github:bonisoft3/mecha`, and is not
-committed: the host verbs that import it build it first, and the mirror's
-`cd.yml` builds it before its image and release. So an omnishell release needs
+committed: an app's `build`, `launch` and `integrate`, and its `release` at
+pages and cloudflare, build it first at each of their platforms that reads the
+tree (the `omnishell-bundle` rule `builders/bayt.cue` emits), and
+the mirror's `cd.yml` builds it before its image and release. So an omnishell release needs
 a mecha release that carries the entry, pinned first. The pin lags that
 release: omnishell's `.mise.toml` names a mecha without the entry, so the
 mirror's `cd.yml` fails at the bundle until mecha releases it and the pin and
-`mise.lock` move. An app's host verbs build the bundle in the monorepo and
-refuse an omnishell tree without it (`builders/bayt.cue`), since the terminal
-would otherwise come up dead. An installed pronto contains its tree alone: a
+`mise.lock` move. That rule builds the bundle in the monorepo and refuses an
+omnishell tree without it, since the terminal would otherwise come up dead. An installed pronto contains its tree alone: a
 module of its release imports nothing outside it, neither by a path nor by
 the sibling names its `deno.json` maps, and the checkout-only harnesses are
 the `#TestModules` of `distribution/config.cue` (`installed_test.ts`); which

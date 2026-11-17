@@ -1,5 +1,5 @@
 #!/bin/sh
-# The broker on Hydra as two of an app's own processes under launch@local, so
+# The broker on Hydra as two of an app's own processes under launch@host, so
 # a local test brings up everything sign-in needs:
 #   local.sh hydra   Hydra in memory, its public and admin APIs on loopback
 #   local.sh front   the front, at http://localhost:28443, the broker's issuer

@@ -15,6 +15,27 @@ async function built(release: string, field = "plan") {
 const pushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
 const release = (extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${pushed}, database: tokenRoles: ["anon", "app_user", "service"]${extra}}`;
 
+Deno.test("the release signs the service token with its pinned runtime", async () => {
+  const result = await new Deno.Command("nu", {
+    args: ["-c", "source gcp/release.nu; service-jwt test-secret"],
+    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
+  }).output();
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+  assertEquals(result.success, true, text(result.stderr));
+  assertEquals(text(result.stdout), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtZWNoYTpzdGFjayIsInJvbGUiOiJzZXJ2aWNlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIn0.3AS7TlxXoUPLZnMpqt8NyTkxfbsxYvoAqcDncjlRVrw");
+});
+
+Deno.test("generated database secrets are URL-safe and use the pinned runtime", async () => {
+  const result = await new Deno.Command("nu", {
+    args: ["-c", "source gcp/release.nu; [ (random-secret) (random-secret) ] | to json"],
+    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
+  }).output();
+  assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+  const secrets: string[] = JSON.parse(new TextDecoder().decode(result.stdout));
+  assert(secrets.every(secret => /^[A-Za-z0-9_-]{48}$/.test(secret)));
+  assert(secrets[0] !== secrets[1]);
+});
+
 Deno.test("the door dials each upstream at its own port in the shared instance", async () => {
   const r = await built(release(), "service");
   assertEquals(r.success, true, r.stderr);

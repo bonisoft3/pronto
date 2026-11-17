@@ -10,8 +10,8 @@ The author's tour of one app, from the first turn to a release. What a
 conforming `brief.md`, `ir.html` and `program.cue` contain is
 [`SPEC.md`](SPEC.md); the component knowledge every compile assumes is
 [`prelude.md`](prelude.md); a screen, in detail, is omnishell's
-[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md), and every attribute it may carry is
-omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md).
+[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.25.0/GUIDE.md), and every attribute it may carry is
+omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md).
 
 ## Starting an app and running a turn
 
@@ -69,7 +69,7 @@ fixed point, so a markup change reports errors about the previous markup on the
 first run — run it again. Do not delete `shell/screens/*.html` to clear a stale
 error: manifest cleanup removes what the last manifest listed and the current
 bundle lacks, hand-authored handlers included; omnishell's guide has
-[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md#the-writer-deleted-my-handler).
+[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.25.0/GUIDE.md#the-writer-deleted-my-handler).
 
 The verbs are sayt's, and every check lands under the verb whose layer it
 needs: `lint` for anything that fails in seconds without executing the app
@@ -108,17 +108,25 @@ Each cluster entity declares who may see and change its rows, as `#Access` in
 `schema.cue`:
 
 ```cue
-access: {scope: "private", owner: "owner_id", shared: {via: "note_share", on: "note_id", user: "user_id"}}
+access: {scope: "private", owner: "owner_id", shared: {via: "note_share", on: "note_id", user: "user_id", role: "role"}}
+access: {scope: "private", owner: "owner_id", groups: [{group: "finance", of: "company_id", role: "reader"}]}
 access: {scope: "folder", parent: "Note", on: "note_id"}
 access: {scope: "public"}
 access: {scope: "internal"}
+access: {scope: "group", group: "group_id", user: "user_id"}
 ```
 
-`private` rows belong to their `owner` column, optionally shared through a
-table (`via`, joined on `on`, granting `user`); `folder` rows inherit a private
-parent's access through `on`; `public` is read-only to anyone; `internal` is
-reachable by backend services alone. What each mode compiles to, and why, is
-[access](docs/access.md).
+The model is Google Drive's. `private` rows belong to their `owner` column,
+optionally shared through a table (`via`, joined on `on`, granting `user`, or
+the group its `group` column names, the Drive role its `role` column holds,
+`reader` or `writer`) and, every row of the entity, with declared groups
+(`<value of "of">:<group>`, the row's key where `of` is omitted); `folder` rows
+inherit a private parent's access through `on`, role included; `public` is
+read-only to anyone; `internal` is reachable by backend services alone;
+`group` is the membership list, which a member reads and the service writes.
+Only an owner deletes a shared row or names another owner, and is then its
+writer. A writer edits its grants unless `shared: {writersCanShare: false}`.
+What each mode compiles to, and why, is [access](docs/access.md).
 
 ### Validations
 
@@ -142,15 +150,20 @@ state: mecha: rows: FavoriteRules: {
 ```
 
 ```js
-(state, event) => state.rows.article.every((a) => a.author_id !== event.row.user_id);
+({context, event}) => context.rows.article.every((a) => a.author_id !== event.row.user_id);
 ```
 
 `via` lists the edges the predicate may follow: a field of this entity carrying
-`ref` walks forward to the one referenced row, and `"<Entity>.<field>"` whose
-field refs this entity walks backward to every row pointing here. `event` is
-`{type: "insert" | "update" | "delete", row}`. `row` is the resulting row
-on insert/update and the previous row on delete; `state.items` is `[]` on
-insert and `[previous]` on update/delete; `state.rows` holds one array per
+`ref` walks forward to the one referenced row, `"<Entity>.<field>"` whose
+field refs this entity walks backward to every row pointing here, and
+`"_origin"` walks to the sender's rows of the membership list (the
+`scope: "group"` entity). `event` is
+`{type: "insert" | "update" | "delete", row, _origin}`. `_origin` is who sent
+the write, `user:<id>`, stated by the seat that runs the guard and never by
+the row, and absent on a write the service makes; a rule that depends on who
+is acting reads it, as a mecha rule reads its event's. `row` is the resulting row
+on insert/update and the previous row on delete; `context.items` is `[]` on
+insert and `[previous]` on update/delete; `context.rows` holds one array per
 edge, keyed by the target table, and an edge may be empty. The answer is a
 boolean; a refusal carries the validation's name (`refused.validation` in a
 machine, `validation <table>.<name>` from the server). No clock, no draw, no
@@ -248,7 +261,7 @@ state: fixture: src: "tests/fixtures/visual.sql"
 ### Schedules
 
 Periodic work is declared as `schedules` (`#Schedule` in `schema.cue`), and
-mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md) turns each
+mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/ticker/README.md) turns each
 occurrence into a row the app's pipelines read; how it wakes, what it
 guarantees and how to choose a cadence are there.
 
@@ -323,9 +336,9 @@ migration ([the two-step rule](docs/schema-change-admission.md#pgroll-migrations
 ## Screens
 
 A screen is HTML the terminal interprets, with no build step and no component
-per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md) is the contract and
-the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md) is every
-attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#machines)
+per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.25.0/GUIDE.md) is the contract and
+the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md) is every
+attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md#machines)
 included.
 
 ## i18n
@@ -360,7 +373,7 @@ asks to be rendered with its rows on request with `ssr: "ssr"`
 ([addresses](docs/localization.md#addresses),
 [crawlable documents](docs/localization.md#crawlable-documents)). An internal
 link names a route rather than a path — `<a data-route="<screen>">`, with
-`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#links)) —
+`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md#links)) —
 and a language switcher is the same link with `data-locale`.
 
 A missing translation is refused, never shown in the default language: at
@@ -386,7 +399,7 @@ app, each case citing the ids it realizes — `apps/truco/tests/acceptance.ts`
 (standalone readers: the `bonisoft3/truco` mirror), declared as an
 `integrate` check, drives the table under `?clock=manual`.
 Omnishell's `check battery` (at `test`) runs
-[the battery](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/automated-tests-battery.md) over every handler
+[the battery](https://github.com/bonisoft3/omnishell/blob/v0.25.0/docs/automated-tests-battery.md) over every handler
 and validation module; `check machines` fires every arrow of every chart;
 visual lint (at `integrate`) fails only on `critical`. The battery runs from
 the committed `.bayt` closure: render it with the cue.mod-pinned `bayt`

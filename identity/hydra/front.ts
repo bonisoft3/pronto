@@ -16,8 +16,8 @@
 // broker's pairwise one, under the same secret, so a person keeps the subject
 // each application already linked.
 import { Refused, randomToken, verifyIdToken } from "../oidc.ts";
-import { callbackOf, pairwiseKey, pairwiseSubject, tenantOf } from "../broker/core.ts";
-import { esc, google, hmacKey, json, page, type Provider, seal, unlisted, unseal } from "../broker/main.ts";
+import { callbackOf, type OptionalScope, pairwiseKey, pairwiseSubject, profileClaims, tenantOf } from "../broker/core.ts";
+import { esc, google, hmacKey, json, page, type Provider, seal, tenantVerifier, type TxtResolver, unlisted, unseal } from "../broker/main.ts";
 import { fakeGoogle } from "./fake.ts";
 
 export interface Hydra {
@@ -31,6 +31,10 @@ export interface Hydra {
 // of Hydra is reachable through the front.
 const PASSED = /^\/(\.well-known\/(openid-configuration|jwks\.json)|oauth2\/(auth|token|fallbacks\/[a-z]+))$/;
 
+// A role a client may act as (pronto's #TokenRoleName): none of the
+// cluster's own, nor one Postgres or a managed database reserves.
+const TOKEN_ROLE = /^(?!(anon|app_user|service|electric|authenticator|postgres|public|none|app|streaming_replica)$)(?!(pg_|cloudsql|rds|azure_))[a-z][a-z0-9_]{0,62}$/;
+
 const go = (to: string) => new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 
 export async function front(p: {
@@ -39,8 +43,11 @@ export async function front(p: {
   providers: Provider[];
   hydra: Hydra;
   fetcher?: typeof fetch;
+  resolveTxt?: TxtResolver;
   /** Routes served beside the broker's own: a stand-in provider's (fake.ts). */
   extra?: (req: Request, url: URL) => Promise<Response> | null;
+  /** The secret Hydra's token hook sends as its bearer; without it there is no hook. */
+  hookSecret?: string;
 }) {
   if (p.secret.length < 32) throw new Error("BROKER_SECRET is at least 32 characters");
   const fetcher = p.fetcher ?? fetch;
@@ -48,6 +55,7 @@ export async function front(p: {
   const providers = new Map(p.providers.map((x) => [x.name, x]));
   const pairwise = await pairwiseKey(p.secret);
   const stateKey = await hmacKey(p.secret, "hydra login round trip");
+  const isTrusted = await tenantVerifier({ issuer, secret: p.secret, resolveTxt: p.resolveTxt });
   const callback = (provider: string) => `${issuer}/callback/${provider}`;
 
   async function admin(method: string, path: string, body?: unknown): Promise<Response> {
@@ -73,7 +81,7 @@ export async function front(p: {
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code"],
       response_types: ["code"],
-      scope: "openid",
+      scope: "openid profile email",
     };
     const path = `/clients/${encodeURIComponent(tenant)}`;
     const held = await admin("GET", path);
@@ -84,7 +92,9 @@ export async function front(p: {
     }
     if (!held.ok) throw new Error(`hydra GET client: ${held.status}`);
     const was = await held.json();
-    if (JSON.stringify([...(was.redirect_uris ?? [])].sort()) !== JSON.stringify(client.redirect_uris)) await adminJson("PUT", path, client);
+    if (JSON.stringify([...(was.redirect_uris ?? [])].sort()) !== JSON.stringify(client.redirect_uris) || was.scope !== client.scope) {
+      await adminJson("PUT", path, client);
+    }
   }
 
   async function pass(req: Request, url: URL): Promise<Response> {
@@ -109,6 +119,15 @@ export async function front(p: {
     return await pass(req, url);
   }
 
+  function toProvider(provider: Provider, legToken: string, pn: string, scopes: readonly OptionalScope[] = []): Response {
+    const to = new URL(provider.authUrl);
+    to.search = new URLSearchParams({
+      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
+      scope: ["openid", ...scopes].join(" "), state: legToken, nonce: pn, prompt: "select_account",
+    }).toString();
+    return go(to.toString());
+  }
+
   async function login(url: URL): Promise<Response> {
     const challenge = url.searchParams.get("login_challenge") ?? "";
     const r = await adminJson("GET", `/oauth2/auth/requests/login?login_challenge=${encodeURIComponent(challenge)}`);
@@ -121,7 +140,12 @@ export async function front(p: {
       });
       return go(redirect_to as string);
     }
-    const leg = await seal(stateKey, { c: challenge, t: tenant, p: name, pn: randomToken(16), exp: Math.floor(Date.now() / 1000) + 600 });
+    const pn = randomToken(16);
+    const trusted = await isTrusted(tenant);
+    const requested = ((r.requested_scope as string[]) ?? []).filter((s): s is OptionalScope => s === "profile" || s === "email");
+    const scopes = trusted ? requested : [];
+    const leg = await seal(stateKey, { c: challenge, t: tenant, p: name, pn, scopes, exp: Math.floor(Date.now() / 1000) + 600 });
+    if (trusted) return toProvider(provider, leg, pn, scopes);
     const host = new URL(tenant).host;
     return page(`Sign in to ${host}`, `<h1>Sign in to <span class="origin">${esc(host)}</span></h1>
 <p>You'll continue with ${esc(provider.label)}. Only <span class="origin">${esc(tenant)}</span> learns that it's you, and it can't tell you apart in any other app.</p>
@@ -130,15 +154,11 @@ export async function front(p: {
   }
 
   async function proceed(url: URL): Promise<Response> {
-    const leg = await unseal(stateKey, url.searchParams.get("leg"));
-    if (!leg) return page("Sign-in expired", `<h1>This sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
+    const legToken = url.searchParams.get("leg");
+    const leg = await unseal(stateKey, legToken);
+    if (!leg || !legToken) return page("Sign-in expired", `<h1>This sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
     const provider = providers.get(leg.p as string)!;
-    const to = new URL(provider.authUrl);
-    to.search = new URLSearchParams({
-      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
-      scope: "openid", state: url.searchParams.get("leg")!, nonce: leg.pn as string, prompt: "select_account",
-    }).toString();
-    return go(to.toString());
+    return toProvider(provider, legToken, leg.pn as string);
   }
 
   async function arrive(name: string, url: URL): Promise<Response> {
@@ -164,12 +184,12 @@ export async function front(p: {
       }),
     });
     if (!exchanged.ok) return await refuse(`${name}'s token exchange answered ${exchanged.status}: ${await exchanged.text()}`);
-    let providerSub: string;
+    let claims: Record<string, unknown> & { sub: string };
     try {
       const { id_token } = await exchanged.json();
-      ({ sub: providerSub } = await verifyIdToken(String(id_token ?? ""), {
+      claims = await verifyIdToken(String(id_token ?? ""), {
         alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce: leg.pn as string, keys: provider.keys,
-      }));
+      });
     } catch (e) {
       // The provider's keys out of reach is no refusal of the person: 503, which they may retry.
       if (!(e instanceof Refused)) {
@@ -180,26 +200,63 @@ export async function front(p: {
     }
     // Hydra holds the challenge to the tenant it was issued for, so the subject
     // is derived for that tenant and no other.
-    const sub = await pairwiseSubject(pairwise, leg.t as string, provider.name, providerSub);
+    const sub = await pairwiseSubject(pairwise, leg.t as string, provider.name, claims.sub);
+    const scopes = (leg.scopes as OptionalScope[] | undefined) ?? [];
+    const profile = profileClaims(claims, scopes);
     const { redirect_to } = await adminJson("PUT", `/oauth2/auth/requests/login/accept?login_challenge=${challenge}`, {
-      subject: sub, remember: false, context: { idp: provider.name },
+      subject: sub, remember: false, context: { idp: provider.name, scopes, profile },
     });
     return go(redirect_to as string);
   }
 
-  // Consent is the page the reader already saw: a subject alone, for the
-  // tenant that asked, granted without a second question.
+  // Consent is the page the reader already saw: a subject alone for unverified
+  // origins, or the requested profile/email claims too for DNS-TXT-verified ones.
   async function consent(url: URL): Promise<Response> {
     const challenge = encodeURIComponent(url.searchParams.get("consent_challenge") ?? "");
     const r = await adminJson("GET", `/oauth2/auth/requests/consent?consent_challenge=${challenge}`);
-    const idp = (r.context as { idp?: string } | null)?.idp;
+    const ctx = (r.context as { idp?: string; scopes?: string[]; profile?: Record<string, unknown> } | null) ?? {};
+    const allowed = new Set(["openid", ...(ctx.scopes ?? [])]);
     const { redirect_to } = await adminJson("PUT", `/oauth2/auth/requests/consent/accept?consent_challenge=${challenge}`, {
-      grant_scope: ((r.requested_scope as string[]) ?? []).filter((s) => s === "openid"),
+      grant_scope: ((r.requested_scope as string[]) ?? []).filter((s) => allowed.has(s)),
       grant_access_token_audience: [],
       remember: false,
-      session: { id_token: idp ? { idp } : {} },
+      session: { id_token: { ...(ctx.idp ? { idp: ctx.idp } : {}), ...(ctx.profile ?? {}) } },
     });
     return go(redirect_to as string);
+  }
+
+  // The role a client acts as, which Hydra's token hook asks for on every
+  // token it issues (docs/identity.md#token-roles-and-trusted-issuers). Only a
+  // client credentials grant has one, and only from the `role` the operator
+  // gave the client when registering it: nothing a client sends with its
+  // request names a role. Its token must name an audience, or every app
+  // trusting the issuer would take it; and no role of the cluster's own is a
+  // client's.
+  const hookKey = p.hookSecret ? await hmacKey(p.hookSecret, "hydra token hook") : null;
+  async function tokenHook(req: Request): Promise<Response> {
+    // Compared as MACs, so the time it takes says nothing of the secret.
+    const mac = async (v: string) => new Uint8Array(await crypto.subtle.sign("HMAC", hookKey!, new TextEncoder().encode(v)));
+    const [a, b] = await Promise.all([mac(req.headers.get("authorization") ?? ""), mac(`Bearer ${p.hookSecret}`)]);
+    if (a.some((x, i) => x !== b[i])) return json(401, { error: "unauthorized" });
+    const { request } = await req.json() as { request?: { client_id?: string; grant_types?: string[]; granted_audience?: string[] } };
+    const grants = request?.grant_types ?? [];
+    if (grants.length !== 1 || grants[0] !== "client_credentials") return new Response(null, { status: 204 });
+    const held = await admin("GET", `/clients/${encodeURIComponent(request?.client_id ?? "")}`);
+    if (!held.ok) {
+      await held.body?.cancel();
+      return json(403, { error: "access_denied" });
+    }
+    const role = ((await held.json()).metadata as { role?: unknown } | null)?.role;
+    if (role === undefined) return new Response(null, { status: 204 });
+    if (typeof role !== "string" || !TOKEN_ROLE.test(role)) {
+      console.error(`broker: client ${request?.client_id}'s role ${JSON.stringify(role)} is no token role`);
+      return json(403, { error: "access_denied" });
+    }
+    if ((request?.granted_audience ?? []).length === 0) {
+      console.error(`broker: client ${request?.client_id} asked for a token naming no audience`);
+      return json(403, { error: "access_denied" });
+    }
+    return json(200, { session: { access_token: { role } } });
   }
 
   return unlisted(async function handler(req: Request): Promise<Response> {
@@ -208,6 +265,7 @@ export async function front(p: {
     try {
       const extra = p.extra?.(req, url);
       if (extra) return await extra;
+      if (hookKey && req.method === "POST" && path === "/hooks/token") return await tokenHook(req);
       if (req.method === "GET" && path === "/oauth2/auth") return await authorize(req, url);
       if (PASSED.test(path)) return await pass(req, url);
       if (req.method === "GET" && path === "/login") return await login(url);
@@ -245,5 +303,5 @@ if (import.meta.main) {
   }
   if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
   const hydra = { public: env("HYDRA_PUBLIC") ?? "http://127.0.0.1:28453", admin: env("HYDRA_ADMIN") ?? "http://127.0.0.1:28455" };
-  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra }));
+  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
 }

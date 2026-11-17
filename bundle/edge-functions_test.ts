@@ -18,6 +18,7 @@ Deno.test("the edge runs the same module, metered, and refuses what is not JSON"
   const out = await Deno.makeTempDir();
   await Deno.writeTextFile(`${out}/functions.js`, await renderFunctions("proof", app, omnishell, declared));
   const { default: functions } = await import(`file://${out}/functions.js`);
+  assertEquals(Object.keys(functions).sort(), Object.keys(declared).sort());
   assertEquals(functions.round.execute(round), reshaped);
   assertThrows(() => functions.spin.execute({}), RangeError, "function spin: fuel exhausted");
   assertThrows(() => functions.fail.execute({ kind: "round" }), Error, "unparsable round");

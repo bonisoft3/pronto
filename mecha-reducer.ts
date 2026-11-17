@@ -2,7 +2,7 @@ import { MECHA_NAME } from "./mecha-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
-import { contracted } from "./mecha-contracts.ts";
+import { carries, contracted } from "./mecha-contracts.ts";
 // Read as text, so it loads wherever this module does (an app's tests take it
 // by URL); deno.lock records the module import of the same file, not the text.
 import "./mecha-runtime.js";
@@ -26,10 +26,10 @@ export type MechaReducerMachine = {
   state: Shape;
   view: Shape;
   public?: Shape;
-  contracts?: Record<string, { reads: string[]; writes?: string[] }>;
+  contracts?: Record<string, { reads: string[]; writes?: string[]; reason?: string }>;
   events: Record<string, { tier: "omnishell" | "mecha"; payload: Shape }>;
   mecha?: {ports?: MechaPortSql; locks: string; transitions: {phase: string; event: string; requires?: {sql: string; reason: string}[]; sql: string}[]};
-  states: Record<string, { final: boolean; always?: { target: string; guard?: string; reduce?: string }[]; on: Record<string, { target?: string; guard?: string; reduce?: string; requires?: { sql: string; reason: string }[] }> }>;
+  states: Record<string, { final: boolean; always?: { target: string; guard?: string[]; reduce?: string }[]; on: Record<string, { target?: string; guard?: string[]; reduce?: string; requires?: { sql: string; reason: string }[] }> }>;
 };
 
 const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
@@ -76,13 +76,15 @@ export async function compileMechaReducer(
     if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid mecha event declaration");
   }
   contracted(spec);
+  const unread = carries(spec);
+  if (unread.length) throw new Error(`mecha contracts: ${unread[0]}`);
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`mecha rules reach ${facts.references.join(", ")}`);
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
     const xstate = (${mechaXStateSource});
     const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});
-    for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
+    for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ?? [])]))]) {
       if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('mecha missing function ' + name);
     }
     const execute = (${runtime.trim()})(spec, rules, xstate.Statechart);

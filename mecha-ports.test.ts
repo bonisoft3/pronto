@@ -17,6 +17,12 @@ Deno.test("initializers use the bounded input, initial-phase, invariant and proj
   await assertRejects(() => run(initial(), {undeclared: true}), Error, "undeclared field");
   await assertRejects(() => run({...initial(), phase: "finished"}), Error);
   await assertRejects(() => run({...initial(), a: [0, 0, 0]}), Error);
+  // The initializer is XState's context factory: its one argument holds the
+  // input, where the runtime states the step's time.
+  const timed = await compileMechaReducer(initialized, `return {...(() => { ${rules} })(), initial: (given) => ({...${JSON.stringify(initial())}, deadline: Object.keys(given).join() === "input" ? given.input._time + 5 : -1})};`, terminal);
+  const seeded = await executeMecha(timed.source, spec.fuel, {initialize: true, payload: {}, context: {tier: "mecha", now: 40}, viewers: []}) as {state: {deadline: number}};
+  assertEquals(seeded.state.deadline, 45);
+  await assertRejects(() => compileMechaReducer({...initialized, initialize: {reduce: "initial", input: {type: "object", fields: {_time: {type: "integer", min: 0, max: 1}}}}}, rules, terminal), Error, "the input carries a field _time");
 });
 
 Deno.test("Mecha ports refuse unresolved composition and invalid authority before emission", async () => {

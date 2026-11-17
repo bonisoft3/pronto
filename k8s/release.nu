@@ -1525,8 +1525,17 @@ export def bake-images [app_dir: string, compose: string, services: list<string>
 	do { cd $app_dir; $compose | ^docker buildx bake -f - --print ...$services } | from json | get target
 }
 
-export def auth-provider-environment [environment: record]: nothing -> record {
-	let entries = ($environment | transpose key value | where {|e| $e.key starts-with "OIDC_" })
+export def auth-provider-environment [environment: record, release_providers: record = {}]: nothing -> record {
+	let merged = ($release_providers | transpose name cfg | reduce -f $environment {|it, acc|
+		let issuer = ($it.cfg.releaseIssuer? | default "")
+		if ($issuer | is-empty) { return $acc }
+		let upper = ($it.name | str uppercase)
+		let ik = $"OIDC_($upper)_ISSUER"
+		let nk = $"OIDC_($upper)_INTERNAL"
+		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
+		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
+	})
+	let entries = ($merged | transpose key value | where {|e| $e.key starts-with "OIDC_" })
 	let secrets = ($entries | where {|e| $e.key ends-with "_CLIENT_SECRET" and $e.value != "" }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let settings = ($entries | where {|e| not ($e.key ends-with "_CLIENT_SECRET") }
@@ -1876,12 +1885,28 @@ export def main [
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
-	# What release.cue sets is the release's, over compose's, as gcp/release.nu's auth.oidc is.
+	# What release.cue sets is the release's, over compose's, as gcp/release.nu's auth.oidc is;
+	# a provider through the local broker signs in through its releaseIssuer.
 	let fixed = (^cue export --expression App.auth.oidc --out json $app_info.cue_path | from json | columns)
-	let oidc = (auth-provider-environment (compose-config $app_source_dir --json | get services.auth.environment | reject -o ...$fixed))
+	let release_providers = (do { cd $app_source_dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
+	let oidc = (auth-provider-environment (compose-config $app_source_dir --json | get services.auth.environment | reject -o ...$fixed) $release_providers)
 	let own_env = (app-services-environment (compose-config $app_source_dir --json) $services $app_meta.own)
+	# An issuer the release trusts, TRUSTED_JWKS, for the roles the program
+	# declares: its public keys are checked here, before anything is applied,
+	# and digested so a change of keys rolls crud. Unset, crud verifies the
+	# stack's own tokens alone.
+	let declared = (open ($app_info.cue_path | path dirname | path join .pronto cluster.json) | get -o declaredRoles | default [])
+	let jwks = ($env.TRUSTED_JWKS? | default "")
+	if ($declared | is-empty) and ($jwks | is-not-empty) {
+		error make { msg: $"TRUSTED_JWKS is set, but ($app_info.name) declares no token role an issuer's token could name" }
+	}
+	let trusted = if ($jwks | is-empty) { null } else {
+		let checked = (with-env {PGRST_JWT_SECRET: ("x" | fill -c "x" -w 32), TRUSTED_JWKS: $jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
+		if $checked.exit_code != 0 { error make { msg: $"TRUSTED_JWKS is refused: ($checked.stderr | str trim)" } }
+		{jwks: $jwks, digest: ($jwks | hash sha256), audience: ($env.TRUSTED_AUDIENCE? | default "")}
+	}
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }) | merge (if $trusted == null { {} } else { {trustedKeysDigest: $trusted.digest, trustedAudience: $trusted.audience} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file | if $is_tenant { tenant-manifests $tenant } else { $in })
 	rm $pushed_file
 
@@ -1969,6 +1994,22 @@ export def main [
 	seed-configmaps $app_meta.services $app_source_dir $target_ns
 	apply-alert-rules $workload_name ($app_meta.alerting?.rules? | default []) $app_source_dir $target_ns
 
+	# crud's key set: the stack's own secret beside the issuer's public keys,
+	# composed here because PostgREST fetches no JWKS and its image has no shell.
+	# A key set that changed under an unchanged issuer, the stack's own secret
+	# rotated, rolls crud below, since its digest names the issuer's keys alone.
+	mut trusted_changed = false
+	if $trusted != null {
+		kubectl wait --for=condition=Ready $"externalSecret/($workload_name)-auth-secrets" -n $target_ns --timeout=120s
+		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64)
+		let composed = (with-env {PGRST_JWT_SECRET: $secret, TRUSTED_JWKS: $trusted.jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
+		if $composed.exit_code != 0 { error make { msg: "crud's key set could not be composed from the cluster's secret and TRUSTED_JWKS" } }
+		let keys = ($composed.stdout | str trim)
+		let held = (kubectl get secret $"($workload_name)-trusted-keys" -n $target_ns -o json | complete)
+		$trusted_changed = ($held.exit_code == 0) and (($held.stdout | from json | get -o data.PGRST_JWKS | default "" | decode base64 | decode utf-8) != $keys)
+		{apiVersion: "v1", kind: "Secret", metadata: {name: $"($workload_name)-trusted-keys", namespace: $target_ns}, data: {PGRST_JWKS: ($keys | encode base64)}} | to json | kubectl apply --server-side --field-manager=pronto-runtime -f -
+	}
+
 	let components = $plan.components
 	let names = ($components | each { $"($rname)-($in)" })
 	let runtime_names = ($plan.runtime | each { $"($rname)-($in)" })
@@ -1977,6 +2018,7 @@ export def main [
 	let runtime_floors = if ($runtime_names | is-empty) { {} } else { rollout-floors (rollout-sample (deployments-now $runtime_names $target_ns)) }
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
+	if $trusted_changed { kubectl rollout restart $"deployment/($rname)-crud" -n $target_ns }
 	# A preview is a second whole stack starting on a node already running the released one and the rest (its pods
 	# wait on each other through a loaded node): it is given longer than a release to come up (PRONTO-153).
 	let rollout_wait = if ($preview | is-not-empty) { 900sec } else { 180sec }

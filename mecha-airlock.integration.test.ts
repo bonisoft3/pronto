@@ -14,11 +14,16 @@
 // as smtp.mailpit.test, on the bridge's `bridge-mail-egress`. The second
 // effect reaches Mailpit through the cluster's mail bridge, and signs its body
 // with the key its effect declares, which only the compose environment holds.
+// A third carries a secret field: a PIN sealed to the airlock's key, as the page
+// seals it, written through crud with the move into its invoking state,
+// stashed by the trigger pronto emits for it, opened for its handler and sent
+// to the sink, and kept by nothing afterwards.
 //
 //   mise x -- deno task test:airlock
 
 import assert from "node:assert/strict";
 import { packageHatch, writePackage } from "./activepieces-package.ts";
+import { seal, sealKeys, sealLabel } from "../../libraries/mecha/services/airlock/seal.ts";
 import { fileURLToPath } from "node:url";
 
 const PRONTO = fileURLToPath(new URL("./", import.meta.url)).replace(/\/$/, "");
@@ -41,7 +46,7 @@ const MAILPIT = "axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f
 // The key the bridged effect signs with, which reaches only the airlock's environment.
 const SIGNING_KEY = `smoke-${RUN}`;
 const SERVICE_JWT =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZSIsInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMCIsImV4cCI6MTk4ODE1MDQwMH0.dGYz_sMSnOvZy0eANh7spJbgyr2fEzeynOERIqW7gd4";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtZWNoYTpzdGFjayIsInJvbGUiOiJzZXJ2aWNlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIiwiZXhwIjoxOTg4MTUwNDAwfQ.K4ZX9EDs-BwPIh3r_ZOKmO9XfrQrEx18rwlw3siXcxs";
 
 // mecha's own steps the cluster's crud, auth and sync read, beside the
 // fixture's.
@@ -56,7 +61,11 @@ const MIGRATIONS = [
 
 const interpreterMigration = await Deno.readTextFile(`${FIXTURE}/migrations/009_airlock_smoke.sql`);
 const interpreters = [...interpreterMigration.matchAll(/CREATE FUNCTION[\s\S]*?END \$\$;/g)].map(([sql]) => sql.replace("CREATE FUNCTION", "CREATE OR REPLACE FUNCTION"));
-assert.equal(interpreters.length, 2);
+assert.equal(interpreters.length, 3);
+// The pinned table's stash, as pronto emits it for a secret field.
+const STASH = "010_airlock_smoke_secret.sql";
+const PIN = "4321";
+const PIX_KEY = `pix-${RUN}`;
 
 const BAYT_CUE = `package fixture
 
@@ -74,11 +83,12 @@ _cluster: cluster.#Cluster & {
 		bounds: {authStatementMs: 5000, tickerCallMs: 35000}
 	}
 	state: {
-		migrations: [${MIGRATIONS.map((m) => `"migrations/${m.split("/").pop()}"`).join(", ")}]
+		migrations: [${[...MIGRATIONS.map((m) => m.split("/").pop()), STASH].map((m) => `"migrations/${m}"`).join(", ")}]
 		pipelines: [], schedules: []
 		effects: [
 			{name: "probe", origin: "https://sink.mecha.test:8443", handler: "effects/probe.js", endpoint: "dapr/probe.yaml"},
 			{name: "confirm", bridge: "mail", handler: "effects/confirm.js", endpoint: "dapr/confirm.yaml", secrets: ["CONFIRM_SIGNING_KEY"]},
+			{name: "pinned", origin: "https://sink.mecha.test:8443", handler: "effects/pinned.js", endpoint: "dapr/pinned.yaml", secrets: ["PIX_KEY"], secretFields: true},
 		]
 		effectInterpreters: ${JSON.stringify(interpreters.join("\n\n"))}
 		// The runner itself is the local stand-in: the test points its SMTP inside the stack.
@@ -105,8 +115,14 @@ project: _fixture
 
 type Out = { ok: boolean; code: number; stdout: string; stderr: string };
 
-async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): Promise<Out> {
-  const out = await new Deno.Command(cmd, { args, cwd: opts.cwd ?? PRONTO, env: { BAYT_IMAGE_TAG: TAG, ...opts.env }, stdout: "piped", stderr: "piped" }).output();
+async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; stdin?: string } = {}): Promise<Out> {
+  const child = new Deno.Command(cmd, { args, cwd: opts.cwd ?? PRONTO, env: { BAYT_IMAGE_TAG: TAG, ...opts.env }, stdin: opts.stdin === undefined ? "null" : "piped", stdout: "piped", stderr: "piped" }).spawn();
+  if (opts.stdin !== undefined) {
+    const writer = child.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(opts.stdin));
+    await writer.close();
+  }
+  const out = await child.output();
   const text = (b: Uint8Array) => new TextDecoder().decode(b).trim();
   return { ok: out.success, code: out.code, stdout: text(out.stdout), stderr: text(out.stderr) };
 }
@@ -141,12 +157,18 @@ async function generate(dir: string) {
     [`${FIXTURE}/effects.json`, "effects.json"],
     [`${FIXTURE}/effects/probe.js`, "effects/probe.js"],
     [`${FIXTURE}/effects/confirm.js`, "effects/confirm.js"],
+    [`${FIXTURE}/effects/pinned.js`, "effects/pinned.js"],
     [`${FIXTURE}/dapr/confirm.yaml`, "dapr/confirm.yaml"],
     [`${FIXTURE}/dapr/probe.yaml`, "dapr/probe.yaml"],
     [`${MECHA}/services/proxy/Caddyfile`, "Caddyfile"],
     ...MIGRATIONS.map((m): [string, string] => [m, `migrations/${m.split("/").pop()}`]),
   ];
   for (const [from, to] of copies) await Deno.copyFile(from, `${dir}/${to}`);
+  await Deno.writeTextFile(`${dir}/dapr/pinned.yaml`, (await Deno.readTextFile(`${FIXTURE}/dapr/probe.yaml`)).replace("name: probe", "name: pinned"));
+  const stash = await must(run("cue", ["export", "-", "-e", "stash", "--out", "text"], {
+    stdin: `package fixture\nimport "bonisoft.org/plugins/pronto"\nstash: (pronto.#secretStashSql & {table: "airlock_smoke_pin", pk: ["id"], field: {name: "pin", type: "string", secret: true}}).out\n`,
+  }), "emit the stash");
+  await Deno.writeTextFile(`${dir}/migrations/${STASH}`, stash + "\n");
   // Caddy's startup hashes files under each declared root, including this fixture.
   await Deno.writeTextFile(`${dir}/Caddyfile`, (await Deno.readTextFile(`${dir}/Caddyfile`)).replace(/:(\{\$PORT:)?8080\}? \{/, "$&\n\troot * /usr/share/caddy"));
   await Deno.writeTextFile(`${dir}/bayt.cue`, BAYT_CUE);
@@ -161,7 +183,7 @@ Deno.test("the airlock plane bayt lowers reaches its declared sink, and nothing 
   const dir = `${PRONTO}/${DIR}`;
   const world = `${dir}/world.yaml`;
   const compose = (args: string[]) =>
-    run("docker", ["compose", "-p", PROJECT, "-f", `${dir}/.bayt/compose.launch.closure.yaml`, "-f", world, ...args], { env: { CONFIRM_SIGNING_KEY: SIGNING_KEY } });
+    run("docker", ["compose", "-p", PROJECT, "-f", `${dir}/.bayt/compose.launch.closure.yaml`, "-f", world, ...args], { env: { CONFIRM_SIGNING_KEY: SIGNING_KEY, PIX_KEY } });
   const exec = (target: string, cmd: string[]) => compose(["exec", "-T", `${P}-${target}`, ...cmd]);
   // A one-off of launch, busybox on the default network, as every service but
   // the airlock's is.
@@ -307,6 +329,51 @@ Deno.test("the airlock plane bayt lowers reaches its declared sink, and nothing 
       assert.equal(manifest.actions.sendMail.fixedProps.starttls, false);
       assert.equal((await exec("bridge-mail", ["java", "-version"])).ok, false, "release contains no JVM");
       assert.match(await must(exec("bridge-mail", ["deno", "--version"]), "Deno version"), /^deno 2\.9\.7\b/);
+    });
+
+    await t.step("a secret field written through crud reaches the sink, and afterwards no table, WAL change, publication or crud read holds it", async () => {
+      // Listening from before the write: whatever a CDC reader or Electric
+      // would decode from the WAL, this decodes too.
+      await sql("SELECT pg_create_logical_replication_slot('secret_probe', 'test_decoding')");
+      const crud = (method: string, path: string, body?: unknown, profile?: string) =>
+        exec("ticker", ["deno", "eval", `const r = await fetch("http://crud:3000${path}", {method: "${method}", headers: {authorization: "Bearer ${SERVICE_JWT}", "content-type": "application/json", prefer: "return=representation"${profile ? `, "accept-profile": "${profile}"` : ""}}${body === undefined ? "" : `, body: ${JSON.stringify(JSON.stringify(body))}`}}); console.log(r.status + " " + await r.text())`]);
+      // The local stack's airlock holds the development key and publishes its public half.
+      const keys = await sealKeys((await Deno.readTextFile(`${MECHA}/services/airlock/dev-seal.key`)).trim());
+      assert.equal(JSON.parse((await must(crud("GET", "/airlock_seal?select=kid"), "GET the seal key")).slice(4))[0].kid, keys.current.kid);
+      const sealed = await seal(keys.current.public, PIN, sealLabel("airlock_smoke_pin", "pin", "p1"));
+      assert.match(await must(crud("PATCH", "/airlock_smoke_pin?id=eq.p1", { pin: PIN }), "PATCH in the clear"), /^400 /);
+      const patched = await must(crud("PATCH", "/airlock_smoke_pin?id=eq.p1", { status: "charging", pin: sealed }), "PATCH through crud");
+      assert.match(patched, /^200 /);
+      assert.deepEqual(JSON.parse(patched.slice(4))[0].pin, null, "the write's own answer holds NULL");
+      let status = "";
+      for (let i = 0; i < 60 && status !== "settled"; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        status = await sql("SELECT status FROM airlock_smoke_pin WHERE id = 'p1'");
+      }
+      assert.equal(status, "settled", await logs(`${P}-airlock`));
+      // The sink echoes each request into its log, over several lines: the
+      // PIN in the body, the environment's key in a header.
+      assert.equal(await hits("sink", "pinned:p1"), 1);
+      const echoed = await logs("sink");
+      assert.ok(echoed.includes(PIN) && echoed.includes(PIX_KEY), "the sink received the PIN and the key");
+      assert.equal(await sql(`SELECT
+          (SELECT count(*) FROM airlock.secret) || ',' ||
+          (SELECT count(*) FROM airlock_smoke_pin WHERE pin IS NOT NULL) || ',' ||
+          (SELECT count(*) FROM airlock.external_effect_ledger WHERE (input::text || outcome::text) LIKE '%${PIN}%' OR (input::text || outcome::text) LIKE '%seal1.%') || ',' ||
+          (SELECT count(*) FROM graphile_worker._private_jobs WHERE payload::text LIKE '%${PIN}%') || ',' ||
+          (SELECT count(*) FROM pg_publication_tables WHERE schemaname = 'airlock') || ',' ||
+          (SELECT count(*) FROM pg_publication_tables WHERE tablename = 'airlock_seal')`), "0,0,0,0,0,0");
+      const changes = await sql("SELECT string_agg(data, E'\\n') FROM pg_logical_slot_get_changes('secret_probe', NULL, NULL)");
+      await sql("SELECT pg_drop_replication_slot('secret_probe')");
+      assert.ok(changes.includes("airlock_smoke_pin"), "the slot decoded the write");
+      // The secret table's own changes carry the ciphertext, which may hold
+      // the PIN's digits by chance; no other change carries either.
+      const others = changes.split("\n").filter((line) => !line.includes("airlock.secret")).join("\n");
+      assert.equal(others.includes(PIN), false, "no WAL change carries the PIN");
+      assert.equal(/seal1\./.test(others), false, "only the secret table's own changes carry even the ciphertext");
+      const read = await must(crud("GET", "/airlock_smoke_pin?id=eq.p1"), "GET through crud");
+      assert.equal(JSON.parse(read.slice(4))[0].pin, null);
+      assert.match(await must(crud("GET", "/secret", undefined, "airlock"), "GET the secret table through crud"), /^40\d /);
     });
 
     await t.step("a rolled-back transition claims nothing and enqueues nothing", async () => {

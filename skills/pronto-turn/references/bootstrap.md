@@ -3,13 +3,14 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **1.1.2** through CUE module **1.1.5**, and Sayt **0.48.0**.
+Use Pronto **1.4.0** through CUE module **1.4.1**, and Sayt **0.49.1**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
-A finish CUE release carries previously published tool self-pins so its shipped
-lock is complete. Keep the generated tool versions even when they differ from
-the CUE module versions.
+A finish CUE module (for example `v1.4.1`) pins and locks the preceding Pronto
+source distribution (`1.4.0`). Generated `.mise.toml` and `mise.lock` agree on
+every tool version; keep `"github:bonisoft3/pronto" = "1.4.0"` rather than
+rewriting it to the CUE module tag.
 
 Bootstrap is the agent's to run, first, in the app's directory: everything it
 installs lands there and in mise's cache. A checkout of pronto on disk does not
@@ -29,8 +30,8 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.48.0/saytw -o saytw
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.48.0/saytw.ps1 -o saytw.ps1
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.49.1/saytw -o saytw
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.49.1/saytw.ps1 -o saytw.ps1
    chmod +x saytw
    ```
 
@@ -42,7 +43,7 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.1.5
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.4.1
    ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v1
    ```
 
@@ -87,16 +88,12 @@ generated configuration, then lock the new tools before step 4:
 
 ```sh
 ./saytw --script tools.nu mise lock
-./saytw --script tools.nu nu -c 'with-env {MISE_LOCKED: "0"} { ^mise install }'
 ```
 
-`mise lock` reads release metadata from GitHub's API, so give it a
-`GITHUB_TOKEN`; it leaves HTTP artifacts without checksums, which the scoped
-install records for the current platform. Setting `MISE_LOCKED=0` outside
-that scoped command does not work: Sayt clears the launcher's override so
-project locking prevails. An already-installed tool is skipped without
-filling its entry; repeat the install with `--force <tool>` (for example,
-`^mise install --force http:duckdb`) and recheck the lock.
+`mise lock` resolves release metadata through mise's versions host and
+downloads each HTTP artifact once to record its checksum, for every platform
+the lock already lists. Installs stay locked: an unlocked install would
+rewrite the lock and fail on `mise.local.toml`'s `path:` pins.
 
 Once the app has a `program.cue`, that command rewrites only `.mise.toml` and
 `.mise.host.toml`; the seat's Sayt rules reach `.say.yaml` on the next

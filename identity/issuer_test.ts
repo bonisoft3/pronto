@@ -10,7 +10,7 @@ function assertEquals(a: unknown, b: unknown, m = "") {
 
 const module = new URL("..", import.meta.url).pathname;
 async function exported(entry: string): Promise<{ success: boolean; value?: Record<string, Issuer & { origin: string }>; stderr: string }> {
-  const code = `import "github.com/bonisoft3/pronto/identity"\nissuers: [Name=string]: identity.#Issuer & {name: Name}\nissuers: ${entry}\n`;
+  const code = `import "github.com/bonisoft3/pronto/identity"\nissuers: [string]~(Name,_): identity.#Issuer & {name: Name}\nissuers: ${entry}\n`;
   const child = new Deno.Command("cue", { args: ["export", "--out", "json", "-e", "issuers", "-"], cwd: module, stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
   const writer = child.stdin.getWriter();
   await writer.write(new TextEncoder().encode(code));

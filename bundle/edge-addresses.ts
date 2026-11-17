@@ -14,7 +14,7 @@ interface Release {
     i18n?: { locales?: Record<string, unknown> }
     prefix?: string
     presenter?: { policy: string }
-    units?: Record<string, { isolation: string; files: string[] }>
+    units?: Record<string, { isolation: string; subdomain?: string; files: string[] }>
   }
 }
 /** An RTCIceServer, as omnishell's release addressing writes it. */
@@ -25,7 +25,7 @@ export interface IceServer {
 }
 export interface Addresses {
   local: (value: string, base: string) => string | null
-  addressRelease: (out: string, options?: { htmlSuffix?: string; iceServers?: IceServer[] }) => Promise<Release>
+  addressRelease: (out: string, options?: { htmlSuffix?: string; iceServers?: IceServer[]; frames?: string[] }) => Promise<Release>
   parseIceServers: (text: string) => IceServer[]
   retainReleases: (out: string, previous: string) => Promise<Set<string>>
   separateAssetDirectories: (out: string, previous: string) => void
@@ -46,15 +46,30 @@ export interface EdgeHints {
   prefix?: string
 }
 
+/** The labels of the realm units served at a host of their own. */
+export function realmSubdomains(units: Record<string, { isolation?: string; subdomain?: string }> | undefined): string[] {
+  return [...new Set(Object.values(units ?? {}).flatMap((unit) => unit.isolation === 'realm' && unit.subdomain ? [unit.subdomain] : []))].sort()
+}
+
+/** The edge's realm frame sources: each realm subdomain's label under the
+ * release's domain, which generate never names (omnishell's admitFrames). */
+async function edgeFrames(out: string, domain: string | undefined): Promise<string[]> {
+  const { units } = JSON.parse(await Deno.readTextFile(path.join(out, 'shell/shell.json'))) as Release['cfg']
+  const labels = realmSubdomains(units)
+  if (!labels.length) return []
+  if (!domain) throw new Error(`realm subdomains ${labels.join(', ')} are hosts under the release's domain, and the release names none`)
+  return labels.map((label) => `https://${label}.${domain}`)
+}
+
 const REALM_POLICY = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'"
 
 /** Cloudflare's assets answer `.html` by their own routing rules, take cache
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
  * hints to send each route's preloads as early hints. The terminal config
  * carries the target's ICE servers. */
-export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers }: { previous?: string; iceServers: IceServer[] }): Promise<EdgeHints> {
+export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers, domain }: { previous?: string; iceServers: IceServer[]; domain?: string }): Promise<EdgeHints> {
   const { addressRelease, local, retainReleases } = addresses
-  const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers })
+  const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers, frames: await edgeFrames(out, domain) })
   const { imports, screens, cfg } = release
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
   if (previous) await retainReleases(out, previous)
@@ -70,7 +85,8 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   // A realm's document is isolated by the seat's sandbox; loaded any other way
   // it would run at this origin under no policy, so it carries the sandbox
   // itself (omnishell hatch.js SANDBOX) and only this app may frame it, as the
-  // container door sends it.
+  // container door sends it. A subdomain realm is relaxed to allow-same-origin
+  // only by originAssets when requested on its dedicated host.
   const realms = Object.values(cfg.units ?? {})
     .filter((unit) => unit.isolation === 'realm').flatMap((unit) => unit.files)
   await Deno.writeTextFile(path.join(out, '_headers'), [

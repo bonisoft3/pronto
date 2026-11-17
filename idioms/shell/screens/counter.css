@@ -1,2 +1,4 @@
+[data-screen="counter"] { padding: var(--sp-lg); }
 .counter { display: flex; gap: var(--sp-md); align-items: center; justify-content: center; }
-.counter output { font-size: var(--text-xl); min-inline-size: 3ch; text-align: center; }
+.counter output { font-size: var(--type-title); line-height: var(--type-leading-title); min-inline-size: 3ch; text-align: center; }
+.counter button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; block-size: var(--control-h); min-inline-size: var(--control-h); padding: var(--size-1) var(--sp-sm); border: var(--border-size-1) solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--primary); font-family: inherit; font-size: inherit; cursor: pointer; }

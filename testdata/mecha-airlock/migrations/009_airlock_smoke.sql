@@ -73,3 +73,41 @@ CREATE TRIGGER airlock_smoke_mail_guard BEFORE UPDATE ON airlock_smoke_mail
   FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION airlock_smoke_mail_guard();
 
 INSERT INTO airlock_smoke_mail VALUES ('b1', 'pending');
+
+-- The secret field's machine: `pin` is written with the move into `charging`
+-- and never kept; the stash pronto emits for it is the step after this one.
+CREATE TABLE airlock_smoke_pin (
+  id     TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  amount INT NOT NULL,
+  pin    TEXT CONSTRAINT airlock_smoke_pin_pin_secret CHECK (pin IS NULL)
+);
+
+CREATE FUNCTION airlock_smoke_pin_guard() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  k text := 'pinned:' || NEW.id;
+  outcome jsonb;
+BEGIN
+  IF OLD.status = 'pending' AND NEW.status = 'charging' THEN
+    INSERT INTO airlock.external_effect_ledger (key, effect, row, input)
+    VALUES (k, 'pinned', jsonb_build_object('id', NEW.id), jsonb_build_object('amount', NEW.amount))
+    ON CONFLICT (key) DO NOTHING;
+    IF NOT FOUND THEN RAISE EXCEPTION 'external effect % was already performed', k; END IF;
+    PERFORM graphile_worker.add_job('external_effect', json_build_object('key', k), job_key => k, max_attempts => 30);
+  ELSIF OLD.status = 'charging' THEN
+    SELECT l.outcome INTO outcome FROM airlock.external_effect_ledger l WHERE l.key = k;
+    IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW.status THEN
+      RAISE EXCEPTION '% leaves charging only by its recorded outcome', k;
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'illegal % -> %', OLD.status, NEW.status;
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER airlock_smoke_pin_guard BEFORE UPDATE ON airlock_smoke_pin
+  FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION airlock_smoke_pin_guard();
+
+INSERT INTO airlock_smoke_pin VALUES ('p1', 'pending', 990, NULL);
+
+ALTER PUBLICATION electric_publication_default ADD TABLE airlock_smoke_pin;

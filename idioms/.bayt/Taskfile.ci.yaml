@@ -1,10 +1,6 @@
 # generated from bayt.cue — do not edit
 tasks:
   default:
-    env:
-      BUILDX_BAKE_ENTITLEMENTS_FS: "0"
-      COMPOSE_BAKE: "true"
-    run: once
     cmds:
     - |-
       sh -c "set -eu
@@ -15,4 +11,8 @@ tasks:
       for target in ci-visual; do
        docker buildx bake -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' \${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} \${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} \${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} \"\$target\"
       done"
+    env:
+      BUILDX_BAKE_ENTITLEMENTS_FS: "0"
+      COMPOSE_BAKE: "true"
+    run: once
 version: "3"

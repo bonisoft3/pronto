@@ -534,7 +534,9 @@ def service-file [plan: record]: nothing -> string {
 # Jobs are left out: `gcloud run jobs replace` has no --dry-run.
 export def preflight [app_info: record, previews: list<string>] {
 	print $"gcp: (stamp) validating the Cloud Run services with Cloud Run \(--dry-run\)"
-	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
+	# Read with no seal key in the environment, so the airlock's shows the
+	# local stack's default, the development key the release refuses.
+	let compose = (do { hide-env -i AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
 	let services = ($compose.services | columns)
 	let work = (mktemp -d -t gcp-preflight.XXXXXX | str trim)
 	let failed = ($previews | par-each --keep-order {|v|
@@ -578,8 +580,18 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
 		}
 	}
-	# The providers compose gives the auth service, under what release.cue sets.
-	let auth_env = $compose.services.auth.environment
+	# The providers compose gives the auth service, under what release.cue sets:
+	# a provider through the local broker signs in through its releaseIssuer.
+	let release_providers = (do { cd $app_info.dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
+	let auth_env = ($release_providers | transpose name cfg | reduce -f $compose.services.auth.environment {|it, acc|
+		let issuer = ($it.cfg.releaseIssuer? | default "")
+		if ($issuer | is-empty) { return $acc }
+		let upper = ($it.name | str uppercase)
+		let ik = $"OIDC_($upper)_ISSUER"
+		let nk = $"OIDC_($upper)_INTERNAL"
+		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
+		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
+	})
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
@@ -588,7 +600,9 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
 	let render_cfg = if $has_render { {render: {enabled: true}} } else { {} }
-	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, tsbifrost: $has_tsbifrost, aiModels: ($compose.services.tsbifrost?.environment?.AI_MODELS? | default "")}} } else { {} }
+	# compose's airlock holds the seal key where an effect reads a secret field.
+	let has_seal = $has_airlock and ("AIRLOCK_SEAL_KEY" in ($compose.services.airlock.environment? | default {}))
+	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, tsbifrost: $has_tsbifrost, aiModels: ($compose.services.tsbifrost?.environment?.AI_MODELS? | default ""), seal: $has_seal}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
 	# Each sidecar's compose environment, its peers where it finds them: at their
@@ -623,7 +637,9 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record, --rendered: record]: nothing -> record {
 	let base = (base-of $app_info $preview)
 	let plan0 = if $rendered == null { plan-of $app_info.cue_path $preview } else { $rendered }
-	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
+	# Read with no seal key in the environment, so the airlock's shows the
+	# local stack's default, the development key the release refuses.
+	let compose = (do { hide-env -i AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
 	let services = ($compose.services | columns)
 	# A service the release does not run itself, but the app names in GCP.sidecars (the renderer, say), is run as that sidecar.
 	let refused = ($services | where {|s| $s in $unbuilt and $s not-in $plan0.sidecars })
@@ -688,6 +704,32 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 		}
 	}
 	if $has_blobs { ensure-bucket $plan.names.bucket $plan.names.serviceAccount $p $r }
+	# The seal key, as an effect's other secrets: made out of band, never here.
+	# A release environment that carries it (staging's, decrypted from SOPS)
+	# keeps it in Secret Manager, a new value a new version; one that does not
+	# needs it there already, as production's is. Never the repository's
+	# development key. A rotation maps the replaced one for five minutes as
+	# GCP.airlock.secrets.AIRLOCK_SEAL_KEY_PREVIOUS (mecha's
+	# services/airlock/README.md#rotating-the-seal-key).
+	if $plan.airlockSeal {
+		let key = ($env.AIRLOCK_SEAL_KEY? | default "" | str trim)
+		let name = $plan.names.secrets.AIRLOCK_SEAL_KEY
+		# Compared as the bytes it decodes to, in either base64 alphabet, padded
+		# or not, wrapped or not, before anything is deployed; the airlock
+		# refuses it by its id at start, however its PKCS#8 is spelled.
+		let bare = {|k|
+			let s = ($k | str replace -a -r '[\s=]' '' | str replace -a '-' '+' | str replace -a '_' '/')
+			if ($s | is-empty) { "" } else { $s + ('' | fill -c '=' -w ((4 - ($s | str length) mod 4) mod 4)) | decode base64 | encode hex }
+		}
+		if (do $bare $key) == (do $bare $compose.services.airlock.environment.AIRLOCK_SEAL_KEY) or (do $bare ($env.AIRLOCK_SEAL_KEY_PREVIOUS? | default "")) == (do $bare $compose.services.airlock.environment.AIRLOCK_SEAL_KEY) {
+			error make {msg: "AIRLOCK_SEAL_KEY is the repository's development key, which only the local stack seals to: give this deployment a key of its own"}
+		}
+		if ($key | is-not-empty) {
+			ensure-secret $name $p $key | ignore
+		} else if not (exists secrets describe $name --project $p) {
+			error make {msg: $"AIRLOCK_SEAL_KEY is required: an effect reads a secret field, which is sealed to it. Set it in this release's environment, or create secret ($name) with `gcloud secrets create ($name) --project ($p) --data-file=-`; mecha's services/airlock/seal-key.ts prints one"}
+		}
+	}
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }

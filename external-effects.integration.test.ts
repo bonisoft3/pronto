@@ -5,6 +5,8 @@
 // the real queue is the airlock's to test.
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { generateSealKey, seal, sealKeys, sealLabel } from "../../libraries/mecha/services/airlock/seal.ts";
+import { SEAL_TABLES_SQL } from "../../libraries/mecha/services/airlock/seal-tables.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 
@@ -26,7 +28,8 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
   if (!started.ok) throw new Error(started.err);
   const psql = (sql: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
   try {
-    for (let i = 0; !(await run("docker", ["exec", container, "pg_isready", "-qU", "postgres"])).ok; i++) {
+    // Over TCP: the image's initdb serves its socket alone, and restarts.
+    for (let i = 0; !(await run("docker", ["exec", container, "pg_isready", "-qh", "127.0.0.1", "-U", "postgres"])).ok; i++) {
       if (i > 60) throw new Error("postgres did not start");
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -41,6 +44,7 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text);
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/job_key.sql", import.meta.url))}
       ${files["services/database/migrations/010_machines.sql"].text}
       INSERT INTO payment VALUES ('00000000-0000-0000-0000-000000000001', 'pending', 12.50, NULL),
                                  ('00000000-0000-0000-0000-000000000002', 'pending', 7.00, NULL);`);
@@ -59,11 +63,11 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       assertEquals((await psql(`SELECT last_tick_at IS NOT NULL FROM schedule WHERE name = 'airlock';`)).out, "t");
       const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${one}';
         SELECT row::text || ' ' || input::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
-        SELECT identifier || ' ' || payload::text || ' ' || job_key || ' ' || max_attempts FROM graphile_worker.added;
+        SELECT identifier || ' ' || payload::text || ' ' || (job_key = airlock.job_key(payload->>'key')) || ' ' || max_attempts FROM graphile_worker.added;
         SELECT cron IS NULL AND due_at IS NOT NULL AND last_tick_at IS NULL FROM schedule WHERE name = 'airlock';`);
       assertEquals(r.out.split("\n"), [
         `{"id": "${one}"} {"amount": 12.50, "currency": "BRL"}`,
-        `external_effect {"key" : "charge:${one}"} charge:${one} 30`,
+        `external_effect {"key" : "charge:${one}"} true 30`,
         "t",
       ]);
     });
@@ -152,7 +156,7 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       const five = "00000000-0000-0000-0000-000000000005";
       const claimed = await psql(`INSERT INTO payment VALUES ('${five}', 'pending', 31.00, NULL);
         UPDATE payment SET status = 'charging' WHERE id = '${five}';
-        SELECT identifier FROM graphile_worker.added WHERE job_key = 'charge:${five}';`);
+        SELECT identifier FROM graphile_worker.added WHERE job_key = airlock.job_key('charge:${five}');`);
       if (!claimed.ok) throw new Error(claimed.err);
       assertEquals(claimed.out, "migrated_external_effect", "startup preserves the app migration's trigger behavior");
     });
@@ -206,6 +210,99 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       const r = await psql(`SET ROLE app_user; SELECT count(*) FROM airlock.external_effect_ledger;`);
       assertEquals(r.ok, false);
       assertStringIncludes(r.err, "permission denied");
+    });
+  } finally {
+    await run("docker", ["rm", "-f", container]);
+  }
+} });
+
+Deno.test({ name: "a secret field's write is stashed for its effect before any other trigger sees it, and its row keeps NULL", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+  const files = await emitFiles(paymentProgram({ effect: `secrets: [{field: "pin"}]` })
+    .replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          {name: "pin", type: "string", secret: true},`));
+  const keys = await sealKeys(await generateSealKey());
+  const sealedFor = (id: string, pin: string) => seal(keys.current.public, pin, sealLabel("payment", "pin", id));
+  const container = `pronto-secrets-${crypto.randomUUID().slice(0, 8)}`;
+  const started = await run("docker", ["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);
+  if (!started.ok) throw new Error(started.err);
+  const psql = (sql: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
+  const one = "00000000-0000-0000-0000-000000000001";
+  try {
+    // Over TCP: the image's initdb serves its socket alone, and restarts.
+    for (let i = 0; !(await run("docker", ["exec", container, "pg_isready", "-qh", "127.0.0.1", "-U", "postgres"])).ok; i++) {
+      if (i > 60) throw new Error("postgres did not start");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    const setup = await psql(`
+      CREATE ROLE anon; CREATE ROLE app_user; CREATE ROLE electric;
+      CREATE SCHEMA graphile_worker;
+      CREATE FUNCTION graphile_worker.add_job(identifier text, payload json DEFAULT NULL, queue_name text DEFAULT NULL,
+        run_at timestamptz DEFAULT NULL, max_attempts int DEFAULT NULL, job_key text DEFAULT NULL, priority int DEFAULT NULL,
+        flags text[] DEFAULT NULL, job_key_mode text DEFAULT 'replace') RETURNS void LANGUAGE sql AS $$ SELECT $$;
+      CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text,
+        pin text CONSTRAINT payment_pin_secret CHECK (pin IS NULL));
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+      ${SEAL_TABLES_SQL}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/job_key.sql", import.meta.url))}
+      ${files["services/database/migrations/010_machines.sql"].text}
+      INSERT INTO payment VALUES ('${one}', 'pending', 12.50, NULL, NULL);`);
+    if (!setup.ok) throw new Error(setup.err);
+
+    await t.step("the move into the invoking state carries the sealed PIN to the secret table for five minutes, and nowhere else", async () => {
+      const sealed = await sealedFor(one, "4321");
+      const r = await psql(`UPDATE payment SET status = 'charging', pin = '${sealed}' WHERE id = '${one}';
+        SELECT (SELECT count(*) FROM payment WHERE pin IS NOT NULL) || ',' ||
+               (SELECT (value = '${sealed}') || ',' || row::text || ',' || (expires_at - clock_timestamp() BETWEEN interval '290 seconds' AND interval '300 seconds') FROM airlock.secret WHERE tbl = 'payment' AND field = 'pin') || ',' ||
+               (SELECT input::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}');`);
+      assertEquals(r.out, `0,true,{"id": "${one}"},true,{"amount": 12.50, "currency": "BRL"}`);
+    });
+
+    await t.step("an insert a conflict turned away keeps nothing, so no one overwrites another's sealed value", async () => {
+      const before = (await psql(`SELECT value FROM airlock.secret WHERE tbl = 'payment';`)).out;
+      const r = await psql(`INSERT INTO payment VALUES ('${one}', 'pending', 1.00, NULL, '${await sealedFor(one, "6666")}') ON CONFLICT DO NOTHING;
+        SELECT value FROM airlock.secret WHERE tbl = 'payment';`);
+      assertEquals(r.out, before);
+    });
+
+    await t.step("one write offering a row twice is refused, with a value or without, so neither offer's value lands on the other's row", async () => {
+      const two = "00000000-0000-0000-0000-000000000002";
+      for (const first of ["NULL", `'${await sealedFor(two, "1111")}'`]) {
+        const r = await psql(`INSERT INTO payment VALUES ('${two}', 'pending', 1.00, NULL, ${first}), ('${two}', 'pending', 1.00, NULL, '${await sealedFor(two, "2222")}') ON CONFLICT DO NOTHING;`);
+        assertEquals(r.ok, false);
+        assertStringIncludes(r.err, "payment is offered one row twice in one transaction");
+      }
+      assertEquals((await psql(`SELECT count(*) FROM airlock.secret WHERE row->>'id' = '${two}';`)).out, "0");
+    });
+
+    await t.step("a PIN in the clear is refused before any trigger, and the refusal does not repeat it", async () => {
+      await psql(`DELETE FROM airlock.secret;`);
+      const r = await psql(`UPDATE payment SET pin = '9876' WHERE id = '${one}';`);
+      assertEquals(r.ok, false);
+      assertStringIncludes(r.err, "payment.pin takes a value sealed to the airlock's key");
+      assertEquals(r.err.includes("9876"), false, r.err);
+      assertEquals((await psql(`SELECT count(*) FROM airlock.secret;`)).out, "0");
+    });
+
+    await t.step("a write the interpreter refuses keeps nothing, and its error says nothing of the sealed value", async () => {
+      const sealed = await sealedFor(one, "9876");
+      const r = await psql(`UPDATE payment SET status = 'settled', pin = '${sealed}' WHERE id = '${one}';`);
+      assertEquals(r.ok, false);
+      assertEquals(r.err.includes(sealed.slice(-40)), false, r.err);
+      assertEquals((await psql(`SELECT count(*) FROM airlock.secret;`)).out, "0");
+    });
+
+    await t.step("a write past the trigger, as a replica-role session's, is refused rather than stored", async () => {
+      const r = await psql(`SET session_replication_role = replica; UPDATE payment SET pin = '${await sealedFor(one, "5555")}' WHERE id = '${one}';`);
+      assertEquals(r.ok, false);
+      assertStringIncludes(r.err, "payment_pin_secret");
+    });
+
+    await t.step("the secret table is closed to the cluster's client roles", async () => {
+      for (const q of ["SELECT count(*) FROM airlock.secret", "INSERT INTO airlock.secret VALUES ('payment', '{}', 'pin', 'x', now())"]) {
+        const r = await psql(`SET ROLE app_user; ${q};`);
+        assertEquals(r.ok, false, q);
+        assertStringIncludes(r.err, "permission denied");
+      }
     });
   } finally {
     await run("docker", ["rm", "-f", container]);

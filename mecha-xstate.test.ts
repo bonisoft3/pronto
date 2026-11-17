@@ -9,15 +9,15 @@ const row = { type: "object" as const, fields: { phase: { type: "string" as cons
 const spec: MechaReducerMachine = {
   name: "xstate_probe", version: 1, fuel: 10000, initial: "idle", state: row, view: row,
   events: { GO: { tier: "omnishell", payload: { type: "object", fields: {} } } },
-  contracts: { admit: { reads: [] }, increment: { reads: [], writes: ["count"] }, zero: { reads: [] }, one: { reads: [] } },
+  contracts: { admit: { reads: [], reason: "not_ready" }, increment: { reads: [], writes: ["count"] }, zero: { reads: [] }, one: { reads: [] } },
   states: {
-    idle: { final: false, on: { GO: { target: "choose", guard: "admit", reduce: "increment" } } },
-    choose: { final: false, on: {}, always: [{ target: "idle", guard: "zero" }, { target: "done", guard: "one", reduce: "increment" }] },
+    idle: { final: false, on: { GO: { target: "choose", guard: ["admit"], reduce: "increment" } } },
+    choose: { final: false, on: {}, always: [{ target: "idle", guard: ["zero"] }, { target: "done", guard: ["one"], reduce: "increment" }] },
     done: { final: true, on: {} },
   },
 };
 const rules = `return {invariant: () => true, project: state => state, admit: () => true,
-  increment: state => ({...state, count: state.count + 1}), zero: state => state.count === 0, one: state => state.count === 1};`;
+  increment: ({context: state}) => ({...state, count: state.count + 1}), zero: ({context: state}) => state.count === 0, one: ({context: state}) => state.count === 1};`;
 const input = () => ({ state: { phase: "idle", count: 0 }, event: { kind: "GO", payload: {} }, context: { tier: "omnishell", actor: "a", now: 0 }, viewers: ["a"] });
 
 Deno.test("the mecha XState expression reproduces the pinned bundle", async () => {
@@ -63,10 +63,14 @@ Deno.test("mecha XState assigns before automatic guards in SES and QuickJS witho
     const execute = (${compiled.source});`);
     assert.deepEqual(JSON.parse(evaluate(`execute(${JSON.stringify(JSON.stringify(input()))})`)), expected);
   } finally { vm.dispose(); }
-  const refused = await compileMechaReducer(spec, rules.replace("admit: () => true", "admit: () => 'not_ready'"), terminal);
+  // A guard is XState's boolean: false refuses with the reason its contract
+  // states, and a string, which XState would read as true, is a program error.
+  const refused = await compileMechaReducer(spec, rules.replace("admit: () => true", "admit: () => false"), terminal);
   assert.deepEqual(await executeMecha(refused.source, spec.fuel, input()), { kind: "rejected", reason: "not_ready" });
-  const broken = await compileMechaReducer(spec, rules.replace("one: state => state.count === 1", "one: () => 'not_ready'"), terminal);
-  await assert.rejects(() => executeMecha(broken.source, spec.fuel, input()), /automatic guard must return a boolean/);
+  const worded = await compileMechaReducer(spec, rules.replace("admit: () => true", "admit: () => 'not_ready'"), terminal);
+  await assert.rejects(() => executeMecha(worded.source, spec.fuel, input()), /guard admit must return a boolean/);
+  const broken = await compileMechaReducer(spec, rules.replace("one: ({context: state}) => state.count === 1", "one: () => 'not_ready'"), terminal);
+  await assert.rejects(() => executeMecha(broken.source, spec.fuel, input()), /guard one must return a boolean/);
 });
 
 Deno.test({ name: "the generated mecha XState engine executes in native PLV8 and rolls back failures", ignore: !Deno.env.get("CORTEX_NATIVE_PG_CONTAINER"), fn: async () => {
@@ -90,11 +94,11 @@ Deno.test({ name: "the generated mecha XState engine executes in native PLV8 and
     await must(database, `CREATE EXTENSION plv8; CREATE SCHEMA hybrid_xstate_probe; CREATE TABLE changes(n integer); INSERT INTO changes VALUES(0); ${engine(compiled.sql)}`);
     const expected = await executeMecha(compiled.source, spec.fuel, input());
     assert.deepEqual(JSON.parse(await must(database, `SELECT hybrid_xstate_probe.engine(${literal(input())});`)), expected);
-    const broken = await compileMechaReducer(spec, rules.replace("one: state => state.count === 1", "one: () => 'invalid'"), terminal);
+    const broken = await compileMechaReducer(spec, rules.replace("one: ({context: state}) => state.count === 1", "one: () => 'invalid'"), terminal);
     await must(database, engine(broken.sql));
     const refused = await sql(database, `BEGIN; UPDATE changes SET n=1; SELECT hybrid_xstate_probe.engine(${literal(input())}); COMMIT;`);
     assert.equal(refused.ok, false);
-    assert.match(refused.err, /automatic guard must return a boolean/);
+    assert.match(refused.err, /guard one must return a boolean/);
     assert.equal(await must(database, "SELECT n FROM changes"), "0");
   } finally { await must("postgres", `DROP DATABASE ${database} WITH (FORCE)`); }
 }});

@@ -5,7 +5,7 @@
 // stranger to a second tenant; and a sign-in never leaves for a redirect that
 // is not the tenant's.
 import { base64url, type Jwk, randomToken, sha256url, verifyIdToken } from "../oidc.ts";
-import { pairwiseKey, pairwiseSubject } from "../broker/core.ts";
+import { pairwiseKey, pairwiseSubject, tenantTrustKey, tenantTxtHost, tenantTxtValue } from "../broker/core.ts";
 import type { Provider } from "../broker/main.ts";
 import { front } from "./front.ts";
 
@@ -18,13 +18,18 @@ const SECRET = "s".repeat(40);
 const pair = await crypto.subtle.generateKey(
   { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
 const googleJwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid: "g1" };
-const pending = new Map<string, { nonce: string; sub: string; redirect: string }>();
+const pending = new Map<string, { nonce: string; sub: string; redirect: string; scope: string }>();
 let nextWho = "alice";
 const fakeGoogle = async (req: Request) => {
   const url = new URL(req.url);
   if (url.pathname === "/auth") {
     const code = crypto.randomUUID();
-    pending.set(code, { nonce: url.searchParams.get("nonce")!, sub: nextWho, redirect: url.searchParams.get("redirect_uri")! });
+    pending.set(code, {
+      nonce: url.searchParams.get("nonce")!,
+      sub: nextWho,
+      redirect: url.searchParams.get("redirect_uri")!,
+      scope: url.searchParams.get("scope") ?? "openid",
+    });
     const to = new URL(url.searchParams.get("redirect_uri")!);
     to.searchParams.set("code", code);
     to.searchParams.set("state", url.searchParams.get("state")!);
@@ -35,8 +40,17 @@ const fakeGoogle = async (req: Request) => {
     const c = pending.get(f.get("code") ?? "");
     pending.delete(f.get("code") ?? "");
     if (!c || f.get("client_secret") !== "op-secret" || f.get("redirect_uri") !== c.redirect) return Response.json({ error: "invalid_grant" }, { status: 400 });
+    const scopes = c.scope.split(/\s+/);
     const head = base64url(enc.encode(JSON.stringify({ alg: "RS256", kid: "g1" })));
-    const body = base64url(enc.encode(JSON.stringify({ iss: "https://accounts.google.com", aud: "op-client", sub: c.sub, nonce: c.nonce, exp: Math.floor(Date.now() / 1000) + 600 })));
+    const body = base64url(enc.encode(JSON.stringify({
+      iss: "https://accounts.google.com",
+      aud: "op-client",
+      sub: c.sub,
+      nonce: c.nonce,
+      exp: Math.floor(Date.now() / 1000) + 600,
+      ...(scopes.includes("profile") ? { name: "Alice Example", picture: "https://lh3.googleusercontent.com/a/alice" } : {}),
+      ...(scopes.includes("email") ? { email: "Alice@Example.test", email_verified: true } : {}),
+    })));
     const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
     return Response.json({ id_token: `${head}.${body}.${base64url(sig)}` });
   }
@@ -108,11 +122,12 @@ const subOf = async (tenant: string, who: string) => {
   return (await verifyIdToken(t.body.id_token, { alg: "RS256", issuers: [ISSUER], audience: tenant, nonce: s.q!.get("nonce")!, keys })).sub;
 };
 
-const A = "https://app-a.example", B = "https://app-b.example";
+const A = "https://app-a.example", B = "https://app-b.example", TRUSTED = "https://iris.cleaning";
+const txtRecords = new Map<string, string[]>();
 const cases: [string, () => Promise<void>][] = [];
 
 cases.push(["a tenant nobody registered signs a person in and gets a Hydra token only it accepts", async () => {
-  const s = await signIn(A, "alice");
+  const s = await signIn(A, "alice", { scope: "openid profile email" });
   assertEquals(s.html!.includes("Sign in to <span class=\"origin\">app-a.example</span>"), true, "the page names the app");
   assertEquals(`${s.landed!.origin}${s.landed!.pathname}`, `${A}/auth/oidc/google/callback`);
   assertEquals(s.landed!.searchParams.get("state"), s.q!.get("state"));
@@ -121,6 +136,7 @@ cases.push(["a tenant nobody registered signs a person in and gets a Hydra token
   const claims = await verifyIdToken(t.body.id_token, { alg: "RS256", issuers: [ISSUER], audience: A, nonce: s.q!.get("nonce")!, keys });
   assertEquals(claims.idp, "google");
   assertEquals(claims.sub, await pairwiseSubject(await pairwiseKey(SECRET), A, "google", "alice"), "the broker's own subject");
+  assertEquals([claims.name, claims.picture, claims.email], [undefined, undefined, undefined], "unverified tenant never receives profile or email");
 }]);
 
 cases.push(["the same person is a stranger to another tenant, and the same to the same tenant", async () => {
@@ -202,7 +218,103 @@ if (MECHA_AUTH) cases.push(["mecha's auth service signs in through Hydra with th
   const done: Response = await routes(new Request(back.at, { headers: { cookie: verifierCookie } }))!;
   assertEquals([done.status, done.headers.get("location")], [303, "/play"], await done.clone().text());
   // mecha from 0.14 links the issuer as well: the broker's.
-  assertEquals(linked, [{ provider: "google", issuer: ISSUER, sub: await pairwiseSubject(await pairwiseKey(SECRET), A, "google", "alice"), name: null, picture: null }]);
+  assertEquals(linked, [{ provider: "google", issuer: ISSUER, sub: await pairwiseSubject(await pairwiseKey(SECRET), A, "google", "alice"), name: null, picture: null, email: null }]);
+}]);
+
+cases.push(["a tenant with a valid _pronto-identity DNS TXT record hops through Hydra straight to Google without an interstitial", async () => {
+  const key = await tenantTrustKey(SECRET);
+  txtRecords.set(tenantTxtHost(TRUSTED), [await tenantTxtValue(key, ISSUER, TRUSTED)]);
+  const verifier = randomToken(32);
+  const q = new URLSearchParams({
+    client_id: TRUSTED, redirect_uri: `${TRUSTED}/auth/oidc/google/callback`, response_type: "code", scope: "openid profile email",
+    state: "st-hydra-trusted", nonce: "nn-hydra-trusted", provider: "google", code_challenge: await sha256url(verifier), code_challenge_method: "S256",
+  });
+  nextWho = "alice";
+  // browse() follows all redirects on ISSUER and stops upon leaving for Google — with zero 200 HTML page in between.
+  const atGoogle = await browse(`${ISSUER}/oauth2/auth?${q}`);
+  assertEquals(atGoogle.res.status, 302, "Hydra login 302-redirects directly to Google");
+  assertEquals(new URL(atGoogle.at).searchParams.get("scope"), "openid profile email");
+  await atGoogle.res.body?.cancel();
+  const hop = await fetch(atGoogle.at, { redirect: "manual" });
+  await hop.body?.cancel();
+  const back = await browse(hop.headers.get("location")!, atGoogle.jar);
+  await back.res.body?.cancel();
+  const landed = new URL(back.at);
+  assertEquals(`${landed.origin}${landed.pathname}`, `${TRUSTED}/auth/oidc/google/callback`);
+  const t = await redeem(TRUSTED, landed.searchParams.get("code")!, verifier);
+  assertEquals(t.status, 200);
+  const claims = await verifyIdToken(t.body.id_token, { alg: "RS256", issuers: [ISSUER], audience: TRUSTED, nonce: "nn-hydra-trusted", keys });
+  assertEquals(claims.aud, [TRUSTED]);
+  assertEquals([claims.name, claims.picture, claims.email, claims.email_verified], [
+    "Alice Example",
+    "https://lh3.googleusercontent.com/a/alice",
+    "alice@example.test",
+    true,
+  ]);
+}]);
+
+// Token roles: Hydra asks the front's token hook for a client credentials
+// token's role, which only the operator's registration names.
+const HOOK_SECRET = "h".repeat(40);
+const AUDIENCE = "https://app-a.example/crud";
+async function register(id: string, extra: Record<string, unknown>) {
+  const res = await fetch(`http://127.0.0.1:${HYDRA_ADMIN_PORT}/admin/clients`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: id, client_secret: `${id}-secret-of-some-length`, grant_types: ["client_credentials"],
+      token_endpoint_auth_method: "client_secret_basic", access_token_strategy: "jwt", audience: [AUDIENCE], ...extra,
+    }),
+  });
+  assertEquals(res.status, 201, await res.text());
+}
+async function clientToken(id: string, form: Record<string, string>) {
+  const res = await fetch(`${ISSUER}/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", authorization: `Basic ${btoa(`${id}:${id}-secret-of-some-length`)}` },
+    body: new URLSearchParams({ grant_type: "client_credentials", ...form }),
+  });
+  const body = await res.json();
+  const claims = body.access_token ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(body.access_token.split(".")[1].replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)))) : undefined;
+  return { status: res.status, body, claims };
+}
+cases.push(["a client registered with a role gets a token naming it, signed by the issuer's published keys", async () => {
+  await register("residual_bot", { metadata: { role: "residual_bot" } });
+  const t = await clientToken("residual_bot", { audience: AUDIENCE });
+  assertEquals(t.status, 200, JSON.stringify(t.body));
+  assertEquals([t.claims.role, t.claims.sub, t.claims.aud, t.claims.ext], ["residual_bot", "residual_bot", [AUDIENCE], undefined]);
+  const kid = JSON.parse(atob(t.body.access_token.split(".")[0].replaceAll("-", "+").replaceAll("_", "/"))).kid;
+  assertEquals((await keys(kid))?.kty, "RSA", "the key is in the issuer's JWKS");
+}]);
+cases.push(["a client cannot name its own role, nor be given one it was not registered with", async () => {
+  const asked = await clientToken("residual_bot", { audience: AUDIENCE, role: "service" });
+  assertEquals([asked.status, asked.claims.role], [200, "residual_bot"], JSON.stringify(asked.body));
+  const scoped = await clientToken("residual_bot", { audience: AUDIENCE, scope: "service" });
+  assertEquals(scoped.status >= 400, true, "a scope the client was not registered for");
+  await register("plain_client", {});
+  const plain = await clientToken("plain_client", { audience: AUDIENCE, role: "service" });
+  assertEquals([plain.status, plain.claims?.role], [200, undefined]);
+  const other = await clientToken("plain_client", { audience: "https://app-b.example/crud" });
+  assertEquals(other.status >= 400, true, "an audience the client was not registered for");
+}]);
+cases.push(["a role's token names an audience, and no role of the cluster's own is a client's", async () => {
+  const bare = await clientToken("residual_bot", {});
+  assertEquals([bare.status, bare.body.error], [403, "access_denied"]);
+  for (const role of ["service", "app_user", "authenticator", "postgres", "pg_read_all_data", "Residual", 7]) {
+    const id = `bad_${String(role).toLowerCase()}`;
+    await register(id, { metadata: { role } });
+    const t = await clientToken(id, { audience: AUDIENCE });
+    assertEquals([t.status, t.claims?.role], [403, undefined], String(role));
+  }
+}]);
+cases.push(["the token hook answers Hydra alone", async () => {
+  for (const authorization of [undefined, "Bearer wrong", `Bearer ${HOOK_SECRET}x`]) {
+    const res = await fetch(`${ISSUER}/hooks/token`, {
+      method: "POST", headers: authorization ? { authorization } : {},
+      body: JSON.stringify({ request: { client_id: "residual_bot", grant_types: ["client_credentials"], granted_audience: [AUDIENCE] } }),
+    });
+    assertEquals(res.status, 401, String(authorization));
+    await res.body?.cancel();
+  }
 }]);
 
 const HYDRA_PUBLIC_PORT = freePort(), HYDRA_ADMIN_PORT = freePort();
@@ -221,6 +333,9 @@ Deno.test({ name: "the broker on Hydra end to end", sanitizeOps: false, sanitize
       SERVE_PUBLIC_HOST: "127.0.0.1", SERVE_PUBLIC_PORT: String(HYDRA_PUBLIC_PORT),
       SERVE_ADMIN_HOST: "127.0.0.1", SERVE_ADMIN_PORT: String(HYDRA_ADMIN_PORT),
       OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true", TTL_ID_TOKEN: "5m",
+      OAUTH2_TOKEN_HOOK_URL: `${ISSUER}/hooks/token`, OAUTH2_TOKEN_HOOK_AUTH_TYPE: "api_key", OAUTH2_TOKEN_HOOK_AUTH_CONFIG_IN: "header",
+      OAUTH2_TOKEN_HOOK_AUTH_CONFIG_NAME: "Authorization", OAUTH2_TOKEN_HOOK_AUTH_CONFIG_VALUE: `Bearer ${HOOK_SECRET}`,
+      OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS: "role", OAUTH2_MIRROR_TOP_LEVEL_CLAIMS: "false",
     },
     stdout: "null", stderr: "inherit",
   }).spawn();
@@ -230,7 +345,10 @@ Deno.test({ name: "the broker on Hydra end to end", sanitizeOps: false, sanitize
     keys: async (kid) => (kid === "g1" ? googleJwk : undefined), clientId: "op-client", clientSecret: "op-secret",
   };
   const hydraUrls = { public: `http://127.0.0.1:${HYDRA_PUBLIC_PORT}`, admin: `http://127.0.0.1:${HYDRA_ADMIN_PORT}` };
-  const server = Deno.serve({ port: frontPort, hostname: "127.0.0.1", onListen() {} }, await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls }));
+  const server = Deno.serve(
+    { port: frontPort, hostname: "127.0.0.1", onListen() {} },
+    await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls, resolveTxt: async (host) => txtRecords.get(host) ?? [], hookSecret: HOOK_SECRET }),
+  );
   try {
     for (let i = 0; ; i++) {
       const ok = await fetch(`${ISSUER}/health`).then(async (r) => (await r.body?.cancel(), r.ok), () => false);

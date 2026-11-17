@@ -13,7 +13,6 @@ open(p, 'w').write(t)
 p = 'published.cue'
 s = open(p).read()
 for old, new in [
-    ('import "strings"\n\n', ''),
     ('#Pin: =~"^bonitao/mecha-', '#Pin: =~"^(bonitao|ghcr\\\\.io/bsoneca)/mecha-'),
     ('#Pin & strings.HasPrefix("bonitao/mecha-\\(s):")', '#Pin & =~"^(bonitao|ghcr\\\\.io/bsoneca)/mecha-\\(s):"'),
 ]:

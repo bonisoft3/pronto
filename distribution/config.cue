@@ -7,8 +7,8 @@ import (
 	"github.com/bonisoft3/pronto/resilience"
 )
 
-#Version:     "1.1.2"
-#SaytVersion: "0.48.0"
+#Version:     "1.4.0"
+#SaytVersion: "0.49.1"
 
 // Checkout-only modules: the compiler's test fixtures read omnishell beside
 // pronto, and the portable types are refreshed from the checkout's mecha
@@ -29,7 +29,7 @@ import (
 // from where the app is released and never declared by it. A dev or CI stack
 // writes none. An entry is an RTCIceServer, so a TURN relay's credentials fit.
 #IceServer: {
-	urls: string | [string, ...string]
+	urls:        string | [string, ...string]
 	username?:   string
 	credential?: string
 }
@@ -42,7 +42,7 @@ import (
 
 #Tools: {
 	...
-	"github:cue-lang/cue":     "0.16.1"
+	"github:cue-lang/cue":     "0.18.0-rc.4"
 	"github:denoland/deno":    "v2.9.7"
 	"github:go-task/task":     "v3.54.0"
 	"github:nushell/nushell":  "0.116.1"
@@ -122,7 +122,9 @@ import (
 // The same stack, the terminal's visual lint against its door, and the stack
 // down again (integrate-local.ts): `integrate` without containers. The
 // omnishell tree is the installed one unless given.
-#IntegrateLocal: I={
+#IntegrateLocal: {
+	let I = self
+
 	// A screen settles inside its door's bounds, as the visual check's.
 	let _door = resilience.resilience.timeouts.door
 	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
@@ -138,11 +140,32 @@ import (
 	out:  "deno run --config (\(root) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\(root) | path join write.ts) ."
 }
 
-#Project: P={
+// A deployment's flag, named at the verb (`sayt release --domain=<host>`,
+// SAY_<VERB>_ARGS_<NAME>) or else by the app's declared default: a generated
+// tree names no deployment of its own. A flag given empty reaches the command,
+// which refuses it.
+#DeploymentFlag: {
+	verb:    string
+	name:    string
+	flag:    string
+	default: string
+	// How the command reads a flag's value: as the next argument, or after `=`.
+	form: *"pair" | "joined"
+	let env = "SAY_\(verb)_ARGS_\(name)"
+	let given = [if form == "pair" {"'\(flag)' $env.\(env)"}, "$'\(flag)=($env.\(env))'"][0]
+	let declared = [if default == "" {""}, if form == "pair" {"\(json.Marshal(flag)) \(json.Marshal(default))"}, json.Marshal("\(flag)=\(default)")][0]
+	out: "...(if ('\(env)' in $env) { [\(given)] } else { [\(declared)] })"
+}
+
+#Project: {
+	let P = self
 	_valid:    saycfg.say & P.say.say
 	domain:    *"" | string
 	ssrOrigin: *"" | string
-	edgeClock: *"ticker" | "disabled"
+	// The edge release's Worker, whose name every Worker, queue and bucket it
+	// deploys derives from: the app's name, or `--name` at the verb.
+	workerName: *"" | string
+	edgeClock:  *"ticker" | "disabled"
 	// The most bytes, gzipped, a pages release's first load may weigh: its
 	// document and the module chunks that document imports. A bundle over it
 	// fails the release; 0 sets none.
@@ -165,8 +188,8 @@ import (
 			// override them.
 			github_attestations: false
 			slsa:                false
-			github: {slsa: false, github_attestations: false}
-			aqua: {github_attestations: false, cosign: false, slsa: false, minisign: false}
+			github:              {slsa: false, github_attestations: false}
+			aqua:                {github_attestations: false, cosign: false, slsa: false, minisign: false}
 		}
 		tools: P.tools
 	}
@@ -178,17 +201,17 @@ import (
 	}
 	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
-	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
-	launch: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join launch-watch.ts)"}).out
+	write:    (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
+	launch:   (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join launch-watch.ts)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
 	// stream and no computation.
 	derived: {
-		tables: *[] | [...string]
+		tables:  *[] | [...string]
 		streams: *[] | [...string]
 	}
 	_derivedOut: "dist/derived.sql"
-	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
+	derive:      (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
 	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.firstLoad > 0 {" --first-load \(P.firstLoad)"}, ""][0])"}).out
@@ -197,8 +220,8 @@ import (
 	// `--from`, given to `sayt release@cloudflare`, starts that directory from
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
-	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	_edgeData:  "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
+	edge:       (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0]) \((#DeploymentFlag & {verb: "RELEASE", name: "DOMAIN", flag: "--domain", default: P.domain}).out) \((#DeploymentFlag & {verb: "RELEASE", name: "SSR_ORIGIN", flag: "--ssr-origin", default: P.ssrOrigin}).out) \((#DeploymentFlag & {verb: "RELEASE", name: "NAME", flag: "--name", default: P.workerName}).out)"}).out
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
 	// `--reset` replaces the object's data with this release's; `--temporary`
 	// deploys to a throwaway account when none is logged in.
@@ -216,24 +239,25 @@ import (
 	// The cluster as host processes (#LaunchLocal).
 	launchLocal: #LaunchLocal
 	// Post-release verification across live deployments.
+	let _verifyDomain = (#DeploymentFlag & {verb: "VERIFY", name: "DOMAIN", flag: "--default-domain", default: P.domain, form: "joined"}).out
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
-	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare --mecha \(P._mecha)\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyK8s: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyGcp: (_run & {args: "if ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
+	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages \(_verifyDomain) \(_verifyArgs)"}).out
+	verifyEdge:  (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare --mecha \(P._mecha) \(_verifyDomain) \((#DeploymentFlag & {verb: "VERIFY", name: "NAME", flag: "--name", default: P.workerName, form: "joined"}).out) \(_verifyArgs)"}).out
+	verifyK8s:   (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s \(_verifyDomain) \(_verifyArgs)"}).out
+	verifyGcp:   (_run & {args: "if ('SAY_VERIFY_ARGS_DOMAIN' in $env) or ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp \(_verifyDomain) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// Its own tests import siblings a release of it does not carry.
-		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts \(strings.Join(#TestModules, " "))] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		types:    (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts \(strings.Join(#TestModules, " "))] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
 		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
-		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
-		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
-		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
+		facts:    (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
+		sql:      (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
+		proto:    (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
 		// The pages bundle written to a scratch folder and held to firstLoad.
 		firstLoad: (_run & {args: "let out = (mktemp -d); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out $out --first-load \(P.firstLoad); rm -r $out"}).out
-		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
-		outcomes: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-verification.ts) . --omnishell \(P._omnishell)"}).out
-		mecha: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
+		hybrids:   (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
+		outcomes:  (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-verification.ts) . --omnishell \(P._omnishell)"}).out
+		mecha:     (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
 		computations: (_run & {args: "if ('computations' | path exists) { run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env --allow-sys=homedir computations }"}).out
@@ -258,13 +282,13 @@ import (
 			// stack's `launch --watch` and a gate never write the same files at once.
 			"generate-lock": {
 				priority: -1000
-				cmds: [{do: (_run & {args: "^sh ($pronto | path join generate-lock.sh) .task/bayt/generate.lock"}).out}]
+				cmds:     [{do: (_run & {args: "^sh ($pronto | path join generate-lock.sh) .task/bayt/generate.lock"}).out}]
 			}
 			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1
-				// Joined, not interpolated: cue v0.16.1 panics interpolating P.write
-				// into a program that fails, where it should say why it fails.
+				// Joined rather than interpolated so evaluation errors in P.write
+				// report their underlying failure directly.
 				cmds: [{do: strings.Join(["if ('program.cue' | path exists) { ", P.write, " }"], "")}]
 			}
 		}

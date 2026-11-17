@@ -4,6 +4,8 @@
 #   identity/serve.sh [env-file]          on Ory Hydra (hydra/front.ts)
 #   identity/serve.sh release --project P --domain D --google-client-id C
 #                                         to Cloud Run (release.nu)
+#   identity/serve.sh txt --project P --domain D <https://app.example>...
+#                                         mints _pronto-identity.<host> TXT records
 # The env file (default ~/.config/pronto-identity/broker.env, never committed)
 # holds BROKER_ISSUER, BROKER_SECRET and each provider's client, e.g.
 # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. HYDRA_SECRET there encrypts
@@ -13,7 +15,11 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 if [ "${1:-}" = release ]; then
 	shift
-	exec mise x nushell@0.116.1 -- nu "$here/release.nu" "$@"
+	exec mise x github:nushell/nushell@0.116.1 github:denoland/deno@v2.9.7 -- nu "$here/release.nu" "$@"
+fi
+if [ "${1:-}" = txt ]; then
+	shift
+	exec mise x github:nushell/nushell@0.116.1 github:denoland/deno@v2.9.7 -- nu "$here/release.nu" txt "$@"
 fi
 env_file=${1:-$HOME/.config/pronto-identity/broker.env}
 [ -f "$env_file" ] || { echo "identity/serve.sh: no $env_file" >&2; exit 2; }
@@ -22,10 +28,13 @@ set -a
 set +a
 : "${BROKER_ISSUER:?BROKER_ISSUER is required}" "${BROKER_SECRET:?BROKER_SECRET is required}"
 SECRETS_SYSTEM=${HYDRA_SECRET:-$(printf 'hydra system secret' | openssl dgst -sha256 -hmac "$BROKER_SECRET" -r | cut -c1-64)}
+# What Hydra's token hook bears to the front, which answers a client
+# credentials token's role (hydra/front.ts).
+HYDRA_HOOK_SECRET=${HYDRA_HOOK_SECRET:-$(printf 'hydra token hook' | openssl dgst -sha256 -hmac "$BROKER_SECRET" -r | cut -c1-64)}
 state=${XDG_STATE_HOME:-$HOME/.local/state}/pronto-identity
 mkdir -p "$state"
 DSN="sqlite://$state/hydra.sqlite?_fk=true"
-export SECRETS_SYSTEM DSN
+export SECRETS_SYSTEM DSN HYDRA_HOOK_SECRET
 # Hydra's release with SQLite, for this machine.
 case "$(uname -s)-$(uname -m)" in
 	Darwin-arm64) asset=macOS_sqlite_arm64 ;;

@@ -807,6 +807,9 @@ import (
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
 						annotations: (#daprSidecar & {id: "crud", port: "3000"}).out
+						if release.trustedKeysDigest != "" {
+							annotations: "pronto.dev/trusted-keys-digest": release.trustedKeysDigest
+						}
 					}
 					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
 					spec: enableServiceLinks: false
@@ -838,12 +841,25 @@ import (
 							{name: "PGRST_DB_PRE_REQUEST", value: "\(release.database.schemas.floor).app_pre_request"},
 							// As mecha's cluster states them (meta.schema).
 							if release.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: "\(release.database.schemas.floor),public"}},
-							{
+							// With a trusted issuer, the key set the release composed from
+							// this secret and the issuer's public keys, and crud's audience.
+							if release.trustedKeysDigest == "" {
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
 									name: "\(release.id)-auth-secrets"
 									key:  "PGRST_JWT_SECRET"
 								}
+							},
+							if release.trustedKeysDigest != "" {
+								name: "PGRST_JWT_SECRET"
+								valueFrom: secretKeyRef: {
+									name: "\(release.id)-trusted-keys"
+									key:  "PGRST_JWKS"
+								}
+							},
+							if release.trustedKeysDigest != "" {
+								name:  "PGRST_JWT_AUD"
+								value: [if release.trustedAudience != "" {release.trustedAudience}, "\(originValue)/crud"][0]
 							},
 							{name: "PGRST_SERVER_HOST", value: "*"},
 							{name: "PGRST_SERVER_PORT", value: "3000"},

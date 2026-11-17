@@ -46,7 +46,8 @@ _claimMax: 200
 	values?: [string]: #Claim
 }
 
-#Issuer: I={
+#Issuer: {
+	let I = self
 	// Its name, which an upgraded session's `idp` carries.
 	name!: #Claim & =~"^[a-z][a-z0-9-]*$"
 	// A token the application's front checks and exchanges. A sign-in by

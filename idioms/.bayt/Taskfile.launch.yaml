@@ -1,9 +1,6 @@
 # generated from bayt.cue — do not edit
 tasks:
   default:
-    deps:
-    - "::bayt:build"
-    run: once
     cmds:
     - |-
       nu -c "if ((\$env.SAYT_TASK_VERB? | default \"\") != \"launch\") or ((\$env.SAYT_PLATFORM? | default \"\") != \"host\") { exit 0 }
@@ -66,10 +63,13 @@ tasks:
         ([\"#!/bin/sh\" \"exit 0\" \"\"] | str join (char nl)) | save -f (\$wbin | path join \"task\")
         ^chmod +x (\$wbin | path join \"task\")
       }
-      if (not (\".certs/localhost.pem\" | path exists)) or (not (\".certs/localhost-key.pem\" | path exists)) {
+      let subs = (if (\"shell/shell.json\" | path exists) { open shell/shell.json | get -o units | default {} | values | get -o subdomain | where (\$it != null and \$it != \"\") | uniq | each {|s| [\$\"(\$s).localhost\" \$\"(\$s).caddy\"] } | flatten } else { [] })
+      let dns_hosts = ([\"localhost\" \"caddy\"] | append \$subs)
+      let san = (if (\".certs/localhost.pem\" | path exists) { try { ^openssl x509 -in .certs/localhost.pem -noout -ext subjectAltName } catch { \"\" } } else { \"\" })
+      if (not (\".certs/localhost.pem\" | path exists)) or (not (\".certs/localhost-key.pem\" | path exists)) or (\$dns_hosts | any {|h| not (\$san | str contains \$\"DNS:(\$h)\") }) {
         mkdir .certs
         with-env { CAROOT: (\".certs\" | path expand) } {
-          ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost caddy 127.0.0.1 ::1
+          ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem ...\$dns_hosts 127.0.0.1 ::1
         }
       }
       let caroot_ca = ((^mise x -- mkcert -CAROOT | str trim) | path join \"rootCA.pem\")
@@ -103,7 +103,8 @@ tasks:
           }
           if not \$matched { error make { msg: \$d.msg } }
         }
-        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out
+        let frames = (\$ep | parse -r '--frames \\x27(?<f>[^\\x27]+)\\x27' | get f)
+        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out ...(\$frames | each {|f| [\"--frames\" \$f] } | flatten)
         glob (\$tree_dir | path join \"*\" | str replace -a (char -u 5c) \"/\") | each {|item| cp -rf \$item \$srv_dir } | ignore
         if ((\$tree_dir | path join \"omnishell\") | path exists) { cp -rf (\$tree_dir | path join \"omnishell\") \$omni_dir }
         for rdir in [\$srv_dir \$omni_dir] {
@@ -117,7 +118,7 @@ tasks:
       }
       \$\"log_location: (\$work_fwd)/proc.log
       \" | save -f (\$work | path join \"pc-logs.yaml\")
-      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"CADDY_TLS_HOST_PORT\") | get var | uniq | sort | append (if \$os == \"windows\" { [\"_PC_PORT\"] } else { [] }))
+      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"CADDY_TLS_HOST_PORT\") and (\$it.var != \"IDENTITY_HTTP_PORT\") | get var | uniq | sort | append (if \$os == \"windows\" { [\"_PC_PORT\"] } else { [] }))
       let start_p = (20000 + ((\$h | str substring 0..6 | into int -r 16) mod 7000))
       let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: \"127.0.0.1\", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' (\$pvars | to json -r) (\$start_p | into string) | from json)
       let port = (\$alloc._PC_PORT? | default \$def_port)
@@ -175,4 +176,7 @@ tasks:
         cleanup-work \$work
         rm -f \$sock \$state_file
       }"
+    deps:
+    - "::bayt:build"
+    run: once
 version: "3"

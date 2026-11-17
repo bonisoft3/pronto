@@ -1,0 +1,18 @@
+{
+  "effects": {
+    "echo": {
+      "table": "echo_request",
+      "field": "status",
+      "state": "echoing",
+      "onDone": "echoed",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 3,
+      "handler": "effects/echo.js",
+      "bridge": {"name": "echo", "targets": ["docker", "cloudflare"], "simulated": false}
+    }
+  }
+}

@@ -1,7 +1,7 @@
 ---
 type: decision
 title: External effects
-description: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event.
+description: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event; a read, an HTTP GET, needs no handler and no ledger, and its answers are journaled for replay.
 status: partially-built
 ---
 
@@ -124,7 +124,9 @@ The program does not compile when:
   or HTTP sets, its secret is also among the handler's `secrets`, or a secret's name is a
   variable the cluster's own services read (`SERVICE_JWT`, `POSTGRES_PASSWORD`, …);
 - any entity takes table `schedule` or `airlock_wake` while an effect is declared, or a
-  schedule is named `airlock`: the wake's own names.
+  schedule is named `airlock`: the wake's own names;
+- an `input` or a `key` reads a secret field, which the effect names in `secrets`
+  instead ([secret fields](2026-11-16-secret-fields.md#refusals)).
 
 Past compile time the interpreter refuses, while a row is in an invoking state, a change to
 its key fields or primary key and its deletion: the row is the ledger's instance until
@@ -133,7 +135,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -198,7 +200,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -242,8 +244,8 @@ comes back in `Metadata.statuscode` (B1, B6). A sink that reads a credential fro
 (`Authorization: Bearer …`, `X-Api-Key`) declares it on the sink, `credential: {header,
 scheme, secret}`, naming an environment variable the cluster requires: the airlock reads
 it once and adds the header to every call through the same metadata (B11), so the handler
-never holds it and no component carries it. A client certificate, which ponto's eSocial
-submission will need, is a binding's `MTLSClientCert` and is not declared yet
+never holds it and no component carries it. A client certificate, as required by eSocial
+submission, is a binding's `MTLSClientCert` and is not declared yet
 ([open](#open)).
 
 The airlock's daprd now invokes declared `HTTPEndpoint`s, since the bindings API cannot carry a
@@ -279,6 +281,124 @@ side. It is one kind of hatch among several, with its own declaration (the sink 
 `reentry`) and its own record (the ledger). How the hatch kinds relate is for a later
 record.
 
+## Reads
+
+About half of what an app asks of other services changes nothing there: a workflow's
+current approver, an exchange rate, a wallet's balance, a form's field definitions. HTTP
+already says what such a request is. A GET is safe and idempotent (RFC 9110 §9.2.1-2),
+so asking again costs nothing at the sink, and its answer is cacheable on HTTP's own
+terms (RFC 9111). A **read** is an external effect that is a GET, built on those terms
+rather than on the ledger's:
+
+```cue
+state: effects: rate: {
+	sink: {origin: "https://rates.example", credential: {scheme: "Bearer", secret: "RATES_KEY"}}
+	request: {method: "GET", path: "/rates/{currency}{?day}"}   // RFC 6570 over the input
+	input: {currency: "NEW.currency", day: "NEW.spent_on"}
+	count: "pricings"                // the row's entries into the state; the interpreter's
+	cacheControl: "max-age=3600"     // for an answer that carries no freshness of its own
+	got: {retry: {limit: 1}, timeout: {request: 3000}}
+}
+```
+
+- **The declaration is the request.** There is no handler: the airlock expands the
+  path and sends it through the effect's endpoint on its daprd, as a write's handler
+  does, with the sink's credential. The answer is the outcome: a 2xx is `done` with its
+  body, anything else the sink answered is `failed` with `{status, body}`, and no answer
+  after every retry is `failed` with the error. Never `unknown`: a GET that never
+  answered changed nothing. Nothing claims it, so a read states no key, idempotency,
+  reentry, note or attempts.
+- **got performs it, configured and not wrapped.** Its retry (408, 429, 5xx and network
+  errors, honouring `Retry-After`) and its timeouts are the program's in got's own
+  option shapes, the part JSON spells; absent, two quick retries and 5 s a request. The
+  whole read is bound at 20 s. got follows no redirect: one followed by the airlock would
+  leave the endpoint the wall admits.
+- **The cache is HTTP's.** An LRU of a thousand answers in the airlock's memory, none
+  over 1 MiB and none of unstated length, shared by every row's read and keyed by each
+  exact request, so a credential is never a key (got's own key is the URL as
+  normalize-url rewrites it, which drops `utm_` parameters, so the airlock keeps a
+  partition per exact path). As a shared cache it keeps no `private` answer and no answer
+  to an authorized request unless the answer says `public`, `s-maxage` or
+  `must-revalidate` (RFC 9111 §3.5). `Vary` and `no-store` are honoured. `cacheControl`
+  stands in for the freshness a legacy sink never sends: got's `beforeCache` hook applies
+  it to an answer with neither `Cache-Control` nor `Expires` whose status a cache may give
+  a heuristic freshness (RFC 9110 §15.1), before the cache judges it.
+
+### A read is a machine's
+
+A read is invoked by a state, as a write is; there is no other way to ask one. A screen
+asks the backend as Cortex has it ask anything of a machine: by writing a row it owns.
+The row's machine invokes the read, the answer lands in the row as `onDone` or
+`onError`, its actions reading it as `outcome`, and the screen sees it through sync. So
+the caller is the row's: the session wrote it under the tenancy floor and its own
+policies (`auth_uid()`), and the read's input reads the caller's data through the row,
+`NEW.<col>` or `{raw: sql}`, as any effect's does. A program with a read declares auth,
+and the interpreter refuses a request's anonymous role entering the read's state, so a
+sink's credential is spent only for a write a signed-in session made.
+
+Entering the invoking state adds one to the row's `count`, an int32 column the program
+declares, and the row names its `incarnation` in a uuid column it declares, which takes a
+new value at the insert, so a row deleted and made again under its key is another one.
+The interpreter alone writes both: a row starts at zero under a new incarnation, and no
+write sets either. The interpreter enqueues `external_read` with the row's key, its
+incarnation, that count `n`, the invocation's key
+`<effect>:<row's key>:<incarnation>:<n>`, the input, evaluated once, and its digest, in
+the
+transition's commit, and re-arms the wake. There is no ledger row: Graphile's backoff
+and got's retry are the resilience, five runs at most, the last delivering `failed`, and
+a job Graphile gave up on (the process dying in its last run) is delivered `failed` by
+the sweep and completed.
+
+What stands in for the ledger's authority is the delivery's own transaction: the airlock
+sets `airlock.read` for that transaction alone, and the interpreter believes it only
+from the session that owns the `airlock` schema, which is the airlock's connection and
+no client's, and only for the row it names. The airlock moves the row only where it
+still waits in the state on that `n` in that incarnation, so an answer to an earlier
+entry, or to an earlier row under its key (a job run again after a crash, the row since
+deleted and made again), moves nothing and writes nothing. The columns the input reads, the
+ones a raw input names among them, are held while the row asks, as a write's key is, and
+the row is not deleted until its answer lands, so no row made again under its key meets
+an answer still on its way.
+
+### The journal
+
+In the delivery's transaction the airlock writes `{key, effect, row, incarnation, n,
+digest, outcome}` to `airlock.read_journal`, so the journal holds exactly the answers rows took,
+each when it took it. It is a read's record of the outside world, as the ledger is a
+write's, and it is no claim: it is written at delivery, never before the call, since a
+GET asked twice changed nothing.
+
+Replay re-runs a row's transitions, the row as it was, its incarnation included; the
+count comes back to the same `n`, so the invocation to the same key, and the airlock in replay answers it from `outcome` rather
+than asking the sink. The digest is a check, not the key: a key the journal holds under
+another digest is the same request made with other input, a history that diverged from
+the recorded one, and so is a key it does not hold. Replay stops there rather than hand
+back an answer to another request, and settles no dead job. A row deleted and made again
+under the same primary key is another incarnation, so the keys of the two histories
+never meet. The housekeeping sweep drops the entries of incarnations that are gone: they
+have no history left to re-run.
+
+### Refused
+
+- a read with a `body`: a GET's has no meaning (RFC 9110 §9.3.1);
+- a read with a `key`, `idempotent`, `reentry`, `note`, `attempts`, `secrets`,
+  `endowments` or `contentType`: nothing claims it, and it has no handler and sends no body;
+- a read on a bridge, which stands in for a sink that does not speak HTTP, or on the
+  AI gateway, which answers only what is posted to it;
+- a read no state invokes, as any effect;
+- a path naming a variable the input does not, or an input the path sends nowhere, or an
+  input value that is no string, number, boolean or `{raw: sql}`;
+- `private` in `cacheControl`: the cache it would land in is shared, and keeps none;
+- an input reading `OLD.`, the machine's state field or the count;
+- a `count` that is no int32 field of the invoking entity, or is generated, its state
+  field or a primary key;
+- an `incarnation` that is no uuid field of the invoking entity, or is generated, a
+  primary key or the count;
+- a `count` or an `incarnation` two machines on one entity name: each machine's
+  interpreter writes its own;
+- a read in an app that declares no auth;
+- a read in an app that targets `cloudflare`, whose airlock does not perform one yet.
+
 ## Bridges: a sink the cluster hosts
 
 The airlock speaks HTTP and nothing else. That is what makes everything crossing it one
@@ -298,7 +418,7 @@ ledger and same re-entry, and it walls the bridge's own reach.
 The implemented declaration and container recipe are documented in
 [[../container-bridges|container bridges]]. A bridge is a role of a declared
 container hatch; it does not introduce a second container definition. Mail is one
-reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
+reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.25.0/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
 
 - **Re-entry follows the protocol.** SMTP carries no idempotency key, so a mail bridge is
   a sink that is not idempotent: the server's `250` is the done answer, and a crash
@@ -342,7 +462,8 @@ its inputs instead, an HKDF of the seed or the ledger key and a label.
 The key is an input: an effect declares `secrets`, the environment variables its handler
 needs, and the airlock hands their values to the handler as a third, frozen argument at
 each call, never writing them to the manifest or the ledger. The handler signs where it
-builds the body.
+builds the body. A value the reader types, a PIN, is a [secret field](2026-11-16-secret-fields.md)
+the same list names as `{field}`.
 
 - **A host-held signing capability** (`sink.sign`, built and removed): it kept the key
   out of program code, but specialised one algorithm into the airlock, when the
@@ -363,7 +484,7 @@ ticker only where one declares a schedule: `state.effects` in mecha's `cluster.c
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
 `airlock-mesh`), each referenced container hatch, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -507,7 +628,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 
@@ -557,6 +678,9 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | W3 | a claim in the plane, then two pokes of the ticker | 1, then 0 | the `airlock` row owed once; one `airlock_wake` row, the wake landing on the airlock's `/healthz`; the second poke emits nothing and wakes nothing |
 | G10 | a job with `attempts = max_attempts` and no run, written with its claim | 0 calls | the sweep settles it `unknown`, `data.dead` the queue's last error, the machine in onError |
 | W2 | `LISTEN "jobs:insert"`; a transition rolled back, then one committed | — | nothing heard before the commit, one notification after; the rolled-back one claimed and enqueued nothing |
+| H1 | got 16.2.0 under Deno 2.9.7 with quick-lru 7.3.0 as its cache, a sink answering `max-age=1` and an ETag | 1, then 1 | served from the cache within max-age; after it, revalidated with `If-None-Match` and the 304 served as the stored 200 |
+| H2 | the same, the sink sending no `Cache-Control`, the default applied in `beforeCache` | 1 | the second GET served from the cache; got's caller still sees the sink's own headers |
+| H3 | a GET timing out on a kept-alive socket, `timeout.request` 100 ms, no retry | **2** | answered after the sink's 500 ms, sent twice; with a connection per request it fails at 100 ms, sent once, which is why a read's agent keeps none alive |
 
 ## Rejected
 
@@ -623,10 +747,17 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 
 ## Open
 
+- **Reads at the edge and on Kubernetes.** The edge's airlock performs writes only, so a
+  program with a read is refused `cloudflare`; the native Kubernetes release deploys no
+  airlock yet. Both would take the same request, got's cache and the same journal.
+- **What runs a replay.** The airlock answers a read from the journal when it runs with
+  `replay`, as the ledger's `outcome` answers a write's invoke; no tool yet re-runs a
+  row's transitions against a database holding both.
+
 - **A client certificate for a sink.** Dapr's HTTP binding takes `MTLSClientCert`,
   `MTLSClientKey` and `MTLSRootCA` as component metadata, which would have to be read from
   a secret store the airlock's daprd does not run. The grammar would be `credential` with a
-  `certificate` kind; nothing declares one until an app needs it (ponto's eSocial).
+  `certificate` kind; nothing declares one until an app needs it.
 - **Bridges beyond mail.** A Dapr binding of another type as a bridge needs only its
   declaration in `state.bridges` and a call shape for the handler; a bridge the program
   owns needs a declaration for its image and its server.
@@ -689,7 +820,7 @@ One PR. These are its commits, in order, each green:
    `mecha-airlock.integration.test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
    cluster through declared container hatches, and mecha's
-   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
+   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.25.0/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.
    The mail service integration suite holds the bridge's answers against SMTP, `crypto_test.ts`

@@ -74,6 +74,7 @@ Deno.test({ name: "a signal moves a row once, is refused mid-check, and believes
       CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text, checks int NOT NULL DEFAULT 0);
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/job_key.sql", import.meta.url))}
       ${files["services/database/migrations/010_machines.sql"].text}
       ${files["services/database/migrations/802_signals.sql"].text}
       INSERT INTO payment (id, status, total) VALUES ('00000000-0000-0000-0000-000000000001', 'pending', 1),

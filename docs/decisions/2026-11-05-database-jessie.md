@@ -13,8 +13,8 @@ itself. Three positions share it:
 | A function | a transformed value the commit stores | the `plv8` language on PostgreSQL; `pgl_step` on the edge | yes |
 
 On PostgreSQL the `plv8` language is QuickJS's pljs, built under that name in the
-database image and in `@local`'s host Postgres from one pin
-([libraries/mecha/services/database/pljs/pins.cue](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/database/pljs/pins.cue)). It defines the
+database image and in `@host`'s Postgres from one pin
+([libraries/mecha/services/database/pljs/pins.cue](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/database/pljs/pins.cue)). It defines the
 `plv8` global, and raises a JavaScript error's first line as the error, its text and
 stack as the detail. The edge's `pgl_step` still runs the host's V8; pljs inside
 PGlite, on the edge and in the page, is the next step and retires that callback.
@@ -87,7 +87,10 @@ function needs one.
 wrapper reaches the engine. The edge object creates the engine over `pgl_step` under
 the step name `fn:<name>`, apart from any machine's
 ([[../../bundle/edge-functions.ts]], `mecha-edge/src/machines.ts`). The browser
-tier has no engine, so a call there fails.
+tier has no engine, so a call there fails. The same module, with its fuel, is
+emitted into the app as `.pronto/functions.json`, which the app's tests run
+through omnishell's `test/function-local.ts`
+([[../monorepo#commands-find-the-platform-with-mise-where|monorepo mode]]).
 
 It suits short, pure transformations of inputs larger than an event payload's
 declared shape: provider responses, documents, imported batches. Asynchronous
@@ -110,7 +113,7 @@ Alternatives not taken:
 ### `pgl_step` in the page
 
 The page's cluster runs stock `@electric-sql/pglite`, which lacks `pgl_step`: the
-module is linked into [pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/README.md)'s
+module is linked into [pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.25.0/packages/pglite-workerd/README.md)'s
 own reproducible build. Nothing in `pgl_step` is workerd's: it hands the call to
 whatever host sets `globalThis.__pgliteStep`, and a page's realm can. A browser
 loader or a browser variant of that build would give the page the engine every

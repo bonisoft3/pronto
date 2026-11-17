@@ -27,8 +27,8 @@
     "watch": [
       {
         "action": "sync",
-        "path": "../shell/index.html",
-        "target": "/render/shell/index.html",
+        "path": "../.pronto/development/index.html",
+        "target": "/render/.pronto/development/index.html",
         "initial_sync": true
       },
       {

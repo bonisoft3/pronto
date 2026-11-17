@@ -275,14 +275,18 @@ Deno.test('a committed-content snapshot sees changes immediately and preserves n
     await Deno.writeTextFile(path.join(dir, 'snapshot.ts'), `
       import assert from 'node:assert/strict'
       import { PGlite } from '@electric-sql/pglite'
-      import { snapshotSql, derivedSql } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'derived.ts'))))}
+      import { SNAPSHOT_TABLES_SQL, snapshotSql, derivedSql } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'derived.ts'))))}
       const db = await PGlite.create()
       await db.exec(\`CREATE TABLE source (id bigint PRIMARY KEY, amount numeric, stamp timestamptz);
         CREATE TABLE sink (id bigint PRIMARY KEY REFERENCES source(id), amount numeric);
         CREATE SCHEMA other; CREATE TABLE other.trigger (id integer PRIMARY KEY, n integer);
+        -- Concurrent compute sessions hold pg_temp_* tables that pg_stat_user_tables lists
+        -- even though a fresh psql session cannot read another session's temp schema.
+        CREATE TEMP TABLE session_scratch (id integer);
         INSERT INTO source VALUES (9007199254740993, 123456789.123456789123456789, '2026-10-06Z');
         INSERT INTO sink SELECT id, amount FROM source; INSERT INTO other.trigger VALUES (1, 0);\`)
-      const all = [{schema:'public',name:'source'}, {schema:'public',name:'sink'}, {schema:'other',name:'trigger'}]
+      const all = (await db.query(SNAPSHOT_TABLES_SQL)).rows[0].coalesce
+      assert.equal(all.some((t) => t.name === 'session_scratch' || t.schema.startsWith('pg_temp')), false)
       const read = async () => (await db.query(snapshotSql(all, ['source', 'sink']))).rows[0].json_build_object
       const before = await read()
       assert.match(before.rows.source, /9007199254740993/)
@@ -352,6 +356,12 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       "CREATE COLLATION search (provider = icu, locale = 'und-u-ks-level1', deterministic = false);",
       'CREATE TABLE names (name text COLLATE search);',
       "INSERT INTO names VALUES ('Flamengo'), ('São Paulo'), ('Other');",
+      // The page's PGlite loads unaccent from the payload, as a generated
+      // search column over it needs (emit.cue's #unaccentSql).
+      'CREATE EXTENSION unaccent SCHEMA public;',
+      "CREATE FUNCTION immutable_unaccent(text) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT RETURN public.unaccent('public.unaccent'::regdictionary, $1);",
+      "CREATE TABLE meeting (title text, search tsvector GENERATED ALWAYS AS (to_tsvector('simple', immutable_unaccent(title))) STORED);",
+      "INSERT INTO meeting VALUES ('Reunião de equipe'), ('Almoço');",
       // A drain the page calls as the service role, over the rows it boots with.
       'CREATE ROLE service NOLOGIN BYPASSRLS; GRANT USAGE ON SCHEMA public TO service;',
       'CREATE TABLE tally_count (n int NOT NULL); GRANT SELECT ON tally TO service; GRANT ALL ON tally_count TO service;',
@@ -423,6 +433,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
         note: await rows('SELECT id, tally_id, note FROM tally_note'),
         read: await rows('SELECT id, n FROM tally_read ORDER BY id'),
         search: await rows("SELECT name FROM names WHERE name LIKE '%flamengo%' OR name LIKE '%sao%' ORDER BY name"),
+        unaccented: await rows("SELECT title FROM meeting WHERE search @@ plainto_tsquery('simple', immutable_unaccent('Reuniao'))"),
         counted: await rows('SELECT n FROM tally_count'),
       }))
       await db.close()
@@ -443,6 +454,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       note: [{ id: 'x', tally_id: 'b', note: "it's $derived$" }],
       read: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
       search: [{ name: 'Flamengo' }, { name: 'São Paulo' }],
+      unaccented: [{ title: 'Reunião de equipe' }],
       counted: [{ n: 2 }],
     })
   } finally {

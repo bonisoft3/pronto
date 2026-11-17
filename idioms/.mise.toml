@@ -17,7 +17,7 @@ aqua.minisign = false
 "github:go-task/task" = "v3.54.0"
 "github:nushell/nushell" = "0.116.1"
 # The repo-wide CUE pin; exports must be byte-identical everywhere.
-"github:cue-lang/cue" = "0.16.1"
+"github:cue-lang/cue" = "0.18.0-rc.4"
 
 # Compares every proto the app does not withhold against its own git history
 # (plugins/pronto/check-proto.ts). Ships windows-x64 and windows-arm64.

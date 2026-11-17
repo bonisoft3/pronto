@@ -1,10 +1,6 @@
 # generated from bayt.cue — do not edit
 tasks:
   default:
-    env:
-      BUILDX_BAKE_ENTITLEMENTS_FS: "0"
-      COMPOSE_BAKE: "true"
-    run: once
     cmds:
     - |-
       sh -c "if [ -n \"\$BUILDKIT_SYNTAX\" ]; then
@@ -21,4 +17,8 @@ tasks:
       docker compose -p \"\$p\" --profile '*' -f \"\$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=\$?
       docker compose -p \"\$p\" --profile '*' -f \"\$f\" down -v --timeout 0 --remove-orphans
       exit \"\$s\""
+    env:
+      BUILDX_BAKE_ENTITLEMENTS_FS: "0"
+      COMPOSE_BAKE: "true"
+    run: once
 version: "3"

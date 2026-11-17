@@ -8,14 +8,15 @@ import (
 	"tool/file"
 )
 
-command: bootstrap: B={
+command: bootstrap: {
+	let B = self
 	existing: {
 		for name in ["pronto", ".say.yaml", ".mise.toml", ".mise.host.toml", "mise.lock", "mise.host.lock"] {
 			(name): file.Glob & {glob: name}
 		}
 	}
 	_matches: list.Concat([for _, scan in B.existing {scan.files}])
-	_after: [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"], B.existing[".mise.host.toml"], B.existing["mise.lock"], B.existing["mise.host.lock"]]
+	_after:   [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"], B.existing[".mise.host.toml"], B.existing["mise.lock"], B.existing["mise.host.lock"]]
 	if len(_matches) > 0 {
 		occupied: "bootstrap requires absent seed and configuration files" & false
 	}

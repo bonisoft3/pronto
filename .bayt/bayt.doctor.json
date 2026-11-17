@@ -37,8 +37,8 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
-      "do": "mise doctor",
       "name": "builtin",
+      "do": "mise doctor",
       "shell": "exec",
       "stop": false
     }

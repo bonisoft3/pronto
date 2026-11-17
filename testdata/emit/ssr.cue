@@ -5,7 +5,8 @@ package emit
 
 import pronto "github.com/bonisoft3/pronto"
 
-#ssrCase: S={
+#ssrCase: {
+	let S = self
 	reads: [...pronto.#Read]
 	child: *false | bool
 	route: *"/jogo/:id" | string
@@ -15,9 +16,9 @@ import pronto "github.com/bonisoft3/pronto"
 		_app: surface: screens: editor: {title: "Editor", route: S.route + "/edit", ssr: "spa", access: "private", reads: [], writes: [], charts: [], forms: [], states: [], files: {handlers: [], adapters: []}}
 	}
 	_terminal: (pronto.#DefaultTerminal & {code: _app}).out
-	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
-	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
-	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
+	_cluster:  (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
+	_loop:     (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
+	_build:    (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 	_files:    (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
 	caddyfile: _files["docker/Caddyfile"].text
 	brief:     _files["brief.html"].text
@@ -26,18 +27,19 @@ import pronto "github.com/bonisoft3/pronto"
 }
 
 #ssrView: #ssrCase & {reads: [_view]}
+
 // The services beside the door a host launch runs: those the program names (a plugin's,
 // code.meta.hostPeers); the renderer is a peer of the door's own variable, not listed here;
 // an app whose plugin states the list itself, as one did before, keeps it.
 #peersCase: {
 	peers: [string]: int
-	ssr: *true | bool
-	stated: *null | [...string]
-	_base: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}}
-	_ssr: #ssrCase & {reads: []}
-	_app: [if ssr {_ssr._app}, _base][0] & {meta: hostPeers: peers}
-	_statics: [if ssr {(pronto.#DefaultTerminal & {code: _app}).out.surface.statics}, []][0]
-	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _statics}).out & {if stated != null {meta: hostPeers: stated}}
+	ssr:       *true | bool
+	stated:    *null | [...string]
+	_base:     (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}}
+	_ssr:      #ssrCase & {reads: []}
+	_app:      [if ssr {_ssr._app}, _base][0] & {meta: hostPeers: peers}
+	_statics:  [if ssr {(pronto.#DefaultTerminal & {code: _app}).out.surface.statics}, []][0]
+	_cluster:  (pronto.#DefaultCluster & {code: _app, statics: _statics}).out & {if stated != null {meta: hostPeers: stated}}
 	hostPeers: _cluster.meta.hostPeers
 }
 
@@ -46,62 +48,64 @@ import pronto "github.com/bonisoft3/pronto"
 // refused over rows the server holds.
 #ssgCase: {
 	reads: *[] | [...pronto.#Read]
-	_app: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}} & {surface: screens: regras: {
-		title:   "Regras"
-		route:   "/regras"
-		"reads": reads
-		writes: []
-		charts: []
-		forms: []
-		states: []
-		prerender: true
-		files: {handlers: [], adapters: []}
-	}}
-	_terminal: (pronto.#DefaultTerminal & {code: _app}).out
-	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
-	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
-	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
-	_emit: pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}
-	_files: _emit.files
+	_app: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}} & {
+		surface: screens: regras: {
+			title:     "Regras"
+			route:     "/regras"
+			"reads":   reads
+			writes:    []
+			charts:    []
+			forms:     []
+			states:    []
+			prerender: true
+			files:     {handlers: [], adapters: []}
+		}
+	}
+	_terminal:      (pronto.#DefaultTerminal & {code: _app}).out
+	_cluster:       (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
+	_loop:          (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
+	_build:         (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
+	_emit:          pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}
+	_files:         _emit.files
 	pagesRedirects: _emit.pagesRedirects
-	caddyfile: _files["docker/Caddyfile"].text
-	entry: _terminal.surface.entry
+	caddyfile:      _files["docker/Caddyfile"].text
+	entry:          _terminal.surface.entry
 	routes: {
-		release: _files["shell/shell.json"].data.routes
+		release:     _files["shell/shell.json"].data.routes
 		development: _files[".pronto/development/shell.json"].data.routes
 	}
 
-	document:  _files["documents/regras/index.html"]
-	sitemap:   _files["sitemap.xml"].text
-	robots:    _files["robots.txt"].text
-	door:      ["sh", "-c", _cluster.surface.targets.caddy.entrypoint.dockerfile.do]
+	document: _files["documents/regras/index.html"]
+	sitemap:  _files["sitemap.xml"].text
+	robots:   _files["robots.txt"].text
+	door:     ["sh", "-c", _cluster.surface.targets.caddy.entrypoint.dockerfile.do]
 	// Installed, the terminal's statics are omnishell's image's, not the
 	// cluster's (builders/bayt.cue).
 	installedDoor: ["sh", "-c", (pronto.#DefaultCluster & {code: _app, statics: (_terminal & {surface: _installedSurface}).surface.statics}).out.surface.targets.caddy.entrypoint.dockerfile.do]
-	doorEnv:   _cluster.surface.targets.caddy.compose.environment
-	origin:    _cluster.surface.origin
+	doorEnv:       _cluster.surface.targets.caddy.compose.environment
+	origin:        _cluster.surface.origin
 }
 
 // Screen-level access ("public" | "private") and its derived rendering
 // strategy (#Screen.ssr) and sitemap visibility (#emit._crawlable).
 #accessCase: {
-	reads: [...pronto.#Read]
+	reads:  [...pronto.#Read]
 	extra?: {...}
 	// An app behind a sign-in, where a public screen is one open to visitors.
 	signIn: *false | bool
 	_base: (#readCase & {
 		"reads": reads
 		route:   "/jogos"
-		goal: {table: "goal", durability: "live", access: {scope: "public"}}
+		goal:    {table: "goal", durability: "live", access: {scope: "public"}}
 	}).app & {
 		capabilities: auth: {required: signIn, service: "/auth"}
 		surface: screens: jogo: {files: {handlers: [], adapters: []}, [if extra != _|_ {extra}, {}][0]}
 	}
 	_terminal: (pronto.#DefaultTerminal & {code: _base}).out
-	_cluster: (pronto.#DefaultCluster & {code: _base, statics: _terminal.surface.statics}).out
-	_loop: (pronto.#DefaultLoop & {code: _base, terminal: _terminal, cluster: _cluster}).out
-	_build: (pronto.#DefaultBuild & {code: _base, loop: _loop, cluster: _cluster, terminal: _terminal}).out
-	_files: (pronto.#emit & {code: _base, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
+	_cluster:  (pronto.#DefaultCluster & {code: _base, statics: _terminal.surface.statics}).out
+	_loop:     (pronto.#DefaultLoop & {code: _base, terminal: _terminal, cluster: _cluster}).out
+	_build:    (pronto.#DefaultBuild & {code: _base, loop: _loop, cluster: _cluster, terminal: _terminal}).out
+	_files:    (pronto.#emit & {code: _base, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
 	out: {
 		screen: {
 			access: _base.surface.screens.jogo.access

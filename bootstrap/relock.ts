@@ -76,7 +76,6 @@ out: toml.Marshal((distribution.#Project & terminal.#Project & mecha.#Project & 
     await Deno.writeTextFile(join(work, configFile), roster);
     await Deno.writeTextFile(join(work, lockFile), "");
     const env: Record<string, string> = {
-      MISE_LOCKED: "0",
       MISE_TRUSTED_CONFIG_PATHS: work,
       MISE_GLOBAL_CONFIG_FILE: join(work, "none.toml"),
     };

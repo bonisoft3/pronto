@@ -133,3 +133,28 @@ export def main [
 	print $"identity: the broker is live at ($address), its issuer ($issuer)"
 	print $"identity: an app signs in through it with issuer ($issuer) and client `origin` \(identity.#Signin & {signin: broker: "($issuer)"}\)"
 }
+
+export def "main txt" [
+	--project: string             # The Google Cloud project holding <service>-secret
+	--domain: string              # Where the broker answers, its issuer: id.example.com
+	--service: string = "identity-broker"
+	--json                        # Emit machine-readable JSON array
+	...tenants: string            # Bare https origins (e.g. https://iris.cleaning)
+] {
+	if ([$project $domain] | any { is-empty }) or ($tenants | is-empty) {
+		error make {msg: "--project, --domain and at least one https tenant origin are required"}
+	}
+	let secret = (gc secrets versions access latest --secret $"($service)-secret" --project $project | str trim)
+	let issuer = $"https://($domain)"
+	let core_url = ($"file://($here)/broker/core.ts")
+	let script = $"import { tenantTrustKey, tenantTxtHost, tenantTxtValue } from '($core_url)';
+const key = await tenantTrustKey\(Deno.env.get\('BROKER_SECRET'\)!\);
+const issuer = Deno.env.get\('BROKER_ISSUER'\)!;
+const rows = [];
+for \(const t of Deno.args\) rows.push\({ name: tenantTxtHost\(t\), type: 'TXT', value: await tenantTxtValue\(key, issuer, t\) }\);
+console.log\(JSON.stringify\(rows\)\);"
+	let raw = (with-env {BROKER_SECRET: $secret, BROKER_ISSUER: $issuer} {
+		^deno eval --no-config $script ...$tenants
+	} | str trim)
+	if $json { print $raw } else { $raw | from json }
+}

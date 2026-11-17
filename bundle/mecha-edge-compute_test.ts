@@ -1,6 +1,26 @@
 import assert from 'node:assert/strict'
 import { fixture } from './mecha-edge-fixture.ts'
 
+Deno.test({ name: 'detailed compute status observes PostgreSQL memory without opening it', sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { worker, at, cleanup } = await fixture(25, 'disabled', false, false, true)
+  try {
+    await worker.restart()
+    const status = async (detail = true) => await (await at(`/import/compute${detail ? '?detail=1' : ''}`, {
+      headers: { authorization: 'Bearer test-import' },
+    })).json() as { postgresMemoryBytes?: number | null }
+    assert.equal((await status()).postgresMemoryBytes, null)
+    assert.equal((await status()).postgresMemoryBytes, null)
+    assert.equal('postgresMemoryBytes' in await status(false), false)
+    assert.equal((await at('/auth/guest', { method: 'POST' })).status, 200)
+    const opened = (await status()).postgresMemoryBytes
+    assert.equal(typeof opened, 'number')
+    assert.ok(opened! > 0)
+    const withoutSql = await at('/test/compute-no-sql')
+    assert.equal(withoutSql.status, 200)
+    assert.equal((await withoutSql.json() as { postgresMemoryBytes: number }).postgresMemoryBytes, opened)
+  } finally { await cleanup() }
+})
+
 Deno.test({ name: 'edge computation arms durable retry, survives restart and publishes live source edits', sanitizeResources: false, sanitizeOps: false }, async () => {
   const { worker, state, until, at, cleanup } = await fixture()
   try {
@@ -9,6 +29,16 @@ Deno.test({ name: 'edge computation arms durable retry, survives restart and pub
     const failed = await until(value => value.batches[0]?.failures > 0)
     assert.deepEqual(failed.rows, [])
     assert.equal(failed.failures[0].identity.name, 'copy')
+    assert.equal((await at('/import/compute')).status, 401)
+    const status = await at('/import/compute', { headers: { authorization: 'Bearer test-import' } })
+    assert.equal(status.status, 200)
+    const report = await status.json() as { coordinator: { failures: { identity: { name: string } }[] }; readers: unknown[] }
+    assert.equal(report.coordinator.failures[0].identity.name, 'copy')
+    assert.deepEqual(report.readers, [])
+    const detail = await at('/import/compute?detail=1', { headers: { authorization: 'Bearer test-import' } })
+    assert.equal(detail.status, 200)
+    assert.deepEqual((await detail.json() as { coordinator: { details: unknown[] } }).coordinator.details, [])
+    assert.equal((await at('/import/compute', { method: 'POST', headers: { authorization: 'Bearer test-import' } })).status, 405)
     assert.notEqual(failed.alarm, null)
     await worker.restart()
     await at('/test/mend')

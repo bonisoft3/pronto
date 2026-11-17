@@ -1,6 +1,7 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { computationDefinitions, computationMachine, type PackagedComputation } from './compute.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 const digest = async (bytes: Uint8Array<ArrayBuffer>) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('')
 const textDigest = (text: string) => digest(new TextEncoder().encode(text))
@@ -32,6 +33,7 @@ export async function writeEdgeCompute(out: string, mecha: string, omnishell: st
   const edge = path.join(mecha, 'packages/mecha-edge/src')
   const runtime = path.join(mecha, 'services/compute')
   const hostFiles = [
+    path.join(mecha, 'packages/compute-snapshot/src/chunk-limits.ts'),
     ...['compute.ts', 'snapshot-query.ts', 'snapshot-compute.ts', 'snapshot-program.ts', 'paged-query.ts', 'paged-execution.ts', 'paged-compute.ts', 'paged-transport.ts', 'paged-query-action.ts', 'query-sql.ts'].map(file => path.join(edge, file)),
     ...['static-build.ts', 'static-cage.ts', 'query-stages.ts'].map(file => path.join(runtime, file)),
     fileURLToPath(new URL('edge-compute.ts', import.meta.url)),
@@ -91,7 +93,7 @@ console.log(JSON.stringify(inputs.map(p=>({factory:staticFactory(p.compiled,p.fi
       wasm.push(`${JSON.stringify(path.basename(base, '.wasm'))}:${previous.variable}`)
     }
     const { name: computation, to, endowments, types, queryTypes, sinkTypes, sinkWrites } = p.spec
-    const contract = { paged: Boolean(p.spec.steps), version: p.version, reads: p.reads, queries: p.queries, ...(p.queryStages ? { queryStages: p.queryStages } : {}), spec: { name: computation, file: `${computation}.js`, to, endowments, types, queryTypes, sinkTypes, sinkWrites } }
+    const contract = { paged: true, version: p.version, reads: p.reads, queries: p.queries, ...(p.queryStages ? { queryStages: p.queryStages } : {}), spec: { name: computation, file: `${computation}.js`, to, endowments, types, queryTypes, sinkTypes, sinkWrites } }
     queryPrograms.push(contract)
     entries.push(`{...${JSON.stringify(contract)},factory:${factories[index].factory},${factories[index].steps ? `steps:${factories[index].steps},` : ""}wasm:{${wasm.join(',')}}}`)
   }
@@ -116,10 +118,6 @@ export class Queries {
     if(path!=='/execute'&&path!=='/paged')return new Response(null,{status:404});
     try {
       const body=await request.json();
-      if(path==='/paged'&&body.action==='cleanup'){
-        if(this.ready)(await this.ready).close();
-        this.ready=null;this.mode=null;await this.ctx.storage.deleteAll();return Response.json({cleared:true});
-      }
       const db=await this.open(path==='/paged');
       return Response.json(path==='/paged'?await pagedQueryAction(db,programs,body):snapshotQuery(db,programs,body));
     } catch(error) { return new Response(error instanceof Error ? error.message : String(error),{status:500}); }
@@ -128,7 +126,12 @@ export class Queries {
 export default {fetch(request,env){
   const url=new URL(request.url);const key=url.pathname==='/paged'?url.searchParams.get('key'):null;
   if(url.pathname==='/paged'&&(!key||key.length>4096))return new Response('missing capture key',{status:400});
-  return env.QUERIES.get(env.QUERIES.idFromName(key?'paged:'+key:'queries')).fetch(request);
+  let name='queries';
+  if(key){
+    let parsed;try{parsed=JSON.parse(key);}catch{parsed=null;}
+    name=Array.isArray(parsed)&&typeof parsed[0]==='string'&&parsed[0]?'paged:'+parsed[0]:'paged:'+key;
+  }
+  return env.QUERIES.get(env.QUERIES.idFromName(name)).fetch(request);
 }};
 `)
   await Deno.writeTextFile(path.join(executionDirectory, 'entry.ts'), `import { computeSnapshot } from ${JSON.stringify(modulePath(executionDirectory, path.join(edge, 'snapshot-compute.ts')))};
@@ -157,7 +160,7 @@ export default {fetch(request,env){return env.COMPUTATIONS.get(env.COMPUTATIONS.
     await Deno.remove(path.join(dir, 'entry.ts'))
   }
   const common = {
-    main: 'worker.js', compatibility_date: '2026-09-01', workers_dev: false, preview_urls: false,
+    main: 'worker.js', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, workers_dev: false, preview_urls: false,
     observability: { enabled: true }, limits: { cpu_ms: 300000 },
     rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false }],
   }
@@ -185,7 +188,7 @@ export default {fetch(request,env){return env.COMPUTATIONS.get(env.COMPUTATIONS.
   }, null, 2))
   const config = {
     definitions: computationDefinitions(packaged),
-    paged: packaged.filter(p => p.spec.steps).map(p => p.spec.name),
+    paged: packaged.map(p => p.spec.name),
     services: [{ binding: 'COMPUTE', service: computeName }],
     deployments: ['compute/queries/wrangler.jsonc', 'compute/execution/wrangler.jsonc'],
   }

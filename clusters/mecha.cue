@@ -161,7 +161,15 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 	}
 }
 
-#Project: {tools: toolchain.#Tools, hostTools: #HostTools, hostToolAliases: #HostToolAliases, ...}
+#Version: "0.25.0"
+
+#Tools: {
+	...
+	for k, v in toolchain.#Tools if k != "github:bonisoft3/mecha" {(k): v}
+	"github:bonisoft3/mecha": #Version
+}
+
+#Project: {tools: #Tools, hostTools: #HostTools, hostToolAliases: #HostToolAliases, ...}
 
 #Cluster: impl.#Cluster
 #Runtime: impl.#Runtime
@@ -169,6 +177,9 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 // The dev service token, which crud's dev secret verifies.
 #DevServiceJwt: impl.#DevServiceJwt
+// The development seal key, the local stack's alone: a release refuses it.
+#DevSealKey: impl.#DevSealKey
+#TenancySql:    impl.#TenancySql
 
 // What a sink's origin may be: the airlock's daprd dials it.
 #Origin: impl.#Origin
@@ -183,6 +194,8 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AppliancePorts: impl.#AppliancePorts
 #DuckdbExtensionsMarker: impl.#DuckdbExtensionsMarker
 #AppliancePostgres: impl.#AppliancePostgres
+#AppliancePgdg: impl.#AppliancePgdg
+#PostgresArgs: impl.#PostgresArgs
 
 // Mecha's AI gateway (services/airlock/tsbifrost.ts) and the tiered AI model schema.
 #TsBifrostPort:   impl.#TsBifrostPort
@@ -193,10 +206,13 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AiProvider:      impl.#AiProvider
 #AiModelSpec:     impl.#AiModelSpec
 #AiTierOverrides: impl.#AiTierOverrides
+#AiRouted:        impl.#AiRouted
+#AiEdgeOverrides: impl.#AiEdgeOverrides
 #AiCapability:    impl.#AiCapability
 
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
+#UnaccentSql:      impl.#UnaccentSql
 
 // The tenancy floor for a database's schemas, and the step it takes.
 #Tenancy:          impl.#Tenancy
@@ -219,14 +235,20 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #Images:  impl.#Images
 
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.22.0@sha256:8b711e8ac228f49e6f0e8871cc45b7e8bd3cacbf99ab30ca224a3fa4416e3ecf"
-	auth:     "ghcr.io/bsoneca/mecha-auth:0.22.0-host.17@sha256:97ab5f5cac0cb4ecdb3bc10a4d422f44c2f93d31b4667c044cc9d1fabad56838"
-	clock:    "bonitao/mecha-clock:0.22.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
-	compute:  "bonitao/mecha-compute:0.22.0@sha256:58f8cd581d5928feccd655a2f4d20e8ca25200cfa7438c06f1146a8427098cd7"
-	conduit:  "bonitao/mecha-conduit:0.22.0@sha256:66ff44e36bbc9e18858a56ee17c17b9a1746960c1817fec38fbf11d4c3d2eef1"
-	database: "bonitao/mecha-database:0.22.0@sha256:ed58b6be6cd69658fbb4e6daff1f91b8923b333f364905c4dacdec2974a05d82"
-	mesh:     "bonitao/mecha-mesh:0.22.0@sha256:8d39aa3543560232c52330152ba70a4d2c973b76d0ac97899d677704bc0e09a4"
-	ticker:   "bonitao/mecha-ticker:0.22.0@sha256:7a1967fd2b02cfc05b0bd728569431f7e57ecd236676313f18f04e52c9eef2a4"
+	activepieces: "bonitao/mecha-activepieces:0.25.0@sha256:62b5df4ebe365eff851d9b6fc2d777015d664b55d143c47381657ab2850596f5"
+	airlock:      "bonitao/mecha-airlock:0.25.0@sha256:82dd88d15578025b4c5534309f2b3336a96ba1c0a58de7bb8f27dc90c0d3d310"
+	auth:         "ghcr.io/bsoneca/mecha-auth:0.25.0-host.1@sha256:a29a48f893bc0475a727ffb96450407e8dfb48942183ecc5eb94a636bcded30d"
+	clock:        "bonitao/mecha-clock:0.25.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
+	compute:      "bonitao/mecha-compute:0.25.0@sha256:b7d6f8accd687fae517b9045deb2885cfa39f94da1cd4addc2ebe00c8e99eac0"
+	conduit:      "bonitao/mecha-conduit:0.25.0@sha256:b2a62f102193a1abdfb048043b28cfd39272a2550798e44c28491bc81a7406b2"
+	database:     "bonitao/mecha-database:0.25.0@sha256:d8eb2aa35230b1835ef1da15e45b342d0e49312db85667e69f26e4b0d5d285fb"
+	extensions:   "bonitao/mecha-extensions:0.25.0@sha256:d3fe4b3869ded07a410579c2928f951bb42c3bdc14ada1122b5cf0a7d7c11c9f"
+	mesh:         "bonitao/mecha-mesh:0.25.0@sha256:8d39aa3543560232c52330152ba70a4d2c973b76d0ac97899d677704bc0e09a4"
+	ticker:       "bonitao/mecha-ticker:0.25.0@sha256:986f5ff959b9dd0cfc0f7721947c44797cf899dd838e0fc3fa17d18b6933e29a"
 }
 
 #ActivepiecesContainer: impl.#ActivepiecesContainer
+#IsolateContainer:      impl.#IsolateContainer
+#IsolateDeadlineMs:     impl.#IsolateDeadlineMs
+#IsolateBuild:          impl.#IsolateBuild
+#BridgePort:            impl.#BridgePort

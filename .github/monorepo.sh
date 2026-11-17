@@ -75,6 +75,6 @@ deno bundle -q --node-modules-dir=none --no-lock --config "$client/deno.json" --
 mkdir -p "$dest/cue.mod"
 cat >"$dest/cue.mod/module.cue" <<'EOF'
 module: "bonisoft.org"
-language: version: "v0.16.1"
+language: version: "v0.18.0"
 EOF
 echo "monorepo: $dest"

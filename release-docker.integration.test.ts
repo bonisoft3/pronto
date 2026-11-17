@@ -4,7 +4,7 @@
 // testdata/appliance: a row machine whose effect an embedded bridge answers, and
 // a drain, whose function a forward migration creates, counting the answers off
 // the change feed. Building it needs Docker and the monorepo.
-import { assertEquals } from "jsr:@std/assert@1.0.11";
+import { assertStringIncludes, assertEquals } from "jsr:@std/assert@1.0.11";
 import { fromFileUrl, join } from "jsr:@std/path@1.0.8";
 
 const ROOT = fromFileUrl(new URL("../../", import.meta.url));
@@ -46,6 +46,7 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
   const app = join(ROOT, "apps", name);
   const image = `ghcr.io/bonisoft3/${name}:latest`;
   const container = `${name}-run`;
+  const volume = `${name}-data`;
   await copyTree(join(ROOT, "apps", "yogurt"), app);
   try {
     // The fixture beside yogurt's own program, under the copy's name.
@@ -63,10 +64,10 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
 
     await must(join(ROOT, "plugins/sayt/sayt.sh"), ["generate"], { cwd: app });
     await must("mise", ["exec", "--", "docker", "compose", "build", "release-docker"], { cwd: app });
-    await must("docker", ["run", "-d", "--name", container, image]);
+    await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
 
     const psql = (sql: string) => must("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1", "-U", "postgres", "-d", name], { stdin: sql });
-    const up = () => until("the appliance", async () => (await run("docker", ["exec", container, "sh", "-c", "portcheck --port 9997 && portcheck --port 3000"])).ok, (v) => v, 180);
+    const up = () => until("the appliance", async () => (await run("docker", ["exec", container, "sh", "-c", "portcheck --port 9997 && portcheck --port 3000 && httpcheck http://127.0.0.1:3002/v1/health"])).ok, (v) => v, 180);
     const ping = async (id: string) => {
       await psql(`INSERT INTO ping (id, status) VALUES ('${id}', 'pending'); UPDATE ping SET status = 'sending' WHERE id = '${id}';`);
       return until(`ping ${id}`, () => psql(`SELECT status || '|' || coalesce(answer, '') FROM ping WHERE id = '${id}'`), (v) => v.startsWith("answered"), 90);
@@ -74,6 +75,39 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
     const id = (n: number) => `00000000-0000-0000-0000-00000000000${n}`;
     await up();
 
+    await t.step("PostgreSQL keeps acknowledged writes durable", async () => {
+      assertEquals(await psql("SELECT current_setting('fsync') || '|' || current_setting('synchronous_commit') || '|' || current_setting('full_page_writes')"), "on|on|on");
+    });
+
+    await t.step("Caddy uses the configured certificate directory", async () => {
+      await until("Caddy certificate storage", async () => {
+        const result = await run("docker", ["exec", container, "sh", "-c", 'tr "\\0" "\\n" < /proc/$(pidof caddy)/environ | sed -n "/^XDG_DATA_HOME=/p"']);
+        return result.out;
+      }, (value) => value === "XDG_DATA_HOME=/var/lib/caddy", 30);
+    });
+
+    let shapeHandle = "";
+    await t.step("Electric serves the live rows", async () => {
+      await psql(`INSERT INTO ping (id, status) VALUES ('${id(6)}', 'pending')`);
+      const url = "http://127.0.0.1:3002/v1/shape?table=ping&secret=dev-electric-secret";
+      const snapshot = await must("docker", ["exec", container, "curl", "-fsSi", `${url}&offset=-1`]);
+      assertStringIncludes(snapshot, id(6));
+      const handle = snapshot.match(/^electric-handle:\s*(.+)\r?$/im)?.[1].trim();
+      const offset = snapshot.match(/^electric-offset:\s*(.+)\r?$/im)?.[1].trim();
+      if (!handle || !offset) throw new Error("Electric snapshot omitted its handle or offset");
+      shapeHandle = handle;
+      await psql(`INSERT INTO ping (id, status) VALUES ('${id(7)}', 'pending')`);
+      const updates = () => must("docker", ["exec", container, "curl", "-fsS", `${url}&handle=${encodeURIComponent(handle)}&offset=${encodeURIComponent(offset)}`]);
+      await until("Electric update", updates, (v) => v.includes(id(7)), 60);
+    });
+    await t.step("a replacement container keeps Electric's shapes on the volume", async () => {
+      await must("docker", ["rm", "-f", container]);
+      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
+      await up();
+      const shape = await must("docker", ["exec", container, "curl", "-fsSi", "http://127.0.0.1:3002/v1/shape?table=ping&offset=-1&secret=dev-electric-secret"]);
+      assertStringIncludes(shape, id(6));
+      assertStringIncludes(shape, `electric-handle: ${shapeHandle}`);
+    });
     await t.step("a row moves through the effect to its onDone state, answered by the embedded bridge", async () => {
       assertEquals(await ping(id(1)), "answered|from-the-stub");
     });
@@ -91,24 +125,34 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
       assertEquals(await ping(id(2)), "answered|from-the-stub");
     });
     await t.step("a change made while Conduit is down reaches the drain once it restarts, the slot holding it", async () => {
+      assertEquals(await until("settled ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "2", 90), "2");
+      await must("docker", ["exec", container, "sh", "-c", 'kill -STOP $(pgrep -f "[c]onduit run")']);
+      await psql(`DELETE FROM ping WHERE id = '${id(2)}';`);
+      assertEquals(await psql("SELECT answered FROM ping_count"), "2");
       await must("docker", ["exec", container, "sh", "-c", 'kill -9 $(pgrep -f "[c]onduit run")']);
+      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "1", 90), "1");
       assertEquals(await ping(id(5)), "answered|from-the-stub");
-      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "3", 90), "3");
+      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "2", 90), "2");
     });
     await t.step("a killed bridge is restarted", async () => {
       await must("docker", ["exec", container, "sh", "-c", 'kill -9 $(pgrep -f "[p]ing-stub.ts")']);
       assertEquals(await ping(id(3)), "answered|from-the-stub");
     });
-    await t.step("a restarted container keeps the ledger and answers new rows", async () => {
-      await must("docker", ["restart", container]);
+    await t.step("a replacement container keeps the ledger and answers new rows", async () => {
+      await must("docker", ["rm", "-f", container]);
+      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
       await up();
+      const shape = await must("docker", ["exec", container, "curl", "-fsSi", "http://127.0.0.1:3002/v1/shape?table=ping&offset=-1&secret=dev-electric-secret"]);
+      assertStringIncludes(shape, id(6));
+      assertStringIncludes(shape, `electric-handle: ${shapeHandle}`);
       assertEquals(await ping(id(4)), "answered|from-the-stub");
       assertEquals(await psql("SELECT count(*) FROM airlock.external_effect_ledger WHERE outcome->>'kind' = 'done'"), "5");
-      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "5", 60), "5");
+      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "4", 60), "4");
       assertEquals(await psql("SELECT count(*) FROM pgroll.migrations WHERE name = '040_ping_count' AND done"), "1");
     });
   } finally {
     await run("docker", ["rm", "-f", container]);
+    await run("docker", ["volume", "rm", volume]);
     await Deno.remove(app, { recursive: true });
   }
 } });

@@ -1,3 +1,7 @@
+// The assertions below state a leaf's world and its event side by side; the
+// leaf itself takes them as XState's one argument.
+// deno-lint-ignore no-explicit-any
+const positional = (leaf: any) => (state: any, event?: any, ...rest: any[]) => leaf({ context: state, event }, ...rest);
 // A handler file is one arrow expression, not a module: evaluating its text
 // yields the function, the way the terminal's compartment does.
 type Update = { op: string; entity?: string; id: string; row?: Record<string, unknown> };
@@ -5,7 +9,7 @@ type Reply = { updates: Update[]; then?: { type: string; seed?: boolean } };
 type Handler = (state: { items?: unknown[]; rows?: Record<string, unknown[]> }, event: Record<string, unknown>) => Reply;
 
 const load = async (name: string): Promise<Handler> =>
-  (0, eval)(await Deno.readTextFile(new URL(`../shell/handlers/${name}.js`, import.meta.url)));
+  positional((0, eval)(await Deno.readTextFile(new URL(`../shell/handlers/${name}.js`, import.meta.url))));
 
 const assertEquals = (actual: unknown, expected: unknown) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {

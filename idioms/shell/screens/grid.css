@@ -1,3 +1,5 @@
+[data-screen="grid"] { padding: var(--sp-lg); }
+.score { text-align: center; }
 .lights { --cols: 5; display: grid; grid-template-columns: repeat(var(--cols), 3rem); gap: var(--sp-sm); justify-content: center; }
-.light { aspect-ratio: var(--ratio-square); border-radius: var(--r-sm); background: var(--surface-muted); }
+.light { box-sizing: border-box; aspect-ratio: var(--ratio-square); padding: var(--size-1); border: var(--border-size-1) solid var(--border); border-radius: var(--r-sm); background: var(--surface-muted); cursor: pointer; }
 .light[data-on="yes"] { background: var(--accent); }

@@ -15,7 +15,7 @@ Deno.test('edge computations package private immutable Workers, static WASM and 
     const programs = await computationPackages(`${temporary}/app`, mecha)
     const output = await writeEdgeCompute(`${temporary}/release`, mecha, omnishell, programs, 'fixture')
     assert.equal(output?.services[0].binding, 'COMPUTE')
-    assert.deepEqual(output?.paged, ['second'])
+    assert.deepEqual(output?.paged, ['copy', 'second'])
     assert.match(output!.services[0].service, /^fixture-compute-[a-f0-9]{12}$/)
     assert.notEqual(output!.definitions[0].version, programs[0].version)
     const directory = `${temporary}/release/compute`
@@ -40,7 +40,7 @@ Deno.test('edge computations package private immutable Workers, static WASM and 
     assert.deepEqual(output!.definitions[0].sinkWrites, { sink: 'upsert' })
     assert.deepEqual(declarations[0].spec.sinkWrites, { sink: 'upsert' })
     assert.equal(output!.definitions[1].sinkWrites, undefined)
-    assert.equal(declarations[0].paged, false)
+    assert.equal(declarations[0].paged, true)
     assert.equal(declarations[1].paged, true)
     const repeated = await writeEdgeCompute(`${temporary}/repeat`, mecha, omnishell, programs, 'fixture')
     assert.equal(repeated!.services[0].service, output!.services[0].service)

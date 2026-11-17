@@ -5,7 +5,11 @@
 // `wrangler deploy` builds the image from, read off the files bayt renders
 // for the cluster target, are all decided here.
 import * as path from 'node:path'
+import { createHash } from 'node:crypto'
 import { parse } from '@std/yaml'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
+
+export type BridgeInstanceType = 'lite' | 'basic' | 'standard-1' | 'standard-2' | 'standard-3' | 'standard-4'
 
 /** A bridge as .pronto/cluster.json lists it (emit.cue): `build` is the
  * cluster target building the real container, whose Dockerfile and compose
@@ -15,18 +19,28 @@ export interface ClusterBridge {
   container: string
   port: number
   targets: string[]
+  instance_type?: BridgeInstanceType
   build: string
+  /** An isolate hatch's bridge ([[../docs/isolate-hatches]]): on cloudflare a
+   * Worker of its own, not a Container. */
+  isolate?: { entrypoint: string; files: string[]; memory: number; build: string }
 }
 
 export const CLOUDFLARE = 'cloudflare'
+
+/** A bridge's binding in the dispatcher, a container's or an isolate's:
+ * `fetch-pages` is bound as BRIDGE_FETCH_PAGES. */
+export function bridgeBinding(bridge: string): string {
+  return `BRIDGE_${bridge.replaceAll('-', '_').toUpperCase()}`
+}
 
 /** The Durable Object binding and class of a bridge's container in the
  * dispatcher: `fetch-pages` is bound as BRIDGE_FETCH_PAGES, class BridgeFetchPages. */
 export function bridgeNames(bridge: string): { binding: string; className: string } {
   const words = bridge.split('-')
-  if (words.includes('')) throw new Error(`bridge ${bridge}: an empty segment between hyphens names no class or binding`)
+  if (words.includes('')) throw new Error(`bridge ${bridge}: an empty segment between hyphens names no class`)
   return {
-    binding: `BRIDGE_${words.join('_').toUpperCase()}`,
+    binding: bridgeBinding(bridge),
     className: `Bridge${words.map(w => w[0].toUpperCase() + w.slice(1)).join('')}`,
   }
 }
@@ -38,19 +52,61 @@ export async function clusterBridges(app: string): Promise<ClusterBridge[]> {
   return bridges
 }
 
-/** The bridges on cloudflare, each a class and a binding of the dispatcher
- * that no other bridge takes: `a-1b` and `a1b` are both BridgeA1b. */
+/** The bridges on cloudflare, each a binding of the dispatcher, and a
+ * container's a class of it too, that no other bridge takes: containers
+ * `a-1b` and `a1b` are both BridgeA1b. An isolate is a Worker of its own,
+ * no class. */
 export function onCloudflare(bridges: ClusterBridge[]): ClusterBridge[] {
   const chosen = bridges.filter(b => b.targets.includes(CLOUDFLARE))
   const taken = new Map<string, string>()
   for (const b of chosen) {
-    for (const name of Object.values(bridgeNames(b.name))) {
+    for (const name of b.isolate === undefined ? Object.values(bridgeNames(b.name)) : [bridgeBinding(b.name)]) {
       const other = taken.get(name)
       if (other !== undefined) throw new Error(`bridges ${other} and ${b.name} are both ${name} in the dispatcher: rename one`)
       taken.set(name, b.name)
     }
   }
   return chosen
+}
+
+/** An isolate's Worker, named after the dispatcher that binds it. A name past
+ * Cloudflare's 63 characters keeps its head and ends in a hash of the whole,
+ * so any bridge name the schema accepts names a Worker, and no two differ
+ * only past the cut. */
+export function isolateWorkerName(dispatcher: string, bridge: string): string {
+  const name = `${dispatcher}-${bridge}`
+  if (name.length <= 63) return name
+  return `${name.slice(0, 54).replace(/-+$/, '')}-${createHash('sha256').update(name).digest('hex').slice(0, 8)}`
+}
+
+/** An isolate bridge's Worker, written under airlock/isolates/<bridge>: the
+ * module built as every release builds it (libraries/mecha's #IsolateBuild,
+ * carried in .pronto/cluster.json), its entry the Worker's main and the rest,
+ * WebAssembly among it, uploaded as modules beside it, with wrangler's own
+ * bundling off, so what deploys is that build. Answers the config's path
+ * under `out`, for the publish to deploy before the dispatcher binding it. */
+export async function writeIsolateWorker(out: string, app: string, bridge: ClusterBridge, name: string): Promise<string> {
+  const isolate = bridge.isolate
+  if (isolate === undefined) throw new Error(`bridge ${bridge.name} is no isolate's`)
+  const dir = path.join(out, 'airlock/isolates', bridge.name)
+  const built = await new Deno.Command(Deno.execPath(), {
+    args: ['eval', '--no-config', isolate.build],
+    env: { ISOLATE_ROOT: app, ISOLATE_OUT: dir, ISOLATE_ENTRYPOINT: isolate.entrypoint, ISOLATE_FILES: JSON.stringify(isolate.files) },
+    stdout: 'inherit', stderr: 'inherit',
+  }).output()
+  if (!built.success) throw new Error(`isolate ${bridge.name}: building ${isolate.entrypoint} failed`)
+  await Deno.writeTextFile(path.join(dir, 'wrangler.jsonc'), JSON.stringify({
+    name,
+    main: 'entry.js',
+    compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
+    workers_dev: false,
+    preview_urls: false,
+    observability: { enabled: true },
+    no_bundle: true,
+    find_additional_modules: true,
+    rules: [{ type: 'ESModule', globs: ['**/*.js'] }, { type: 'CompiledWasm', globs: ['**/*.wasm'] }],
+  }, null, 2) + '\n')
+  return path.relative(out, path.join(dir, 'wrangler.jsonc')).replaceAll('\\', '/')
 }
 
 /** What `wrangler deploy` builds and runs the container with, as bayt

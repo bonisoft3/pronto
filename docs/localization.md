@@ -15,7 +15,7 @@ finding — rather than shown in the default language. Formatting belongs to the
 terminal; of the modules an app writes, only an adapter holds `Intl`, and a
 guarded one. What an author writes is
 [the guide's i18n section](../GUIDE.md#i18n); what a screen may say is
-omnishell's [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#placeholders).
+omnishell's [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md#placeholders).
 
 ## Locale tags
 
@@ -112,7 +112,7 @@ to the Portuguese document. The router reads `location.pathname`: a hash is
 invisible to the server, so no rendered document could answer `#/reglas`.
 
 **The terminal resolves a page's locale** in the order omnishell's
-[reference](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#placeholders) gives, and the
+[reference](https://github.com/bonisoft3/omnishell/blob/v0.25.0/REFERENCE.md#placeholders) gives, and the
 document renderer and the storybook are handed the locale they render. The order puts
 present intent above a standing preference: `Accept-Language` is declared once
 to a browser for every site, so it beats an app's default and never overrides a
@@ -126,11 +126,11 @@ rendered](screens.md#how-a-routes-first-document-is-rendered)), renders one
 document per locale, and a route rendered on request (`ssr: "ssr"`) one per
 request; each carries `lang`, `dir`, its title in that language, an absolute
 canonical, its `hreflang` siblings and `x-default`, absolute against the
-deployment's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/proxy.md#the-origin))
+deployment's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/proxy.md#the-origin))
 — a prerendered one through the door, as the sitemap is. Only a param-less route can be prerendered, because the rows an
 `/article/:slug` needs do not exist at build. The choice is per route since
 the split falls inside apps: shadcnui's documentation routes are content,
-thenote's `/note/:id` would be harmed by indexing, and realworld's
+a private `/note/:id` would be harmed by indexing, and realworld's
 `/article/:slug` is content and parameterized. How either is rendered and
 served is [screens](screens.md#how-a-routes-first-document-is-rendered). A public app's
 `sitemap.xml` lists every route without a `:param` once per locale, each entry carrying the

@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Access
-description: How an entity's declared access becomes the scope column, the tenancy-floor call and the policies at the cluster and the same rule in the browser, who stamps a row's owner, and how a reader inside an aggregate they cannot see gets an exact count.
+description: How an entity's declared access becomes the scope column, the tenancy-floor call and the policies at the cluster and the same rule in the browser, what a grant's role and a group allow, who stamps a row's owner, and how a reader inside an aggregate they cannot see gets an exact count.
 ---
 
 # Access
@@ -13,22 +13,109 @@ entity takes none ([the lattice](lattice.md#the-durability-ladder)).
 Pronto compiles the declaration into what mecha's tenancy floor needs, a
 `scope_id` per row and one call, and into the permissive policies that decide
 who inside the floor may do what. The floor, its audit and its tests are
-[mecha's](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/database/rls/README.md); the
+[mecha's](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/database/rls/README.md); the
 author's examples are [the guide's](../GUIDE.md#access).
 
-## The four modes
+## The modes
 
-The model is Google Drive's. `#policySql` and `#tableSql` in
+The model is Google Drive's, in its words where it is taken
+([[decisions/2026-11-13-drive-roles-and-event-origin#Where this is not Drive|and not all of it is]]). `#policySql` and `#tableSql` in
 [`emit.cue`](../emit.cue) write, per mode, into `006_policies.sql` and the
 table:
 
 | Mode | `scope_id` | Floor | What `app_user` may do |
 |---|---|---|---|
 | `private` (`owner`) | `'user:' \|\| owner`, generated | `rls_protect` | select, update and delete rows where `owner = auth_uid()`; insert only with that check |
-| `private` with `shared` (`via`, `on`, `user`) | the same | exempt: the floor is restrictive, and a sharee holds no scope the owner's row carries | the above, or a row the `via` table grants them, through a `SECURITY DEFINER` helper so the two tables' policies do not recurse |
-| `folder` (`parent`, `on`) | the parent's, copied by `mecha.scope_from_parent` | as its parent | everything on a row whose `private` parent they may see |
+| `private` with `shared` (`via`, `on`, `user`, `group`, `role`) or `groups` (`group`, `of`, `role`) | the same | exempt: the floor is restrictive, and a grantee holds no scope the owner's row carries | the above, or what [the role](#roles) a grant gives them allows, through a `SECURITY DEFINER` helper so the tables' policies do not recurse |
+| `folder` (`parent`, `on`) | the parent's, copied by `mecha.scope_from_parent` | as its parent | everything on a row whose unshared `private` parent they may see; under a shared parent, what their role on the parent allows |
 | `public` | `'public:'`, generated | `rls_protect` | select; `write: true` also grants all writes; `write: "update"` permits updates to non-key fields only |
 | `internal` | none; `app_user`'s is its own id | exempt | nothing, except `app_user` reading its own row |
+| `group` (`group`, `user`) | `'user:' \|\| user`, generated | `rls_protect` | select the rows addressed to them; nothing else, so only `service` writes one |
+
+## Roles
+
+A grant carries one of Drive's roles, and the emitted `<table>_role(row)`
+answers the caller's: `owner`, `writer`, `reader`, or none.
+
+| | reads the row and what is under it | changes them | edits its grant table | deletes the row, sets another owner |
+|---|---|---|---|---|
+| `reader` | yes | | | |
+| `writer` | yes | yes | unless `writersCanShare: false` | |
+| the owner | yes | yes | yes | yes |
+
+`shared.role` names the grant table's column holding the role, a required
+`string` the table checks to be `reader` or `writer`; a grant table without one
+grants `writer`. The grant table is the entity's own composition, `{scope:
+"folder", parent: <the entity>, on: <shared.on>}`, and no other entity's, or its
+rows would be written under another's policies; a shared entity's key is `id`.
+What a role refuses is an error and never zero
+rows: an update finds the row and fails its check, and a `BEFORE` trigger
+refuses a delete, an owner change and a composition moved out from under its
+parent, none of which a policy, which sees one version of the row, can.
+
+A writer shares the row, as Drive's editor does: they add, change and remove
+its grants, to no role above their own, since a grant holds none. `shared:
+{writersCanShare: false}`, Drive's setting by its name, keeps the grant table
+to the owner. An owner who sets another is left the row's writer, as Drive
+leaves them: the cluster replaces the grants of the two with one `writer`
+grant to the previous owner, so the grant table's other fields have defaults.
+What is under the row takes the new owner's scope with it, which no lifecycle
+guard of a composition judges: the row itself did not change.
+An entity shared by `groups` alone has no grant table to write that in, and
+its previous owner keeps what a group gives them.
+
+A grant row shares one row, with a user or with a group. `shared.group` names
+a second column of the grant table, holding a group's id as the membership
+list writes it, and a row fills its user or its group, never both and never
+neither: which column it fills is the grantee's type, Drive's `user` or
+`group`. They are two columns because the sync path gives a column one edge:
+the subject's own grants are the grant table by `user`, and a group's are the
+grant table by `group`, reached by whoever reads a membership row for it. Both
+columns are `required: false`.
+
+An entity also names the groups every row of it is shared with, which no
+grant row has to say:
+
+```cue
+Company: access: {scope: "private", owner: "owner_id",
+	groups: [{group: "everyone", role: "reader"}, {group: "admins", role: "writer"}]}
+Advance: access: {scope: "private", owner: "requester_id",
+	shared: {via: "advance_grant", on: "advance_id", user: "user_id", group: "group_id", role: "role"},
+	groups: [{group: "finance", of: "company_id", role: "reader"}]}
+GroupMember: access: {scope: "group", group: "group_id", user: "user_id"}
+```
+
+A declared group is one shape over the table however many rows it holds; a
+group granted row by row costs what a user's grants cost, one shape for the
+list and one for each row it names. So the declared form is for what a whole
+entity owes a group, and the grant row for what its owner decides afterwards.
+
+A declared group is `<value>:<group>`, the value being the row's key, or the
+column `of` names: company `c1` is read by the members of `c1:everyone`, and an
+advance of company `c1` by the members of `c1:finance`, and an advance with
+no company by no group. A group granted row by row that ends as one of these does
+is told from it where the key is a `uuid`; over a `string` key it is named so
+that it cannot be read as `<key>:<group>`. A membership names no entity, so one group name is
+read over one entity's keys: `finance` of a company and `finance` of a project
+is refused, as is one entity naming a group twice. The program's one
+`scope: "group"` entity is the membership list, written by the service from
+wherever the program's people are administered.
+
+A group named by `of` adds a generated column `group_<name>` to the table and
+to each composition under it, which is what one shape is keyed on; a row moved
+to another group takes its compositions along. `of` is a `ref` to a private
+or public entity, and the row is written only by someone who reads the row it
+names (its owner, where that entity is unshared), so nobody files a row into a
+group they are no part of; only the owner files it under another afterwards.
+That row's entity is declared first, since the policy calls its role function.
+A group over the row's own key is named by the key's text, so that key is a
+`uuid` or a `string`.
+
+Who may take a step that depends on the row's state is not a role: it is a
+[[../GUIDE#Validations|lifecycle guard]] reading `event._origin`. The origin is
+who sent the write; a write a trigger makes, as a handover's grant, has none.
+The `pages` and `cloudflare` targets refuse a shared entity: neither serves
+the keyed shapes it syncs through.
 
 `write: "update"` uses column grants as well as an UPDATE policy: a reader
 cannot create or delete rows, or rename a primary key to replace a seeded row.
@@ -51,8 +138,9 @@ an authored migration. Reconciliation does not reverse earlier restrictions.
 
 Every table grants `service` everything. An exempt table gets a row in
 `mecha.rls_exempt` with its reason in words, the short list a reviewer reads.
-A shared entity, its grant table and a child of a shared parent each declare a
-`mecha.shape_key`, so the sync path can deliver a row the floor does not.
+A shared entity, its grant table, a child of a shared parent and a table that
+names a group by a column each declare a `mecha.shape_key`, so the sync path
+can deliver a row the floor does not.
 `access` is optional at the cluster rungs, and an entity that omits it gets no
 policy, no floor and no `rls_exempt` reason while `002_grants.sql` grants
 `app_user` every table, so every signed-in reader may read and write all its
@@ -65,22 +153,58 @@ subtly wrong floor, and a correction to the floor reaches every app by
 migration rather than by regeneration. The floor holds even when the
 generator is bypassed.
 
+## Declared token roles
+
+A [declared token role](identity.md#token-roles-and-trusted-issuers) is a
+Postgres role a token names, in `state.tokenRoles`, and the policies above
+stand unchanged for it: each names `app_user`, so none admits it, and it holds
+no grant `002_grants.sql` gives the others. Unlike `service` it never
+bypasses the floor: a release refuses a declared role holding BYPASSRLS. What
+it may do is the app's own SQL, in the order of preference:
+
+- `GRANT EXECUTE` on a function it alone calls, after `REVOKE EXECUTE ... FROM
+  PUBLIC`, since Postgres lets PUBLIC execute a new function. A `SECURITY
+  DEFINER` function owned by the migration role writes what it writes, past
+  the floor, and nothing else;
+- a grant on a table with a policy `TO` the role, under the floor: its
+  subject is its token's `sub`, so `current_scopes()` is `public:` and
+  `user:<sub>`, and the rows it reaches are those, or what the policy adds.
+
+```sql
+CREATE FUNCTION advance_residual() RETURNS json LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$ ... $$;
+REVOKE EXECUTE ON FUNCTION advance_residual() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION advance_residual() TO residual_bot;
+```
+
+A token another issuer signed acts as a declared role and nothing else, and
+the cluster's own roles act only on a token naming the stack's own issuer: the
+floor's `app_pre_request` refuses a declared role to a token naming the stack's
+issuer or none, and the cluster's roles to one naming another
+([identity](identity.md#token-roles-and-trusted-issuers)).
+
+A role the database already holds is taken for a token role only if it holds
+no more than one: the emitted SQL refuses one that logs in, is a superuser,
+bypasses row-level security, creates roles or databases, replicates, or owns
+the database.
+
 ## The browser's mirror
 
 `shell.yaml` carries each table's access, and the store's `visible()`
-re-applies it on every local read: a `private` row is the reader's or granted
-through the `via` rows they hold, a `folder` row is visible exactly when its
-parent is, `internal` is never visible, and a row the session wrote and the
-cluster has not confirmed is always visible. A change to a grant table or a
-parent re-renders the regions that depend on it, so an unshare revokes the row
-from an open screen.
+re-applies it on every local read: a `private` row is the reader's, or granted
+through the `via` rows they hold or a group whose membership row they hold, a
+`folder` row is visible exactly when its parent is, `internal` is never
+visible, and a row the session wrote and the cluster has not confirmed is
+always visible. A change to a grant table, the membership list or a parent
+re-renders the regions that depend on it, so an unshare revokes the row from
+an open screen. The mirror is of reading only: a reader's write is run and
+then refused by the cluster
+([pending](../PENDING.md#access)).
 
 So policies added in raw SQL may widen access only where the mirror already
 allows, and may narrow it freely. `#Access` has no "everyone reads, the owner
 writes" mode, because `public` names no owner and its optional write arm applies to everyone:
 realworld's `011_owner_writes.sql` hand-writes owner-gated arms for `article`
-and `comment` and restates their owners, and xpense's `011_ledger_writes.sql`
-opens `category` and `expense` to every signed-in writer
+and `comment` and restates their owners
 ([pending](../PENDING.md#access)). Declaring such a table `private` and
 widening its SELECT in SQL instead would make it mean "mine" to the browser
 and "everyone's" to the server.
@@ -162,6 +286,10 @@ frames on screen.
 
 ## Rejected
 
+- **A grant that carries the owner's power**: a grantee set the owner to
+  themself and deleted the row
+  ([[decisions/2026-11-13-drive-roles-and-event-origin|the record]], which
+  holds the other alternatives to roles and groups).
 - **Visibility as a filter a screen writes** — one forgotten filter is a
   breach, and the policy is the one place a reviewer reads it.
 - **Emitting the floor's policy text from the generator** — a guarantee that

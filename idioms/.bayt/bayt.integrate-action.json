@@ -17,8 +17,8 @@
   },
   "env": {},
   "taskfile": {
-    "incremental": false,
     "run": "always",
+    "incremental": false,
     "preconditions": []
   },
   "visibility": "internal",
@@ -77,9 +77,9 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf integrate'",
       "shell": "nu",
-      "name": "builtin",
       "stop": false
     }
   ],
