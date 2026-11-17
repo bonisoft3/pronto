@@ -813,6 +813,22 @@ import (
 							  # migrations, each idempotent, run again, keeping every row. Live traffic
 							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
 							  # SECURITY); being idempotent, the step is run again, up to three times.
+							  # A database built before the airlock has neither its ledger (Graphile Worker's schema,
+							  # the airlock's own step) nor its job key. The airlock's own start-up upgrade is no
+							  # install of them and runs only after this job, so they are made here, ahead of the
+							  # replays that may enqueue effect jobs: only where there is no airlock schema, the
+							  # graphile step only where its tables are missing, each once.
+							  if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")" = t ]; then
+							    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_graphile_worker.sql 2>/dev/null || true); do
+							      if [ "$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")" = t ]; then echo "initdb: applying $f, once"
+							        psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "/docker-entrypoint-initdb.d/$f"
+							      fi
+							    done
+							    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null || true); do
+							      echo "initdb: applying $f, once"
+							      psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "/docker-entrypoint-initdb.d/$f"
+							    done
+							  fi
 							  # The airlock's job key (mecha's job_key.sql, a step of its own that initdb
 							  # places only on a fresh volume) reaches a database built before it, ahead of
 							  # the replays: the machines' interpreters (010) and an app's own migrations
@@ -850,7 +866,7 @@ import (
 							fi
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
-							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
+							psql -v ON_ERROR_STOP=1 -XqAc 'GRANT \(strings.Join([for r in R.database.tokenRoles {"\"\(r)\""}], ", ")) TO postgres WITH INHERIT FALSE, SET TRUE'
 							# It also owns the tables under FORCE ROW LEVEL SECURITY and the
 							# SECURITY DEFINER functions that write them, which a superuser
 							# bypasses; BYPASSRLS gives it that back. Sessions that switch

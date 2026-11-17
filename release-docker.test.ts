@@ -468,7 +468,7 @@ Deno.test("release-docker resolves the published mecha extensions image outside 
   const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]')) as Target & { compose: { build: { additional_contexts: Record<string, string> } } };
   const ctx = rd.compose.build.additional_contexts["libraries_mecha-extensions-image"];
   assert(!ctx.includes(":?"), `compose refuses to load the file: ${ctx}`);
-  assertStringIncludes(ctx, "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/mecha-extensions:");
+  assertStringIncludes(ctx, "${MONOREPO_COMPOSE_MODE:-docker-image://${PRONTO_IMAGE_REGISTRY:-bonitao}/mecha-extensions:");
 });
 
 // One container serving several bridges (one per action) was two processes of

@@ -1542,7 +1542,9 @@ export def render-manifests [
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
 	let named = (do { cue export --expression App.airlock.secrets --out json $cue_path ...(if ($data | is-not-empty) { [$data] } else { [] }) } | complete)
-	let runtime = (release-runtime ($cue_path | path dirname) $env_name --named (if $named.exit_code == 0 { $named.stdout | from json | columns } else { [] }))
+	# A failing export is a failed release: reading no names would pass a release whose secrets are unchecked.
+	if $named.exit_code != 0 { error make { msg: $"Failed to read App.airlock.secrets: ($named.stderr)" } }
+	let runtime = (release-runtime ($cue_path | path dirname) $env_name --named ($named.stdout | from json | columns))
 	let airlock = if "airlock" in $runtime { {airlock: {sinks: $facts.k8sSinks}} } else { {} }
 	{App: ({database: ({tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])} | merge (schema-facts $facts)), runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })

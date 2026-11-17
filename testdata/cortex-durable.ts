@@ -49,7 +49,7 @@ export const spec: CortexDurable = {
 export const rules = `return {
   project: () => ({}),
   invariant: state => state.requested >= 0,
-  request: state => ({...state, requested: state.requested + 1, wake: state.requested + 1}),
-  increment: state => ({...state, requested: state.requested + 1}),
-  keep: state => ({...state})
+  request: ({context: s}) => ({...s, requested: s.requested + 1, wake: s.requested + 1}),
+  increment: ({context: s}) => ({...s, requested: s.requested + 1}),
+  keep: ({context: s}) => ({...s})
 };`;

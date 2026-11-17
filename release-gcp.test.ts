@@ -180,7 +180,7 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi\n        if [ "$try" = 3 ]; then exit 1; fi`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
-  assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
+  assertStringIncludes(c.command[2], `GRANT "anon", "app_user", "service" TO postgres WITH INHERIT FALSE, SET TRUE`);
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
@@ -196,6 +196,25 @@ Deno.test("a database built before the airlock's job key gets it, ahead of the r
   assert(key < sql.indexOf("else\n  source /usr/local/bin/docker-entrypoint.sh"), "not the fresh build's, which initdb's own directory runs");
 });
 
+Deno.test("a built database with no airlock schema gets the ledger, the airlock's step and the job key, ahead of the replays", async () => {
+  const sql = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  // The airlock's own start-up upgrade runs only after this job, so the install is the job's.
+  const guard = sql.indexOf(`if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")" = t ]; then`);
+  const graphile = sql.indexOf("ls [0-7][0-9][0-9]_graphile_worker.sql");
+  const airlock = sql.indexOf("ls [0-7][0-9][0-9]_airlock.sql");
+  const key = sql.indexOf("ls [0-7][0-9][0-9]_airlock_job_key.sql");
+  assert(guard > sql.indexOf('echo "initdb: already built"'), "an already built database's branch");
+  assert(guard < graphile && graphile < airlock && airlock < key, "ledger, then the airlock's step, then the job key");
+  assert(key < sql.indexOf("for step in 005_create_tables.sql"), "all before the replays");
+  assertStringIncludes(sql, `to_regclass('graphile_worker.migrations') IS NULL`);
+  assertStringIncludes(sql, "psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f");
+});
+
+Deno.test("a role named like a keyword is granted quoted", async () => {
+  const sql = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "select"]'), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  assertStringIncludes(sql, `GRANT "anon", "select" TO postgres WITH INHERIT FALSE, SET TRUE`);
+});
+
 Deno.test("a token role added to a built database is made before the grant and the replays", async () => {
   const job = async (roles: string) => (await built(release().replace('["anon", "app_user", "service"]', roles), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
   const sql = await job('["anon", "app_user", "service", "residual_bot"]');
@@ -204,8 +223,8 @@ Deno.test("a token role added to a built database is made before the grant and t
   const made = sql.indexOf(`CREATE ROLE "residual_bot" NOLOGIN;`);
   assert(made > sql.indexOf('echo "initdb: already built"'));
   assert(made < sql.indexOf("for step in 005_create_tables.sql"), "before the replays");
-  assert(made < sql.indexOf('GRANT anon, app_user, service, residual_bot TO postgres'), "before the grant");
-  assertStringIncludes(sql, 'GRANT anon, app_user, service, residual_bot TO postgres WITH INHERIT FALSE, SET TRUE');
+  assert(made < sql.indexOf('GRANT "anon", "app_user", "service", "residual_bot" TO postgres'), "before the grant");
+  assertStringIncludes(sql, 'GRANT "anon", "app_user", "service", "residual_bot" TO postgres WITH INHERIT FALSE, SET TRUE');
   // The schema's own roles are never remade, and an app declaring none gets no step.
   assertEquals((await job('["anon", "app_user", "service"]')).includes("CREATE ROLE"), false);
 });
@@ -226,7 +245,7 @@ Deno.test("a preview's initdb applies the tests' rows, and a release's never doe
 Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
   // An app without auth has no app_user; a literal grant would die on it.
   const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;
-  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
+  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], `GRANT "anon", "service" TO postgres WITH INHERIT FALSE, SET TRUE`);
   const auth = (await built(release(), "service")).value.spec.template.spec.containers[2];
   // The service refuses to start without it; the bound is resilience's client statement, in ms.
   assertEquals(auth.env.find((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").value, "5000");

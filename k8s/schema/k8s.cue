@@ -460,6 +460,25 @@ import (
 			}
 		}
 	}
+	// The token roles the program declares, beside the schema's own: a release may name one that an
+	// older database lacks. Made before the replays, as 001_roles.sql makes them (emit.cue's #tokenRole,
+	// the same refusal of one that stands with more than a token role holds): idempotent, quoted.
+	let declaredRoles = [for r in release.database.tokenRoles if !list.Contains(["anon", "app_user", "service"], r) {r}]
+	let declaredRolesSql = strings.Join([for r in declaredRoles {
+		"""
+			DO $role$ BEGIN
+			  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+			    CREATE ROLE "\(r)" NOLOGIN;
+			  ELSIF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = '\(r)' AND (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))) THEN
+			    RAISE EXCEPTION 'role \(r) stands with more than a token role holds, which a token naming it would act with';
+			  END IF;
+			END $role$;
+			"""
+	}], "\n")
+	let declaredRolesStep = [if len(declaredRoles) > 0 {
+		"  # A token role the program declared after this database was built is made now, before the\n  # replays below, which may grant it something.\n  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'\n\(declaredRolesSql)\nSQL"
+	}, ""][0]
+
 	let schemaJobObj = [
 		if release.type == "pronto" {
 			(schemaJob & {
@@ -511,6 +530,7 @@ import (
 					END
 					$repoint$;
 					SQL
+					\(declaredRolesStep)
 					  # Graphile Worker's schema, where the app declares an effect, reaches a database
 					  # built before its first one: once, when it is not there, since its step is no
 					  # replay (it inserts its first migration and creates its tables bare) and Graphile
@@ -535,8 +555,8 @@ import (
 					  # places only on a fresh volume) reaches a database built before it, ahead of
 					  # the replays: the machines' interpreters (010) and an app's own migrations
 					  # enqueue effect jobs through airlock.job_key, and the next effect-state write
-					  # would fail without it. Idempotent, and again once the airlock's step below
-					  # has made its schema, for a database that had none.
+					  # would fail without it. Idempotent, and run again right after the airlock's step
+					  # below (in the loop) has made its schema, for a database that had none.
 					  jobkey() {
 					    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock_job_key.sql 2>/dev/null || true); do
 					      echo "initdb: applying $f"
@@ -556,9 +576,11 @@ import (
 					        if [ "$try" = 3 ]; then exit 1; fi
 					        echo "initdb: $step failed, again in 10s"; sleep 10
 					      done
+					      # A database with no airlock schema has just had it made: its job key follows at
+					      # once, before the machines' code and the app's migrations that enqueue through it.
+					      case "$step" in *_airlock.sql) jobkey ;; esac
 					    fi
 					  done
-					  jobkey
 					  exit 0
 					fi
 					source /usr/local/bin/docker-entrypoint.sh

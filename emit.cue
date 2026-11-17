@@ -4253,7 +4253,11 @@ _pgrollDir: "services/database/pgroll"
 			// palette is not a second :root to keep in step — it is the other
 			// half of this value, resolved against whatever colour-scheme is in
 			// force at the point of use.
-			[for k, v in D.design.colors {"  --\(k): light-dark(\(v), \(D.design.dark[k]));"}],
+			// The roles and the app's own palette in the order the design declares
+			// them, then the shadow inks: #Design lists the inks first, and this
+			// block's bytes must not depend on where the schema keeps them.
+			[for k, v in D.design.colors if !list.Contains(#shadowInks, k) {"  --\(k): light-dark(\(v), \(D.design.dark[k]));"}],
+			[for k, v in D.design.colors if list.Contains(#shadowInks, k) {"  --\(k): light-dark(\(v), \(D.design.dark[k]));"}],
 			[for k, v in D.design.rounded {"  --r-\(k): \(v);"}],
 			[for k, v in D.design.spacing {"  --sp-\(k): \(v);"}],
 			[for k, v in D.design.motion {"  --motion-\(k): \(v);"}],

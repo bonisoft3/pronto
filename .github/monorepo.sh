@@ -50,6 +50,13 @@ def pin(p, v):
     s = open(p).read(); t, n = re.subn(r'^#Version: "[^"]+"$', f'#Version: "{v}"', s, flags=re.M); assert n == 1, p; open(p, 'w').write(t)
 pin('clusters/mecha.cue', mecha_v)
 pin('terminals/omnishell.cue', omnishell_v)
+# The mirror's cue.mod deps name the same prereleases (prerelease.sh), so a consumer resolves the fork's modules.
+for dep, v in (('mecha', mecha_v), ('omnishell', omnishell_v)):
+    p = 'cue.mod/module.cue'
+    s = open(p).read()
+    t, n = re.subn(r'("github.com/bonisoft3/' + dep + r'@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{v}"', s)
+    assert n == 1, dep
+    open(p, 'w').write(t)
 PY
 )
 assets() { gh api "repos/bsoneca/pronto-fork/releases/tags/$1" --jq '[.assets[] | {name, digest, url}]'; }

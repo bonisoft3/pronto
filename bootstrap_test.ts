@@ -150,10 +150,14 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     assert(JSON.stringify(Object.keys(mechaPublished).sort()) === JSON.stringify([...mechaImages].sort()), `clusters/mecha.cue published keys (${Object.keys(mechaPublished).sort().join(",")}) do not cover #Images (${[...mechaImages].sort().join(",")})`);
     for (const [svc, ref] of Object.entries(mechaPublished)) {
       // The upstream image (bonitao/) or the fork's (ghcr.io/bsoneca/), at a release or a fork's prerelease of one, by digest.
-      assert(new RegExp(`^(bonitao|ghcr\\.io/bsoneca)/mecha-${svc}:\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$`).test(ref), `clusters/mecha.cue published.${svc} (${ref}) is not an exact mecha image by digest`);
+      // Tagged with the tool's version, or its upstream base (a fork's -host.N prerelease keeps upstream's image).
+      const mechaVersion = tools["github:bonisoft3/mecha"] as string;
+      const mechaTags = [mechaVersion, mechaVersion.replace(/-host\.\d+$/, "")].map((v) => v.replaceAll(".", "\\."));
+      assert(new RegExp(`^(bonitao|ghcr\\.io/bsoneca)/mecha-${svc}:(${mechaTags.join("|")})@sha256:[0-9a-f]{64}$`).test(ref), `clusters/mecha.cue published.${svc} (${ref}) is not a mecha ${mechaVersion} image by digest`);
     }
     const omnishellRuntime = (await cue(repo, ["export", "./plugins/pronto/terminals:omnishell", "-e", "published.runtime", "--out", "text"])).trim();
-    assert(omnishellRuntime.startsWith(`bonitao/omnishell:${tools["github:bonisoft3/omnishell"]}@sha256:`), `terminals/omnishell.cue published.runtime (${omnishellRuntime}) does not match omnishell ${tools["github:bonisoft3/omnishell"]}`);
+    // #RuntimePin: the upstream image or the fork's, at any exact release (or prerelease) by digest, whatever the tool version.
+    assert(/^(bonitao\/omnishell|ghcr\.io\/bsoneca\/omnishell):\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$/.test(omnishellRuntime), `terminals/omnishell.cue published.runtime (${omnishellRuntime}) is not an exact omnishell image by digest`);
     const duckdb = tools["http:duckdb"];
     const assets: Record<string, string> = {
       "linux-x64": "linux-amd64",

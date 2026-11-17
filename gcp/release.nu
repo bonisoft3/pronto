@@ -612,15 +612,23 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let run_host = $"($plan0.service)-($number).($plan0.region).run.app"
 	let peers = (plan-with $app_info.cue_path ({GCP: {runHost: $run_host}} | merge deep $base)).peers
 	let own = (^cue export --expression '{for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}' --out json $app_info.cue_path | from json)
+	let mapped = (^cue export --expression '{for n, c in GCP.sidecars {(n): [for k, _ in c.secrets {k}]}}' --out json $app_info.cue_path | from json)
 	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
 		let set = ($own | get -o $n | default [])
 		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value | where {|e| $e.key not-in $set }
 			| reduce -f {} {|e, all| $all | insert $e.key ($peers | get $n | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
 		# A sidecar airlock would take compose's development seal key as its own: only the service's airlock
-		# has the key made and checked (has_seal), so one that reads secret fields states its key in GCP.sidecars.
-		if $n == "airlock" and ($compose_env | columns | any {|k| $k in [AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS AIRLOCK_SEAL_DEV] }) {
-			error make {msg: "release@gcp does not seal secret fields for an airlock run as a GCP.sidecars entry: its seal key would be compose's development key. Run the airlock as the service's own, or set AIRLOCK_SEAL_KEY in the sidecar's env"}
+		# has the key made and checked (has_seal), so one that reads secret fields maps AIRLOCK_SEAL_KEY
+		# through GCP.sidecars.<name>.secrets (a key in its env alone is the release's, set above, and counts too).
+		let keyed = ($set | append ($mapped | get -o $n | default []))
+		if $n == "airlock" and not ("AIRLOCK_SEAL_KEY" in $keyed) {
+			error make {msg: "release@gcp does not seal secret fields for an airlock run as a GCP.sidecars entry: its seal key would be compose's development key. Run the airlock as the service's own, or map AIRLOCK_SEAL_KEY through the sidecar's secrets (GCP.sidecars.airlock.secrets)"}
 		}
+		# Compose's development seal and an empty previous key are not the sidecar's to carry.
+		let compose_env = if $n == "airlock" {
+			let c = ($compose_env | reject -o AIRLOCK_SEAL_DEV)
+			if (($c.AIRLOCK_SEAL_KEY_PREVIOUS? | default "x") | into string | is-empty) { $c | reject AIRLOCK_SEAL_KEY_PREVIOUS } else { $c }
+		} else { $compose_env }
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
