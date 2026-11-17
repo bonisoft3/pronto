@@ -177,6 +177,9 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 // The dev service token, which crud's dev secret verifies.
 #DevServiceJwt: impl.#DevServiceJwt
+// The development seal key, the local stack's alone: a release refuses it.
+#DevSealKey: impl.#DevSealKey
+#TenancySql:    impl.#TenancySql
 
 // What a sink's origin may be: the airlock's daprd dials it.
 #Origin: impl.#Origin
@@ -209,6 +212,7 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
+#UnaccentSql:      impl.#UnaccentSql
 
 // A machine Mecha runs: XState's configuration and the setup beside it.
 #Machine: impl.#Machine

@@ -221,6 +221,9 @@ _sqlType: {
 		[if C.f.ref != _|_ {"REFERENCES \(C.f.ref)(id) ON DELETE CASCADE"}],
 		C._typeCheck,
 		[if C.check != _|_ {"CHECK (\(C.check))"}],
+		// Its stash trigger empties it on every write; a write that passes
+		// none (a replica-role session) is refused rather than stored.
+		[if C.f.secret != _|_ {"CONSTRAINT \"\(C.table)_\(C.f.name)_secret\" CHECK (\"\(C.f.name)\" IS NULL)"}],
 	])
 	out: strings.Join(_frags, " ")
 }
@@ -820,16 +823,38 @@ _sqlType: {
 	}]
 
 	// Only the outcome the airlock recorded leaves an invoking state, so no other
-	// writer can forge one.
-	_outcomeCheck: [if _invoking {
-		_key: (#ledgerKeySql & {effect: ST.invokes[ST.name], rec: "OLD"}).out
-		"""
-			      SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = \(_key);
-			      IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
-			        RAISE EXCEPTION '% leaves \(ST.name) only by the recorded outcome of %', '\(ST.table)', \(_key) USING ERRCODE = 'check_violation';
-			      END IF;
+	// writer can forge one. A read's answer is set for the airlock's own
+	// transaction (mecha's airlock.ts deliverRead), believed only from the
+	// session that owns the airlock's schema, and only for this row and the
+	// entry it still waits on, which its incarnation and count name; an answer
+	// to an earlier entry, or to an earlier row under its key, is skipped.
+	_outcomeCheck: [
+		if _invoking if ST.invokes[ST.name].request == _|_ {
+			_key: (#ledgerKeySql & {effect: ST.invokes[ST.name], rec: "OLD"}).out
 			"""
-	}, ""][0]
+				      SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = \(_key);
+				      IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
+				        RAISE EXCEPTION '% leaves \(ST.name) only by the recorded outcome of %', '\(ST.table)', \(_key) USING ERRCODE = 'check_violation';
+				      END IF;
+				"""
+		},
+		if _invoking if ST.invokes[ST.name].request != _|_ {
+			_x:   ST.invokes[ST.name]
+			_row: "jsonb_build_object(" + strings.Join([for f in ST.pk {"'\(f)', OLD.\"\(f)\""}], ", ") + ")"
+			"""
+				      IF session_user = (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'airlock') THEN
+				        outcome := nullif(current_setting('airlock.read', true), '')::jsonb;
+				      END IF;
+				      IF outcome IS NULL OR outcome->>'effect' IS DISTINCT FROM '\(_x.name)' OR outcome->'row' IS DISTINCT FROM \(_row) OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
+				        RAISE EXCEPTION '% leaves \(ST.name) only by the answer of the read %', '\(ST.table)', '\(_x.name)' USING ERRCODE = 'check_violation';
+				      END IF;
+				      IF outcome->>'n' IS DISTINCT FROM OLD."\(_x.count)"::text OR outcome->>'incarnation' IS DISTINCT FROM OLD."\(_x.incarnation)"::text THEN
+				        RETURN NULL;
+				      END IF;
+				"""
+		},
+		"",
+	][0]
 
 	_normalBlock: """
 		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
@@ -917,7 +942,7 @@ _sqlType: {
 		_hasInvoke:     len([for _, _ in _invokes {true}]) > 0
 		_hasTimers:     S.machine._timed
 		_cortex:        S.machine.cortex != _|_
-		_declare:       [if _hasInvoke || _hasTimers || _cortex {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}, if _cortex {"  cortex_event text;\n  cortex_payload jsonb;\n  cortex_rows integer;\n  cortex_changed integer := 0;\n"}], "")}, ""][0]
+		_declare:       [if _hasInvoke || _hasTimers || _cortex {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if len([for _, x in _invokes if x.request != _|_ {x}]) > 0 {"  read_input jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}, if _cortex {"  cortex_event text;\n  cortex_payload jsonb;\n  cortex_rows integer;\n  cortex_changed integer := 0;\n"}], "")}, ""][0]
 		_timerContext:  [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
 		_sameStateGate: [if _hasTimers {" AND timer_delay IS NULL"}, ""][0]
 		_pk:            [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
@@ -928,8 +953,14 @@ _sqlType: {
 		}]
 		// A row in an invoking state is the ledger's instance until its outcome
 		// lands: its key fields and primary key stay as the ledger holds them,
-		// and it is not deleted, or the outcome could never be delivered.
-		_held: [for sName, x in _invokes {
+		// and it is not deleted, or the outcome could never be delivered. A
+		// read's row keeps what its request read until the answer lands, the
+		// columns a raw input names among them, and is not deleted either, so
+		// no row made again under its key meets an answer still on its way.
+		// Its count and incarnation are the interpreter's: a row starts at
+		// zero under a new incarnation, and no write sets either.
+		_claims: {for sName, x in _invokes if x.request == _|_ {(sName): x}}
+		_held: list.Concat([[for sName, x in _claims {
 			_cols: list.SortStrings([for c, _ in {for f in list.Concat([x.key, _pk]) {(f): true}} {c}])
 			_key:  (#ledgerKeySql & {effect: x, rec: "OLD"}).out
 			"""
@@ -937,7 +968,50 @@ _sqlType: {
 				    RAISE EXCEPTION '% in \(sName) keeps its key until the outcome of %', '\(_table)', \(_key) USING ERRCODE = 'check_violation';
 				  END IF;
 				"""
-		}]
+		}], [for sName, x in _invokes if x.request != _|_ {
+			_named: list.Concat([
+				[for _, v in x.input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") {strings.TrimPrefix(v, "NEW.")}],
+				// A raw input's row references, as PostgreSQL reads them: NEW in any
+				// case, a quoted name kept, an unquoted one folded; one that reads
+				// the whole row holds every field.
+				for _, v in x.input if (v & {raw: string}) != _|_
+				let refs = [if regexp.Match("(?i)\\bnew\\s*\\.", v.raw) for m in regexp.FindAll("(?i)\\bnew\\s*\\.\\s*(\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$]*)", v.raw, -1) {m}]
+				let whole = len([if regexp.Match("(?i)\\bnew\\b", v.raw) for m in regexp.FindAll("(?i)\\bnew\\b", v.raw, -1) {m}]) > len(refs) {
+					list.Concat([
+						[if whole for f in _entity.fields {f.name}],
+						[for m in refs let name = regexp.ReplaceAll("(?i)^new\\s*\\.\\s*", m, "") {
+							[if strings.HasPrefix(name, "\"") {strings.Trim(name, "\"")}, strings.ToLower(name)][0]
+						}],
+					])
+				},
+			])
+			// The entity's own fields alone, a name inside a string literal being
+			// none; the state and count fields are the machine's, which the
+			// answer moves.
+			_fields: [for f in _entity.fields {f.name}]
+			_cols: list.SortStrings([for c, _ in {for f in list.Concat([_pk, list.FlattenN(_named, 1)]) if list.Contains(_fields, f) if f != _field if f != x.count if f != x.incarnation {(f): true}} {c}])
+			"""
+				  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
+				    RAISE EXCEPTION '% in \(sName) keeps what its read asked until the answer of %', '\(_table)', '\(x.name)' USING ERRCODE = 'check_violation';
+				  END IF;
+				"""
+		}], [for c, _ in {for _, x in _invokes if x.request != _|_ {(x.incarnation): true}} {
+			"""
+				  IF TG_OP = 'INSERT' THEN
+				    NEW."\(c)" := gen_random_uuid();
+				  ELSIF NEW."\(c)" IS DISTINCT FROM OLD."\(c)" THEN
+				    RAISE EXCEPTION '% names its incarnation in \(c), which only its machine writes', '\(_table)' USING ERRCODE = 'check_violation';
+				  END IF;
+				"""
+		}], [for c, _ in {for _, x in _invokes if x.request != _|_ {(x.count): true}} {
+			"""
+				  IF TG_OP = 'INSERT' THEN
+				    NEW."\(c)" := 0;
+				  ELSIF NEW."\(c)" IS DISTINCT FROM OLD."\(c)" THEN
+				    RAISE EXCEPTION '% counts its entries in \(c), which only its machine writes', '\(_table)' USING ERRCODE = 'check_violation';
+				  END IF;
+				"""
+		}]])
 		_deleteBlock: [if _hasInvoke {
 			"""
 				  IF TG_OP = 'DELETE' THEN
@@ -949,7 +1023,11 @@ _sqlType: {
 
 				"""
 		}, ""][0]
-		_ops: [if _hasInvoke {"INSERT OR UPDATE OR DELETE"}, "INSERT OR UPDATE"][0]
+		_ops:    [if _hasInvoke {"INSERT OR UPDATE OR DELETE"}, "INSERT OR UPDATE"][0]
+		_entity: [for en, e in S.entities if en == S.machine.entity || e.table == S.machine.entity {e}][0]
+		_stashes: [for name, _ in {for _, x in _invokes for f in x._fieldSecrets {(f): true}} for f in _entity.fields if f.name == name {
+			(#secretStashSql & {table: _table, pk: _pk, field: f}).out
+		}]
 		// A ledger key is a field's text, which for a date or time is the
 		// session's to spell; pinned, so the claim's key and the outcome
 		// check's are one.
@@ -1026,7 +1104,7 @@ _sqlType: {
 			  EXECUTE FUNCTION "\(_fnName)"();
 			"""
 
-		[if _cortex && S.runtime {#cortexRuntimeSql + "\n\n"}, ""][0] + _checkConstraint + "\n\n" + _triggerBody + [if _hasTimers {"\n\n" + (#MachineTimerSql & {machine: S.machine, table: _table, pk: _pk}).out}, ""][0]
+		[if _cortex && S.runtime {#cortexRuntimeSql + "\n\n"}, ""][0] + _checkConstraint + "\n\n" + strings.Join([for x in _stashes {x + "\n\n"}], "") + _triggerBody + [if _hasTimers {"\n\n" + (#MachineTimerSql & {machine: S.machine, table: _table, pk: _pk}).out}, ""][0]
 	}, ""][0]
 
 	_lifecycleMachineSql: [if S.machine["on"] != _|_ {
@@ -1129,6 +1207,92 @@ _sqlType: {
 	}, "'{}'::jsonb"][0]
 }
 
+// A secret field's write (#Field.secret): the sealed value moves to the
+// airlock's secret table under the row's primary key, as the ledger names the
+// row, and the row keeps NULL. The first trigger, which fires before any other
+// since a table's triggers fire in the order of their names and a digit sorts
+// before every name the program gives one, refuses what is not sealed (mecha's
+// seal.ts SEALED) without repeating it, so a client that sends a PIN in the
+// clear has it in no table and no error; it then holds the sealed value for the
+// transaction alone and empties the column, so no other trigger, nor an error
+// one raises, sees even the ciphertext. The second, after the write, keeps it
+// only for a row the write did write: an insert that ON CONFLICT DO NOTHING
+// turned away, onto another reader's row, keeps nothing. The table is mecha's
+// (services/airlock/seal-tables.ts), in a schema only its owner may use. The
+// airlock deletes the value in the commit that settles the effect and reads
+// nothing past five minutes (seal.ts SEAL_TTL_SECONDS); what expired unread is
+// swept by the airlock and by every write here, so a scaled-to-zero airlock is
+// not all that clears it.
+#secretStashSql: {
+	let X = self
+	table: string
+	pk: [...string]
+	field: #Field & {secret: true}
+	_f:    X.field.name
+	_fn:   "trg_\(X.table)_\(_f)_secret"
+	_kept: "trg_\(X.table)_\(_f)_secret_kept"
+	// The transaction's own setting, by the row: a value set LOCAL is gone at
+	// its end, written or not.
+	_held: "'pronto_secret.k' || md5('\(X.table)' || chr(10) || '\(_f)' || chr(10) || NEW.\"\(X.pk[0])\"::text)"
+	out: """
+		CREATE OR REPLACE FUNCTION "\(_fn)"() RETURNS trigger
+		LANGUAGE plpgsql
+		SECURITY DEFINER
+		SET search_path = public, pg_catalog AS $$
+		BEGIN
+		  IF NEW."\(_f)" IS NOT NULL AND NEW."\(_f)" !~ '^seal1\\.[A-Za-z0-9_-]{16}\\.(?:[A-Za-z0-9_-]{128}){4}$' THEN
+		    RAISE EXCEPTION '\(X.table).\(_f) takes a value sealed to the airlock''s key, and this one is not' USING ERRCODE = 'invalid_parameter_value';
+		  END IF;
+		  -- Every row an insert offers is marked, sealed value or not: one write
+		  -- offering a row twice, a conflict turning one away, would hand one
+		  -- offer's value to the other's row.
+		  IF TG_OP = 'INSERT' THEN
+		    IF coalesce(current_setting(\(_held), true), '') <> '' THEN
+		      RAISE EXCEPTION '\(X.table) is offered one row twice in one transaction, which a secret field cannot tell apart' USING ERRCODE = 'cardinality_violation';
+		    END IF;
+		    PERFORM set_config(\(_held), coalesce(NEW."\(_f)", '-'), true);
+		  ELSIF NEW."\(_f)" IS NOT NULL THEN
+		    PERFORM set_config(\(_held), NEW."\(_f)", true);
+		  END IF;
+		  NEW."\(_f)" := NULL;
+		  RETURN NEW;
+		END $$;
+
+		CREATE OR REPLACE FUNCTION "\(_kept)"() RETURNS trigger
+		LANGUAGE plpgsql
+		SECURITY DEFINER
+		SET search_path = public, pg_catalog AS $$
+		DECLARE
+		  sealed text := current_setting(\(_held), true);
+		BEGIN
+		  PERFORM set_config(\(_held), '', true);
+		  IF sealed LIKE 'seal1.%' THEN
+		    DELETE FROM "airlock"."secret" WHERE "expires_at" <= clock_timestamp();
+		    INSERT INTO "airlock"."secret" ("tbl", "row", "field", "value", "expires_at")
+		    VALUES ('\(X.table)', \((#ledgerRowSql & {pk: X.pk}).out), '\(_f)', sealed, clock_timestamp() + interval '\(#SecretTtlSeconds) seconds')
+		    ON CONFLICT ("tbl", "row", "field") DO UPDATE SET "value" = EXCLUDED."value", "expires_at" = EXCLUDED."expires_at";
+		  END IF;
+		  RETURN NULL;
+		END $$;
+
+		REVOKE EXECUTE ON FUNCTION "\(_fn)"() FROM PUBLIC;
+		REVOKE EXECUTE ON FUNCTION "\(_kept)"() FROM PUBLIC;
+		DROP TRIGGER IF EXISTS "0_\(X.table)_\(_f)_secret" ON "\(X.table)";
+		CREATE TRIGGER "0_\(X.table)_\(_f)_secret"
+		  BEFORE INSERT OR UPDATE ON "\(X.table)"
+		  FOR EACH ROW
+		  EXECUTE FUNCTION "\(_fn)"();
+		DROP TRIGGER IF EXISTS "0_\(X.table)_\(_f)_secret_kept" ON "\(X.table)";
+		CREATE TRIGGER "0_\(X.table)_\(_f)_secret_kept"
+		  AFTER INSERT OR UPDATE ON "\(X.table)"
+		  FOR EACH ROW
+		  EXECUTE FUNCTION "\(_kept)"();
+		"""
+}
+
+// How long a sealed value waits for its effect (mecha's seal.ts SEAL_TTL_SECONDS).
+#SecretTtlSeconds: 300
+
 // The instance's primary key, which the airlock's outcome UPDATE names.
 #ledgerRowSql: {
 	let R = self
@@ -1167,23 +1331,49 @@ _sqlType: {
 // first. Graphile's own default.
 #QueueHeadroom: 25
 
+// A read is no claim: entering its state adds one to the row's count, and its
+// job carries the row, that count, the row's incarnation, the journal key
+// `<effect>:<row's key>:<incarnation>:<count>`, the input, evaluated once,
+// and its digest. Graphile alone
+// retries it, #ReadAttempts times. It spends its sink's credential, so a
+// request's anonymous role enters its state no more than a write from no one
+// would claim a charge.
+#ReadAttempts: 5
+
 #invokeEnterSql: {
 	let I = self
 	effect: _
 	state:  string
 	pk:     [...string]
-	_key:   (#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out
-	out: """
+	_wake: """
+		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
+		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
+		           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);
+		"""
+	_input: (#jsonbObjectSql & {values: I.effect.input}).out
+	out:    [if I.effect.request != _|_ {_read}, _claim][0]
+	_n:     [if I.effect.request != _|_ {"NEW.\"\(I.effect.count)\""}, ""][0]
+	_inc:   [if I.effect.request != _|_ {"NEW.\"\(I.effect.incarnation)\""}, ""][0]
+	_rowKey: [if len(I.pk) == 1 {"NEW.\"\(I.pk[0])\"::text"}, "jsonb_build_array(" + strings.Join([for f in I.pk {"NEW.\"\(f)\"::text"}], ", ") + ")::text"][0]
+	_read: """
+		        IF current_setting('role', true) = 'anon' THEN
+		          RAISE EXCEPTION 'read % is asked by a signed-in writer, and the request names none', '\(I.effect.name)' USING ERRCODE = 'insufficient_privilege';
+		        END IF;
+		        \(_n) := coalesce(\(_n), 0) + 1;
+		        read_input := \(_input);
+		        PERFORM graphile_worker.add_job('external_read', json_build_object('effect', '\(I.effect.name)', 'row', \((#ledgerRowSql & {pk: I.pk}).out), 'n', \(_n), 'incarnation', \(_inc), 'key', '\(I.effect.name):' || \(_rowKey) || ':' || \(_inc) || ':' || \(_n), 'input', read_input, 'digest', md5(read_input::text)), max_attempts => \(#ReadAttempts));
+		\(_wake)
+		"""
+	_key: [if I.effect.request == _|_ {(#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out}, ""][0]
+	_claim: """
 		        INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "input")
 		        VALUES (\(_key), '\(I.effect.name)', \((#ledgerRowSql & {pk: I.pk}).out), \((#jsonbObjectSql & {values: I.effect.input}).out))
 		        ON CONFLICT ("key") DO NOTHING;
 		        IF NOT FOUND THEN
 		          RAISE EXCEPTION 'external effect % was already performed: entering \(I.state) again needs a new key', \(_key) USING ERRCODE = 'unique_violation';
 		        END IF;
-		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => airlock.job_key(\(_key)), max_attempts => \(I.effect.attempts+#QueueHeadroom));
-		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
-		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
-		           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);
+		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => airlock.job_key(\(_key)), max_attempts => \([if I.effect.request == _|_ {I.effect.attempts + #QueueHeadroom}, 0][0]));
+		\(_wake)
 		"""
 }
 
@@ -1774,6 +1964,51 @@ _sqlType: {
 // Prefix 799 is reserved for write permissions, before schedules and seeds.
 // A separate migration preserves 006's digest when narrowing an existing public
 // writer. The migration ledger can apply the restriction without resetting data.
+// A role a token may name beside the cluster's own (#TokenRole), which
+// nothing logs in as. One that already stands is taken only if it holds no
+// more than that: a name the database already gave a login, a superuser, a
+// bypass of row-level security or the database itself would hand a token
+// their power. Quoted, since a name
+// may be a keyword.
+#tokenRole: {
+	role: string
+	out: """
+		  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(role)') THEN
+		    CREATE ROLE "\(role)" NOLOGIN;
+		  ELSIF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = '\(role)' AND (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))) THEN
+		    RAISE EXCEPTION 'role \(role) stands with more than a token role holds, which a token naming it would act with';
+		  END IF;
+
+		"""
+}
+
+// A declared token role's bounds, the client tier's (plugins/pronto/resilience).
+#tokenRoleBounds: {
+	role: string
+	let bounds = resilience.resilience.timeouts
+	out: "ALTER ROLE \"\(role)\" SET statement_timeout = '\(bounds.statement.client)s';\n" +
+		"ALTER ROLE \"\(role)\" SET lock_timeout = '\(bounds.lock.client)s';\n" +
+		"ALTER ROLE \"\(role)\" SET idle_in_transaction_session_timeout = '\(bounds.idleInTransaction.client)s';\n"
+}
+
+// The declared token roles as 001_roles.sql leaves them, restated on every
+// release ahead of its migrations (the cluster's `roles` reconcile): initdb
+// runs 001 once, and a role may be declared after it did, with a migration
+// granting it something. Each is listed in `mecha.token_role`, which lets an
+// outside issuer's token act as it and as no other; the tenancy floor that
+// holds the list and reads it goes first, restated, since a database built
+// before it has neither.
+#tokenRolesSql: {
+	roles: [...string]
+	let quoted = strings.Join([for r in roles {"'\(r)'"}], ", ")
+	out: mecha.#TenancySql + "\n" +
+		"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
+		"GRANT \(strings.Join([for r in roles {"\"\(r)\""}], ", ")) TO authenticator;\n" +
+		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "") +
+		"INSERT INTO mecha.token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
+		"DELETE FROM mecha.token_role WHERE role_name NOT IN (\(quoted));\n"
+}
+
 #publicUpdateSql: {
 	let P = self
 	e:        #Entity
@@ -2166,6 +2401,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
+				// Sealed to the airlock's key at the form (omnishell's
+				// screen.js), never written in the clear.
+				if f.secret != _|_ {secret: true}
 				let column = #machineColumn & {entityName: e.name, fieldName: f.name, columns: S.code._machineColumns}
 				if f.default != _|_ {
 					defaulted: true
@@ -2618,6 +2856,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out:     list.Contains(S.servers, true) || S.auth
 }
 
+// An entity whose generated column calls unaccent (immutable_unaccent, the one
+// a column can call, mecha's #UnaccentSql) brings the extension in the step
+// that creates its table: opted into by the schema that uses it, so no app
+// without one changes the bytes of a step its databases applied.
+#unaccented: {
+	e!:  _
+	out: len([for f in e.fields if f.generated != _|_ if strings.Contains(f.generated, "unaccent") {f}]) > 0
+}
+
 #appMigrations: {
 	let M = self
 	code!: _
@@ -2645,7 +2892,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_server: (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
 	list:    [for f in M._all if M._server {f}]
 	_all: [
-		"services/database/migrations/000_extensions.sql",
+		// A live baseline keeps the extensions it applied; one an entity later
+		// needs is a migration's.
+		if len([for r in M.raw if r.name == "000_extensions.sql" {r}]) == 0 {"services/database/migrations/000_extensions.sql"},
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
 		"services/database/migrations/004_types.sql",
@@ -2709,6 +2958,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		let machines = L._machines[e.name]
 		(e.name): strings.Join(list.Concat([
 			["SET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '30s';"],
+			[if (#unaccented & {"e": e}).out {strings.TrimSuffix(mecha.#UnaccentSql, "\n")}],
 			[(#tableSql & {"e": e, columns: L.code._machineColumns, entities: L.code.state.entities}).out],
 			[if e.indexes != _|_ {strings.Join((#indexSql & {"e": e}).out, "\n")}],
 			[for u in e.uniques {"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(e.table) (\(strings.Join(u.cols, ", ")));"}],
@@ -3101,7 +3351,8 @@ _pgrollDir: "services/database/pgroll"
 			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.providers != _|_ {
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
-			blobs: D.code.capabilities.blobs
+			blobs:   D.code.capabilities.blobs
+			issuers: len([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}]) > 0
 			if D.code.capabilities.ai != _|_ {
 				ai: D.code.capabilities.ai
 			}
@@ -3122,6 +3373,9 @@ _pgrollDir: "services/database/pgroll"
 				if len(updateOnly) > 0 {
 					public_access: strings.Join([for e in updateOnly {(#publicUpdateSql & {"e": e}).out}], "\n\n")
 				}
+				if D.code.state.tokenRoles != _|_ if len(D.code.state.tokenRoles) > 0 {
+					roles: (#tokenRolesSql & {roles: list.SortStrings([for n, _ in D.code.state.tokenRoles {n}])}).out
+				}
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
@@ -3141,12 +3395,14 @@ _pgrollDir: "services/database/pgroll"
 				name: n
 				// The compose stack is the docker target's.
 				(#SinkAt & {sink: x.sink, target: "docker"}).out
+				if x.request != _|_ {read: true}
 				if x.sink.targets != _|_ if x.sink.targets.docker != _|_ if x.sink.targets.docker.bridge != _|_ {simulated: true}
 
 				// The credential's variable is required of the environment with
 				// the handler's secrets, and handed to the airlock alone.
-				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
+				_secrets: [for s, _ in {for s in list.Concat([x._envSecrets, [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
 				if len(_secrets) > 0 {secrets: _secrets}
+				if len(x._fieldSecrets) > 0 {secretFields: true}
 			}]
 			// An isolate bridge's appliance form: its hatch's host serving the
 			// build the hatch's image made, and any WebAssembly beside it, as a
@@ -3541,6 +3797,14 @@ _pgrollDir: "services/database/pgroll"
 		if E.code.state.rewrites != _|_ if len(E.code.state.rewrites) > 0 {
 			pages:      true & !list.Contains(E.code.meta.targets, "pages")
 			cloudflare: true & !list.Contains(E.code.meta.targets, "cloudflare")
+		}
+	}
+
+	// A declared token role is a role of the container's PostgreSQL, which the
+	// page's and the edge's databases have no counterpart of.
+	_tokenRoleTargets: {
+		if len(E._declaredRoles) > 0 for t in ["pages", "cloudflare"] if list.Contains(E.code.meta.targets, t) {
+			(t): "tokenRoles: the \(t) target has no role a token may switch to" & true
 		}
 	}
 
@@ -4154,6 +4418,12 @@ _pgrollDir: "services/database/pgroll"
 	// declared: the ticker writes its ticks as it, through crud, which mecha's
 	// cluster has verify the token wherever something wakes (its _serviceToken).
 	_serviceOn: len(E._timedMachines) > 0 || E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
+	// The roles a token may name beside the cluster's own, in one order
+	// (#TokenRole). They are crud's to switch to, so crud takes the keys of
+	// the issuers a release trusts.
+	_declaredRoles: list.SortStrings([if E.code.state.tokenRoles != _|_ for n, _ in E.code.state.tokenRoles {n}])
+	cluster: capabilities: issuers: len(E._declaredRoles) > 0
+	_declaredRolesServed: [if len(E._declaredRoles) > 0 if !E._serverOn {"tokenRoles: a token role is a role of the app's database, and the app has no server tier"}, true][0] & true
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
 	// these from the code, and a cluster that disagrees conflicts here.
@@ -4521,7 +4791,8 @@ _pgrollDir: "services/database/pgroll"
 		// evaluating a program takes gigabytes, too much to repeat in
 		// ci-replay, in a release or in a test. The
 		// token roles are those 001_roles.sql grants authenticator, which a
-		// Kubernetes release's operator would otherwise revoke. The drains are
+		// Kubernetes release's operator would otherwise revoke, the program's
+		// own among them, whose issuers' keys a release gives crud. The drains are
 		// what the page's and the edge's clusters call (mecha-browser's
 		// drains.ts), where no stream runs them. The database image is the
 		// one a test runs the app's migrations in; the actors migration is
@@ -4534,7 +4805,8 @@ _pgrollDir: "services/database/pgroll"
 					schema:   E.cluster.surface.schema
 					database: mecha.published.database
 					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
-					tokenRoles:   E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					if len(E._declaredRoles) > 0 {declaredRoles: E._declaredRoles}
 					computations: E.cluster.state.computations
 					drains: list.Concat([
 						[for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}],
@@ -4681,21 +4953,29 @@ _pgrollDir: "services/database/pgroll"
 				format: "type-sql"
 				data:   [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
 			}
-			"services/database/migrations/000_extensions.sql": {
-				format: "sql"
-				// plv8 is required exactly when a server entity declares
-				// validations: it is the language their predicates run in.
-				// gen_random_uuid() is core since PostgreSQL 13, so an app
-				// without validations needs no extension at all.
-				//
-				// IF NOT EXISTS because a migration is restated, not replayed
-				// once: a correction below it reaches a database that already
-				// holds the extension, and CREATE EXTENSION alone would abort
-				// the whole file before the correction ran.
-				text: [
-					if len(E._validated) > 0 {"CREATE EXTENSION IF NOT EXISTS plv8;\n"},
-					if len(E._validated) == 0 {"-- no extensions required\n"},
-				][0]
+			if len([for r in E._raw if r.name == "000_extensions.sql" {r}]) == 0 {
+				"services/database/migrations/000_extensions.sql": {
+					format: "sql"
+					// plv8 is required exactly when a server entity declares
+					// validations: it is the language their predicates run in.
+					// unaccent exactly when a baseline entity's generated column
+					// calls it (mecha.#UnaccentSql); a later entity's migration carries
+					// its own. gen_random_uuid() is core since PostgreSQL 13, so
+					// an app without either needs no extension at all.
+					//
+					// IF NOT EXISTS because a migration is restated, not replayed
+					// once: a correction below it reaches a database that already
+					// holds the extension, and CREATE EXTENSION alone would abort
+					// the whole file before the correction ran.
+					_lines: [
+						if len(E._validated) > 0 {"CREATE EXTENSION IF NOT EXISTS plv8;\n"},
+						if len([for e in E._baseServer if (#unaccented & {"e": e}).out {e}]) > 0 {mecha.#UnaccentSql},
+					]
+					text: [
+						if len(_lines) > 0 {strings.Join(_lines, "")},
+						"-- no extensions required\n",
+					][0]
+				}
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
@@ -4706,20 +4986,20 @@ _pgrollDir: "services/database/pgroll"
 						    CREATE ROLE \(r) NOLOGIN;
 						  END IF;
 						"""
-				}], "\n") + "\n" + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+				}], "\n") + "\n" + strings.Join([for r in E._declaredRoles {(#tokenRole & {role: r}).out + "\n"}], "") + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
 
 				// PostgREST's login, which switches to the role a request's token
 				// names; it applies that role's settings (the bounds below) only
 				// when the role is granted to it. No password, as electric's: the
 				// deployment's secret sets it (mecha's #RolePasswordsStep).
-				_tokenRoles: [for r in _roles if r != "electric" {r}]
+				_tokenRoles: list.Concat([[for r in _roles if r != "electric" {r}], E._declaredRoles])
 				_authenticator: """
 					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
 					    CREATE ROLE authenticator NOINHERIT;
 					  END IF;
 
 					"""
-				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(_tokenRoles, ", ")) TO authenticator;\n"
+				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(list.Concat([[for r in _roles if r != "electric" {r}], [for r in E._declaredRoles {"\"\(r)\""}]]), ", ")) TO authenticator;\n"
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -4744,13 +5024,13 @@ _pgrollDir: "services/database/pgroll"
 
 				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
 				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
-					for r in _tokenRoles
+					for r in _roles if r != "electric"
 					let tier = [if r == "service" {"service"}, "client"][0] {
 						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
 							"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
 							"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
 					},
-				]])
+				], [for r in E._declaredRoles {(#tokenRoleBounds & {role: r}).out}]])
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -4957,7 +5237,7 @@ _pgrollDir: "services/database/pgroll"
 			if len(_invoking) > 0 {
 				"services/airlock/effects.json": {
 					format: "json"
-					data: effects: {for i in _invoking {
+					data: effects: {for i in _invoking if i.effect.request == _|_ {
 						(i.effect.name): {
 							table:      i.table
 							field:      i.field
@@ -4970,7 +5250,10 @@ _pgrollDir: "services/database/pgroll"
 							if !i.effect.sink.idempotent {reentry: i.effect.reentry}
 							attempts: i.effect.attempts
 							handler:  "effects/\(i.effect.name).js"
-							if i.effect.secrets != _|_ {secrets: i.effect.secrets}
+							if len(i.effect._envSecrets) > 0 {secrets: i.effect._envSecrets}
+							// Read from the airlock's secret table at each call,
+							// the row the ledger names and these columns of it.
+							if len(i.effect._fieldSecrets) > 0 {secretFields: i.effect._fieldSecrets}
 							if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
 							if i.effect.sink.contentType != _|_ {contentType: i.effect.sink.contentType}
 
@@ -4988,6 +5271,21 @@ _pgrollDir: "services/database/pgroll"
 							}
 						}
 					}}
+					// The reads (mecha's services/airlock/read.ts): the request, and
+					// where its answer lands.
+					if len([for i in _invoking if i.effect.request != _|_ {i}]) > 0 {
+						data: reads: {
+							for i in _invoking if i.effect.request != _|_ {
+								(i.effect.name): {
+									request: {method: i.effect.request.method, path: i.effect.request.path}
+									invoke:  {table: i.table, field: i.field, state: i.state, onDone: i.onDone, onError: i.onError, row: i.row, count: i.effect.count, incarnation: i.effect.incarnation}
+									if i.effect.cacheControl != _|_ {cacheControl: i.effect.cacheControl}
+									if i.effect.got != _|_ {got: i.effect.got}
+									if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
+								}
+							}
+						}
+					}
 				}
 			}
 			for i in _invoking {
@@ -5006,7 +5304,9 @@ _pgrollDir: "services/database/pgroll"
 						][0]
 					}
 				}
-				"effects/\(i.effect.name).js": {format: "jessie", src: "effects/\(i.effect.name).js"}
+				if i.effect.request == _|_ {
+					"effects/\(i.effect.name).js": {format: "jessie", src: "effects/\(i.effect.name).js"}
+				}
 			}
 
 			if len(E.code.state.schedules) > 0 {

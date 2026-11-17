@@ -22,7 +22,7 @@ Deno.test("the release signs the service token with its pinned runtime", async (
   }).output();
   const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
   assertEquals(result.success, true, text(result.stderr));
-  assertEquals(text(result.stdout), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZSIsInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMCJ9.3YAFD2hjWqdLGYNqLhF3-LuuKER-0LYaAC_EfEFlfMI");
+  assertEquals(text(result.stdout), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtZWNoYTpzdGFjayIsInJvbGUiOiJzZXJ2aWNlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIn0.3AS7TlxXoUPLZnMpqt8NyTkxfbsxYvoAqcDncjlRVrw");
 });
 
 Deno.test("generated database secrets are URL-safe and use the pinned runtime", async () => {

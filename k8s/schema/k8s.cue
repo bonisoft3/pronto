@@ -465,6 +465,9 @@ import (
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
 						annotations: (#daprSidecar & {id: "crud", port: "3000"}).out
+						if release.trustedKeysDigest != "" {
+							annotations: "pronto.dev/trusted-keys-digest": release.trustedKeysDigest
+						}
 					}
 					spec: containers: [{
 						name:            "crud"
@@ -490,12 +493,25 @@ import (
 							{name: "PGRST_DB_SCHEMA", value: "public"},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 							{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
-							{
+							// With a trusted issuer, the key set the release composed from
+							// this secret and the issuer's public keys, and crud's audience.
+							if release.trustedKeysDigest == "" {
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
 									name: "\(release.name)-auth-secrets"
 									key:  "PGRST_JWT_SECRET"
 								}
+							},
+							if release.trustedKeysDigest != "" {
+								name: "PGRST_JWT_SECRET"
+								valueFrom: secretKeyRef: {
+									name: "\(release.name)-trusted-keys"
+									key:  "PGRST_JWKS"
+								}
+							},
+							if release.trustedKeysDigest != "" {
+								name:  "PGRST_JWT_AUD"
+								value: [if release.trustedAudience != "" {release.trustedAudience}, "\(originValue)/crud"][0]
 							},
 							{name: "PGRST_SERVER_HOST", value: "*"},
 							{name: "PGRST_SERVER_PORT", value: "3000"},

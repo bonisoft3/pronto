@@ -101,7 +101,10 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue mecha-xstate.test.ts xstate-host.integration.test.ts"
-          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts reads.test.ts token-roles.test.ts"
+          # The sealing the page does, through omnishell's bundled client, whose
+          # debug module reads DEBUG as it loads.
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue --allow-env=DEBUG secret-seal.test.ts"
           # The compute batch machine, run by mecha's snapshot coordinator over
           # PGlite: claims, captures, publication and materialization.
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-env mecha-snapshot.test.ts mecha-snapshot-materialize.test.ts"
@@ -131,6 +134,12 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno task test:airlock"
+          # A read in postgres under the emitted interpreter, delivered,
+          # journaled and replayed by the airlock's own code.
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue,deno reads.integration.test.ts"
+          # A declared token role from Hydra's client credentials through the
+          # door and PostgREST; Hydra is identity/hydra's tool, as signin's.
+          - do: "mise -C identity/hydra x -- sh -c 'export HYDRA_BIN=$(command -v hydra); cd ../.. && deno test --no-config --allow-read --allow-write --allow-env --allow-net --allow-run=docker,cue,hydra token-roles.integration.test.ts'"
       # Needs libraries/mecha/packages/pglite-workerd/dist. Runs locally:
       # edge-compute's native DuckDB build does not reproduce its manifest
       # hashes on CI's runners.
@@ -146,12 +155,15 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test -A --config bundle/deno.json bundle/mecha-edge-compute_test.ts bundle/mecha-edge-retention_test.ts bundle/mecha-edge-compression_test.ts bundle/edge-isolate-workerd_test.ts"
+          # unaccent in PostgreSQL, npm PGlite and the edge object, whose
+          # PGlite links it in; Docker beside wrangler dev, on that job's runner.
+          - do: "mise exec -- deno test -A --config bundle/deno.json unaccent.integration.test.ts"
       # A pages release's derived rows: their SQL, and a bundled page whose
       # PGlite boots holding them; bundling needs the omnishell and mecha trees.
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --parallel --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts bundle/edge-functions_test.ts mecha-reducer.test.ts database-functions.test.ts bundle/edge-dispatcher_test.ts bundle/edge-bridges_test.ts"
+          - do: "mise exec -- deno test --parallel --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-seal_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts bundle/edge-functions_test.ts mecha-reducer.test.ts database-functions.test.ts bundle/edge-dispatcher_test.ts bundle/edge-bridges_test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:

@@ -28,10 +28,13 @@ set -a
 set +a
 : "${BROKER_ISSUER:?BROKER_ISSUER is required}" "${BROKER_SECRET:?BROKER_SECRET is required}"
 SECRETS_SYSTEM=${HYDRA_SECRET:-$(printf 'hydra system secret' | openssl dgst -sha256 -hmac "$BROKER_SECRET" -r | cut -c1-64)}
+# What Hydra's token hook bears to the front, which answers a client
+# credentials token's role (hydra/front.ts).
+HYDRA_HOOK_SECRET=${HYDRA_HOOK_SECRET:-$(printf 'hydra token hook' | openssl dgst -sha256 -hmac "$BROKER_SECRET" -r | cut -c1-64)}
 state=${XDG_STATE_HOME:-$HOME/.local/state}/pronto-identity
 mkdir -p "$state"
 DSN="sqlite://$state/hydra.sqlite?_fk=true"
-export SECRETS_SYSTEM DSN
+export SECRETS_SYSTEM DSN HYDRA_HOOK_SECRET
 # Hydra's release with SQLite, for this machine.
 case "$(uname -s)-$(uname -m)" in
 	Darwin-arm64) asset=macOS_sqlite_arm64 ;;

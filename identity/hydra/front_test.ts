@@ -253,6 +253,70 @@ cases.push(["a tenant with a valid _pronto-identity DNS TXT record hops through 
   ]);
 }]);
 
+// Token roles: Hydra asks the front's token hook for a client credentials
+// token's role, which only the operator's registration names.
+const HOOK_SECRET = "h".repeat(40);
+const AUDIENCE = "https://app-a.example/crud";
+async function register(id: string, extra: Record<string, unknown>) {
+  const res = await fetch(`http://127.0.0.1:${HYDRA_ADMIN_PORT}/admin/clients`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: id, client_secret: `${id}-secret-of-some-length`, grant_types: ["client_credentials"],
+      token_endpoint_auth_method: "client_secret_basic", access_token_strategy: "jwt", audience: [AUDIENCE], ...extra,
+    }),
+  });
+  assertEquals(res.status, 201, await res.text());
+}
+async function clientToken(id: string, form: Record<string, string>) {
+  const res = await fetch(`${ISSUER}/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", authorization: `Basic ${btoa(`${id}:${id}-secret-of-some-length`)}` },
+    body: new URLSearchParams({ grant_type: "client_credentials", ...form }),
+  });
+  const body = await res.json();
+  const claims = body.access_token ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(body.access_token.split(".")[1].replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)))) : undefined;
+  return { status: res.status, body, claims };
+}
+cases.push(["a client registered with a role gets a token naming it, signed by the issuer's published keys", async () => {
+  await register("residual_bot", { metadata: { role: "residual_bot" } });
+  const t = await clientToken("residual_bot", { audience: AUDIENCE });
+  assertEquals(t.status, 200, JSON.stringify(t.body));
+  assertEquals([t.claims.role, t.claims.sub, t.claims.aud, t.claims.ext], ["residual_bot", "residual_bot", [AUDIENCE], undefined]);
+  const kid = JSON.parse(atob(t.body.access_token.split(".")[0].replaceAll("-", "+").replaceAll("_", "/"))).kid;
+  assertEquals((await keys(kid))?.kty, "RSA", "the key is in the issuer's JWKS");
+}]);
+cases.push(["a client cannot name its own role, nor be given one it was not registered with", async () => {
+  const asked = await clientToken("residual_bot", { audience: AUDIENCE, role: "service" });
+  assertEquals([asked.status, asked.claims.role], [200, "residual_bot"], JSON.stringify(asked.body));
+  const scoped = await clientToken("residual_bot", { audience: AUDIENCE, scope: "service" });
+  assertEquals(scoped.status >= 400, true, "a scope the client was not registered for");
+  await register("plain_client", {});
+  const plain = await clientToken("plain_client", { audience: AUDIENCE, role: "service" });
+  assertEquals([plain.status, plain.claims?.role], [200, undefined]);
+  const other = await clientToken("plain_client", { audience: "https://app-b.example/crud" });
+  assertEquals(other.status >= 400, true, "an audience the client was not registered for");
+}]);
+cases.push(["a role's token names an audience, and no role of the cluster's own is a client's", async () => {
+  const bare = await clientToken("residual_bot", {});
+  assertEquals([bare.status, bare.body.error], [403, "access_denied"]);
+  for (const role of ["service", "app_user", "authenticator", "postgres", "pg_read_all_data", "Residual", 7]) {
+    const id = `bad_${String(role).toLowerCase()}`;
+    await register(id, { metadata: { role } });
+    const t = await clientToken(id, { audience: AUDIENCE });
+    assertEquals([t.status, t.claims?.role], [403, undefined], String(role));
+  }
+}]);
+cases.push(["the token hook answers Hydra alone", async () => {
+  for (const authorization of [undefined, "Bearer wrong", `Bearer ${HOOK_SECRET}x`]) {
+    const res = await fetch(`${ISSUER}/hooks/token`, {
+      method: "POST", headers: authorization ? { authorization } : {},
+      body: JSON.stringify({ request: { client_id: "residual_bot", grant_types: ["client_credentials"], granted_audience: [AUDIENCE] } }),
+    });
+    assertEquals(res.status, 401, String(authorization));
+    await res.body?.cancel();
+  }
+}]);
+
 const HYDRA_PUBLIC_PORT = freePort(), HYDRA_ADMIN_PORT = freePort();
 
 // One test owns Hydra, the front and the fake Google from start to shutdown;
@@ -269,6 +333,9 @@ Deno.test({ name: "the broker on Hydra end to end", sanitizeOps: false, sanitize
       SERVE_PUBLIC_HOST: "127.0.0.1", SERVE_PUBLIC_PORT: String(HYDRA_PUBLIC_PORT),
       SERVE_ADMIN_HOST: "127.0.0.1", SERVE_ADMIN_PORT: String(HYDRA_ADMIN_PORT),
       OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true", TTL_ID_TOKEN: "5m",
+      OAUTH2_TOKEN_HOOK_URL: `${ISSUER}/hooks/token`, OAUTH2_TOKEN_HOOK_AUTH_TYPE: "api_key", OAUTH2_TOKEN_HOOK_AUTH_CONFIG_IN: "header",
+      OAUTH2_TOKEN_HOOK_AUTH_CONFIG_NAME: "Authorization", OAUTH2_TOKEN_HOOK_AUTH_CONFIG_VALUE: `Bearer ${HOOK_SECRET}`,
+      OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS: "role", OAUTH2_MIRROR_TOP_LEVEL_CLAIMS: "false",
     },
     stdout: "null", stderr: "inherit",
   }).spawn();
@@ -280,7 +347,7 @@ Deno.test({ name: "the broker on Hydra end to end", sanitizeOps: false, sanitize
   const hydraUrls = { public: `http://127.0.0.1:${HYDRA_PUBLIC_PORT}`, admin: `http://127.0.0.1:${HYDRA_ADMIN_PORT}` };
   const server = Deno.serve(
     { port: frontPort, hostname: "127.0.0.1", onListen() {} },
-    await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls, resolveTxt: async (host) => txtRecords.get(host) ?? [] }),
+    await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls, resolveTxt: async (host) => txtRecords.get(host) ?? [], hookSecret: HOOK_SECRET }),
   );
   try {
     for (let i = 0; ; i++) {

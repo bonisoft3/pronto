@@ -104,6 +104,10 @@ import (
 		// Provider API keys (e.g. GEMINI_API_KEY) mounted into tsbifrost/airlock
 		// from Secret Manager, keyed by environment variable name.
 		secrets: *{} | {[=~"^[A-Z][A-Z0-9_]*$"]: string}
+		// An effect reads a secret field: the airlock holds the key the screen
+		// seals it to (mecha's services/airlock/seal.ts), which the release
+		// keeps in names.secrets.AIRLOCK_SEAL_KEY from its environment.
+		seal: *false | bool
 	}
 
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
@@ -261,6 +265,8 @@ import (
 			// The service role's token, signed with PGRST_JWT_SECRET: the ticker
 			// writes with it, and its clock's poke carries it.
 			SERVICE_JWT: "\(R._id)-service-jwt"
+			// The airlock's seal key, where an effect reads a secret field.
+			AIRLOCK_SEAL_KEY: "\(R._id)-airlock-seal-key"
 		}
 	}
 }
@@ -474,6 +480,7 @@ import (
 							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
 							{name: "AIRLOCK_DIR", value: "/airlock"},
 							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+							if R.airlock.seal {(secretOf & {env: "AIRLOCK_SEAL_KEY", secret: sq.AIRLOCK_SEAL_KEY}).out},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
 						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
 					}},
@@ -692,6 +699,7 @@ import (
 		// An alias sends readers on to the domain, so it needs one.
 		if len(R._aliases) > 0 {aliasTarget: R.domain & !=""}
 		hasRpId:     R._rpId != ""
+		airlockSeal: R.airlock.seal
 		iap:         R._iap
 		serviceYaml: yaml.Marshal(B.service)
 		jobYaml:     yaml.Marshal(B.job)

@@ -731,6 +731,7 @@ What fixes its shape:
   - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
   - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).
   - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN`: WebAuthn relying party identity and origin; automatically inferred from `ORIGIN` when unset.
+  - `PGRST_JWKS` and `TRUSTED_AUDIENCE`: for a program declaring token roles, the key set crud verifies by, which `trusted-keys.ts` composes from `PGRST_JWT_SECRET` and a trusted issuer's public keys, and crud's audience, `<ORIGIN>/crud` when unset ([identity](identity.md#token-roles-and-trusted-issuers)).
 - **Image tagging and publication.** Distribution tasks derive the OCI image tag
   by stripping any path prefix from a prefixed release tag (`$tag | path basename`),
   defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry

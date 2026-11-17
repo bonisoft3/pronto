@@ -21,6 +21,15 @@ processes:
       - OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS=true
       - TTL_ID_TOKEN=5m
       - LOG_LEVEL=warn
+      # A client credentials token's role, which the front answers from the
+      # client's registration (front.ts).
+      - OAUTH2_TOKEN_HOOK_URL=http://127.0.0.1:28443/hooks/token
+      - OAUTH2_TOKEN_HOOK_AUTH_TYPE=api_key
+      - OAUTH2_TOKEN_HOOK_AUTH_CONFIG_IN=header
+      - OAUTH2_TOKEN_HOOK_AUTH_CONFIG_NAME=Authorization
+      - OAUTH2_TOKEN_HOOK_AUTH_CONFIG_VALUE=Bearer ${HYDRA_HOOK_SECRET}
+      - OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS=role
+      - OAUTH2_MIRROR_TOP_LEVEL_CLAIMS=false
     depends_on:
       migrate:
         condition: process_completed_successfully

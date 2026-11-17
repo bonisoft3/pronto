@@ -31,6 +31,10 @@ export interface Hydra {
 // of Hydra is reachable through the front.
 const PASSED = /^\/(\.well-known\/(openid-configuration|jwks\.json)|oauth2\/(auth|token|fallbacks\/[a-z]+))$/;
 
+// A role a client may act as (pronto's #TokenRoleName): none of the
+// cluster's own, nor one Postgres or a managed database reserves.
+const TOKEN_ROLE = /^(?!(anon|app_user|service|electric|authenticator|postgres|public|none|app|streaming_replica)$)(?!(pg_|cloudsql|rds|azure_))[a-z][a-z0-9_]{0,62}$/;
+
 const go = (to: string) => new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 
 export async function front(p: {
@@ -42,6 +46,8 @@ export async function front(p: {
   resolveTxt?: TxtResolver;
   /** Routes served beside the broker's own: a stand-in provider's (fake.ts). */
   extra?: (req: Request, url: URL) => Promise<Response> | null;
+  /** The secret Hydra's token hook sends as its bearer; without it there is no hook. */
+  hookSecret?: string;
 }) {
   if (p.secret.length < 32) throw new Error("BROKER_SECRET is at least 32 characters");
   const fetcher = p.fetcher ?? fetch;
@@ -215,12 +221,47 @@ export async function front(p: {
     return go(redirect_to as string);
   }
 
+  // The role a client acts as, which Hydra's token hook asks for on every
+  // token it issues (docs/identity.md#token-roles-and-trusted-issuers). Only a
+  // client credentials grant has one, and only from the `role` the operator
+  // gave the client when registering it: nothing a client sends with its
+  // request names a role. Its token must name an audience, or every app
+  // trusting the issuer would take it; and no role of the cluster's own is a
+  // client's.
+  const hookKey = p.hookSecret ? await hmacKey(p.hookSecret, "hydra token hook") : null;
+  async function tokenHook(req: Request): Promise<Response> {
+    // Compared as MACs, so the time it takes says nothing of the secret.
+    const mac = async (v: string) => new Uint8Array(await crypto.subtle.sign("HMAC", hookKey!, new TextEncoder().encode(v)));
+    const [a, b] = await Promise.all([mac(req.headers.get("authorization") ?? ""), mac(`Bearer ${p.hookSecret}`)]);
+    if (a.some((x, i) => x !== b[i])) return json(401, { error: "unauthorized" });
+    const { request } = await req.json() as { request?: { client_id?: string; grant_types?: string[]; granted_audience?: string[] } };
+    const grants = request?.grant_types ?? [];
+    if (grants.length !== 1 || grants[0] !== "client_credentials") return new Response(null, { status: 204 });
+    const held = await admin("GET", `/clients/${encodeURIComponent(request?.client_id ?? "")}`);
+    if (!held.ok) {
+      await held.body?.cancel();
+      return json(403, { error: "access_denied" });
+    }
+    const role = ((await held.json()).metadata as { role?: unknown } | null)?.role;
+    if (role === undefined) return new Response(null, { status: 204 });
+    if (typeof role !== "string" || !TOKEN_ROLE.test(role)) {
+      console.error(`broker: client ${request?.client_id}'s role ${JSON.stringify(role)} is no token role`);
+      return json(403, { error: "access_denied" });
+    }
+    if ((request?.granted_audience ?? []).length === 0) {
+      console.error(`broker: client ${request?.client_id} asked for a token naming no audience`);
+      return json(403, { error: "access_denied" });
+    }
+    return json(200, { session: { access_token: { role } } });
+  }
+
   return async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
       const extra = p.extra?.(req, url);
       if (extra) return await extra;
+      if (hookKey && req.method === "POST" && path === "/hooks/token") return await tokenHook(req);
       if (req.method === "GET" && path === "/oauth2/auth") return await authorize(req, url);
       if (PASSED.test(path)) return await pass(req, url);
       if (req.method === "GET" && path === "/login") return await login(url);
@@ -258,5 +299,5 @@ if (import.meta.main) {
   }
   if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
   const hydra = { public: env("HYDRA_PUBLIC") ?? "http://127.0.0.1:28453", admin: env("HYDRA_ADMIN") ?? "http://127.0.0.1:28455" };
-  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra }));
+  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
 }

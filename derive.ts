@@ -312,10 +312,11 @@ export async function terminalPath(path: string, appDir: string): Promise<string
  * endowed with what the effect declares, completing in its exports. */
 export async function effectModules(
   appDir: string,
-  effects: Record<string, { endowments?: string[] }>,
+  effects: Record<string, { endowments?: string[]; request?: unknown }>,
 ): Promise<{ path: string; references: string[]; completion: string; role: string }[]> {
   const rows = [];
-  for (const [ename, e] of Object.entries(effects)) {
+  // A read has no handler: its request is the declaration.
+  for (const [ename, e] of Object.entries(effects).filter(([, e]) => e.request === undefined)) {
     const path = `effects/${ename}.js`;
     const src = await ifMissing(Deno.readTextFile(`${appDir}/${path}`), null);
     if (src === null) fail(`effect ${ename}: its handler ${path} is not a file`);
@@ -496,7 +497,7 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
     state: {
       pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
       computations?: Record<string, { src: string; wasm: string[]; endowments: string[] }>;
-      effects?: Record<string, { endowments?: string[] }>;
+      effects?: Record<string, { endowments?: string[]; request?: unknown }>;
       mecha?: { rows?: Record<string, unknown>; reducers?: Record<string, unknown> };
       seed?: { src: string };
     };
@@ -1118,7 +1119,7 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
     artifacts.push({ path, sha256: await sha(path), derived });
   }
   for (const c of Object.values(state.computations ?? {})) artifacts.push({ path: c.src, sha256: await sha(c.src), derived: false });
-  for (const name of Object.keys(state.effects ?? {})) artifacts.push({ path: `effects/${name}.js`, sha256: await sha(`effects/${name}.js`), derived: false });
+  for (const [name, e] of Object.entries(state.effects ?? {})) if (e.request === undefined) artifacts.push({ path: `effects/${name}.js`, sha256: await sha(`effects/${name}.js`), derived: false });
   // The stylesheets the rules above read, so that editing one and not
   // regenerating is a stale-row finding rather than a green literal lint over
   // yesterday's numbers. A screen's row hashes the STRING scanned rather than a

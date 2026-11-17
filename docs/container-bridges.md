@@ -30,6 +30,10 @@ capabilities. No database credential, host port publication or callback permissi
 is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.24.0/services/airlock/README.md)
 for the ledger and transport contract.
 
+A [read](decisions/2026-10-03-external-effects.md#reads), an effect that is an
+HTTP GET, never reaches a bridge: a bridge stands in for a sink that does not
+speak HTTP, so there is nothing of it to GET, and the compiler refuses one.
+
 ## Where a bridge runs
 
 A bridge's container reaches outside the stack, so the local stack — what

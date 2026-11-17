@@ -14,6 +14,9 @@
 package bayt
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/yaml"
 	"list"
@@ -1038,7 +1041,13 @@ import (
 
 				// What an effect declares it reads, which compose refuses to start
 				// without (the airlock's environment there).
-				let _secrets = [for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}]
+				// A secret field's seal key among them: a released appliance holds a
+				// key of its own, never the repository's development one
+				// (mecha.#DevSealKey).
+				let _secrets = list.Concat([
+					[for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}],
+					[if len([for e in B.cluster.state.effects if e.secretFields != _|_ {e}]) > 0 {"AIRLOCK_SEAL_KEY"}],
+				])
 
 				// A computation's files, by the paths the processes' environment
 				// names them, relative to the app.
@@ -1151,6 +1160,11 @@ import (
 				// airlock does not (process-compose substitutes no `:?` refusal).
 				let _engine = [if _feldera {"'export DUCKSTREAM_ENGINE=feldera' "}, ""][0]
 				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
+				// The seal key is the deployment's own: the repository's development
+				// one is the local stack's alone. The airlock refuses it by its id at
+				// start (seal.ts refuseDevKey); this refuses its usual spellings, the
+				// bytes it decodes to in either base64 alphabet, before anything runs.
+				let _devSealCheck = [if list.Contains(_secrets, "AIRLOCK_SEAL_KEY") {"'for k in AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; do' '  eval \"v=\\${$k:-}\"' '  s=$(printf %s \"$v\" | tr -d \" \\t\\r\\n=\" | tr -- -_ +/)' '  while [ $(( ${#s} % 4 )) -ne 0 ]; do s=\"$s=\"; done' '  [ -z \"$s\" ] || [ \"$(printf %s \"$s\" | base64 -d 2>/dev/null | sha256sum | cut -d\" \" -f1)\" != \(hex.Encode(sha256.Sum256(base64.Decode(null, mecha.#DevSealKey)))) ] || { echo \"appliance: $k is the development key in the repository: give the appliance a key of its own\" >&2; exit 1; }' 'done' "}, ""][0]
 
 				// The door's port, which the one starting the appliance may move, is
 				// no port a bridge's process of it listens on.
@@ -1384,7 +1398,7 @@ import (
 							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do if [ "$1" = "--" ]; then shift; break; fi; shift; done' 'exec "$@"' > /usr/local/bin/mise && chmod 755 /usr/local/bin/mise"#,
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_engine)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_devSealCheck)\#(_engine)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
 							// The appliance runs no renderer: its handler goes, braces counted,
 							// since a handler holds nested blocks a line match would cut short.

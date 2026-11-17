@@ -297,7 +297,7 @@ if (clustered) {
     const bytes = (await Deno.readFile(path.join(dist, f))) as Uint8Array<ArrayBuffer>
     return encodeBase64(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).bytes())
   }
-  assets = { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)), ivm: encodeBase64(await Deno.readFile(path.join(denoDir, 'npm/registry.npmjs.org', ivm[1], ivm[2], 'dist/pg_ivm.tar.gz'))) }
+  assets = { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)), ivm: encodeBase64(await Deno.readFile(path.join(denoDir, 'npm/registry.npmjs.org', ivm[1], ivm[2], 'dist/pg_ivm.tar.gz'))), unaccent: encodeBase64(await Deno.readFile(path.join(dist, 'unaccent.tar.gz'))) }
 }
 const payload = {
   files,

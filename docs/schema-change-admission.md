@@ -21,7 +21,10 @@ An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
 database image and page or edge releases. One named `005_create_tables.sql`
 keeps the tables a live database applied, so a column added to a baseline
 entity rewrites no applied script and arrives in a forward migration alone.
-Entries named as the row machines'
+One named `000_extensions.sql` keeps the extensions it applied, so a generated
+column a baseline entity gains over `immutable_unaccent` carries
+`CREATE EXTENSION IF NOT EXISTS unaccent` and the wrapper (mecha's `#UnaccentSql`) in
+that forward migration instead. Entries named as the row machines'
 or the reducers' step (`010_machines.sql` and `016_mecha_actors.sql`, or where
 `state.steps` places them), or as a declared Cortex source migration, replace
 those generated scripts. Each name may be declared once; its source is copied

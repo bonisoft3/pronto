@@ -82,7 +82,14 @@ currency brings, a scale no finer than its minor units and sums only within
 one currency, are the app's to check. Some fields carry physical labels (`text`,
 `int`, `bigint`, `timestamptz`, `tsvector`), which `#typeAlias` maps to their
 types; `tsvector` is an index, not a value anyone states
-([pending](../PENDING.md#types-and-identity)).
+([pending](../PENDING.md#types-and-identity)). A generated column searches
+without accents through `immutable_unaccent(text)`, so `Reuniao` finds
+`Reunião`: `generated: "to_tsvector('simple', immutable_unaccent(coalesce(title, '')))"`.
+`unaccent()` itself is only STABLE, which a generated column refuses. An
+entity whose generated column calls it brings the extension and the wrapper
+in the step that creates its table (`000_extensions.sql` for a baseline
+entity, its own migration for a later one), in every database a release
+runs: PostgreSQL, a page's PGlite and the edge's.
 
 ## The type table
 

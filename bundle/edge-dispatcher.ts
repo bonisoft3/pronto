@@ -34,6 +34,9 @@ export interface AirlockRelease {
   routes: Record<string, Record<string, string[][]>>
   containers: string[]
   isolates: string[]
+  /** An effect reads a secret field, so the dispatcher holds the seal key
+   * and the object its public half (edge-seal.ts). */
+  seal: boolean
 }
 
 /** The dispatcher's Worker and queue, named after the script holding the
@@ -142,7 +145,9 @@ ${classes.join('')}`)
       exports: Object.fromEntries(bridges.map(b => [bridgeNames(b.name).className, { type: 'durable-object', storage: 'sqlite' }])),
     } : {}),
   }, null, 2) + '\n')
-  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, routes, containers: bridges.map(b => b.name), isolates: isolates.map(i => i.deployment) }
+  const manifest = JSON.parse(await Deno.readTextFile(path.join(app, 'services/airlock/effects.json'))) as { effects: Record<string, { secretFields?: string[] }> }
+  const seal = Object.values(manifest.effects).some(e => (e.secretFields ?? []).length > 0)
+  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, routes, containers: bridges.map(b => b.name), isolates: isolates.map(i => i.deployment), seal }
   await Deno.writeTextFile(path.join(out, 'src/airlock.json'), JSON.stringify(release))
   return release
 }

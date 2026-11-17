@@ -491,6 +491,20 @@ import (
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
 	cel?: string
+	// A value the reader types once for an external effect, a PIN, kept as
+	// Kubernetes keeps a sealed secret: the screen seals it to the airlock's
+	// public key, so only ciphertext travels and is stored, and the airlock
+	// opens it in memory just before its handler's call. The column is NULL in
+	// every row; a write naming it hands the sealed value to the airlock's
+	// secret table for five minutes, where the effect naming it in `secrets`
+	// reads it. What else it may not touch is refused at #App
+	// (docs/decisions/2026-11-16-secret-fields.md).
+	secret?: true
+	if secret != _|_ {
+		type:     "string"
+		required: false
+		pk:       false
+	}
 }
 
 // Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
@@ -1158,13 +1172,9 @@ import (
 	// Also the sink's Dapr binding name, so a DNS label.
 	name: =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
-	// The ledger key is "<name>:" and these fields of the invoking machine's
-	// entity: one as its text, several JSON-encoded. It is also the sink's
-	// idempotency key, so it names the instance and never the input's content.
-	key: *["id"] | [string, ...string]
 	// XState's input: what the handler is handed, frozen into the ledger at
 	// the claim. "NEW.<col>" reads the row, {raw: sql} is an expression,
-	// anything else a literal.
+	// anything else a literal. A read's is what its path expands.
 	input: {[string]: _} | *{}
 	// An https origin naming a host by a DNS name of two labels or more, as
 	// mecha spells it (#Origin); a name that resolves inward is not refused,
@@ -1193,22 +1203,99 @@ import (
 		credential?:  #Credential
 		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
 	}
-	// What a handler does when the ledger shows an earlier entry that may have
-	// reached the sink. An idempotent sink is simply called again; a repeat
-	// is called again too, and `note` says why a duplicate is acceptable.
-	{sink: idempotent: true} | {
-		sink: idempotent: false
-		reentry: *"reconcile" | "unknown" | "repeat"
+
+	// A read: the effect is this HTTP request, a GET, whose answer is the
+	// outcome, so it has no handler (docs/decisions/2026-10-03-external-effects.md#reads).
+	// `path` is an RFC 6570 template over `input`: `{var}` a path segment,
+	// `{?a,b}` and `{&a,b}` the query. A GET is safe (RFC 9110 §9.2.1): nothing
+	// claims it, so it states no key, idempotency, reentry, note or attempts.
+	// Like every effect it is a machine's: a screen asks it by writing the row
+	// whose state invokes it, as the row's own, and sees the answer land there.
+	request?: {
+		method: "GET"
+		path:   =~"^/([A-Za-z0-9._~!$&'()*+,;=:@/?-]|\\{[?&]?[A-Za-z_][A-Za-z0-9_]*(,[A-Za-z_][A-Za-z0-9_]*)*\\})*$"
+		// Refused below with the reason: a GET's body has no meaning (RFC 9110 §9.3.1).
+		body?: _
+	}
+	if request == _|_ {
+		// The ledger key is "<name>:" and these fields of the invoking machine's
+		// entity: one as its text, several JSON-encoded. It is also the sink's
+		// idempotency key, so it names the instance and never the input's content.
+		key: *["id"] | [string, ...string]
+		// What a handler does when the ledger shows an earlier entry that may have
+		// reached the sink. An idempotent sink is simply called again; a repeat
+		// is called again too, and `note` says why a duplicate is acceptable.
+		{sink: idempotent: true} | {
+			sink: idempotent: false
+			reentry: *"reconcile" | "unknown" | "repeat"
+		}
+
+		// The judgment the compiler cannot make: the sink's idempotency and what
+		// a repeat costs are claims about a peer.
+		note: string & !=""
+		// Thrown errors tolerated before the outcome is unknown.
+		attempts: *5 | int & >=1
+	}
+	if request != _|_ {
+		// Refused below with the reason, rather than as words a read lacks.
+		key?: _
+		sink: idempotent?: _
+		reentry?:  _
+		note?:     _
+		attempts?: _
+
+		// The int32 field of the invoking entity counting the row's entries
+		// into the invoking state, and its uuid field naming the row's
+		// incarnation, which a row deleted and made again under its key does
+		// not share. The interpreter alone writes both: the incarnation once,
+		// at the insert, and the count, adding one as the row enters. A read's
+		// journal key is `<name>:<row's key>:<incarnation>:<count>`: replay,
+		// re-running the row's transitions, reaches the same key and is
+		// answered from the journal.
+		count:       string
+		incarnation: string
+		// Freshness, in Cache-Control's own syntax (RFC 9111 §5.2.2), for an
+		// answer whose sink sends neither Cache-Control nor Expires, as many
+		// legacy services send none: `"max-age=60"`. The airlock's cache is
+		// shared by every row's read, so it keeps an answer to an authorized
+		// request only if it says `public`, `s-maxage` or `must-revalidate`
+		// (RFC 9111 §3.5), and a private one never.
+		cacheControl?: =~"^[a-z-]+(=(\"[^\"]*\"|[0-9]+|[a-z-]+))?(, ?[a-z-]+(=(\"[^\"]*\"|[0-9]+|[a-z-]+))?)*$"
+		// got's own options, the part JSON spells (got's RetryOptions and
+		// Delays, in milliseconds). Absent, two quick retries on 408, 429,
+		// 5xx and network errors, honouring Retry-After up to 5 s, and 5 s a
+		// request; the whole read is bound at 20 s.
+		got?: {
+			retry?: close({
+				limit?:         int & >=0 & <=5
+				statusCodes?:   [...(int & >=100 & <=599)]
+				errorCodes?:    [...=~"^E[A-Z_]+$"]
+				backoffLimit?:  int & >=0
+				noise?:         int & >=0
+				maxRetryAfter?: int & >=0
+			})
+			timeout?: close({
+				lookup?:        int & >0
+				connect?:       int & >0
+				secureConnect?: int & >0
+				socket?:        int & >0
+				send?:          int & >0
+				response?:      int & >0
+				read?:          int & >0
+				request?:       int & >0 & <=20000
+			})
+		}
 	}
 
-	// The judgment the compiler cannot make: the sink's idempotency and what
-	// a repeat costs are claims about a peer.
-	note: string & !=""
-	// Thrown errors tolerated before the outcome is unknown.
-	attempts: *5 | int & >=1
-	// The environment variables whose values the handler is handed at each
-	// call, a key to sign with being the common case. Never in the ledger.
-	secrets?: [...#SecretName]
+	// What the handler is handed beside its input at each call, never in the
+	// ledger: an environment variable by name, a key to sign with being the
+	// common case, or `{field: <name>}`, a secret field of the invoking
+	// entity, the value its reader typed, as Kubernetes' `secretKeyRef` names
+	// a key of a Secret. A field secret's value is the handler's `secrets[<name>]`.
+	// A read has no handler, so it takes none.
+	secrets?:      [...(#SecretName | close({field: string}))]
+	_envSecrets:   [if secrets != _|_ for s in secrets if (s & string) != _|_ {s}]
+	_fieldSecrets: [if secrets != _|_ for s in secrets if (s & string) == _|_ {s.field}]
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
 	endowments?: [...mechaCluster.#CageEndowment]
@@ -1244,6 +1331,20 @@ import (
 }
 #RewriteMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
 
+// A role a token may name beside the cluster's own `anon`, `app_user` and
+// `service`: PostgreSQL's NOLOGIN role, which PostgREST's login may switch to
+// and which holds nothing else. What it may do is the app's own SQL (GRANT
+// EXECUTE on a function, a policy naming it); it never bypasses row-level
+// security. A token naming it comes from an issuer the release trusts
+// (docs/identity.md#token-roles-and-trusted-issuers). `note` says who acts as
+// it, and why.
+#TokenRole: close({
+	note: string & !=""
+})
+// A Postgres role name none of the cluster's own roles, nor one Postgres or a
+// managed database reserves. Emitted SQL quotes it.
+#TokenRoleName: =~"^[a-z][a-z0-9_]{0,62}$" & !~"^(anon|app_user|service|electric|authenticator|postgres|public|none|app|streaming_replica)$" & !~"^(pg_|cloudsql|rds|azure_)"
+
 // What a sink reads a caller's credential from: `Authorization: Bearer <key>`
 // is `{scheme: "Bearer", secret: "KEY"}`; an `X-Api-Key` header is
 // `{header: "X-Api-Key", secret: "KEY"}`; `Basic` takes the secret already
@@ -1264,7 +1365,7 @@ import (
 // An environment variable an effect declares, never one the cluster's own
 // services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
 // dispatcher Worker and BRIDGE_<NAME>_URL addresses one on the mesh.
-#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$" & !~"^BRIDGE_"
+#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|PGRST_JWKS|TRUSTED_JWKS|TRUSTED_AUDIENCE|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS|AIRLOCK_SEAL_KEY|AIRLOCK_SEAL_KEY_PREVIOUS|AIRLOCK_SEAL_PUBLIC|AIRLOCK_SEAL_DEV)$" & !~"^BRIDGE_"
 
 #ActivepiecesAlias:      string & =~"^[a-zA-Z][a-zA-Z0-9_]*$"
 #ActivepiecesPath:       string & =~"^\\./pieces/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"
@@ -1752,6 +1853,8 @@ import (
 		signals?: [=~"^[a-z][a-z0-9-]*$"]: #Signal
 		// Each a path answered at another under /crud (#Rewrite), on a container target.
 		rewrites?: [=~"^[a-z][a-z0-9-]*$"]: #Rewrite
+		// Each a role a token may name beside the cluster's own (#TokenRole).
+		tokenRoles?: [#TokenRoleName]: #TokenRole
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's
@@ -2915,7 +3018,7 @@ import (
 		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if !A.state.entities[en].server {
 			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
 		}],
-		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ if _effects[n].request == _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
 			"effect \(n) keys on \(k), which is not a field of \(en)"
 		}],
 		[for i in _invokes if i.final {
@@ -2946,7 +3049,7 @@ import (
 		}],
 		// The credential is the airlock's alone: a handler handed it could put
 		// it in a body the ledger keeps.
-		[for n, x in _effects if x.sink.credential != _|_ if x.secrets != _|_ if list.Contains(x.secrets, x.sink.credential.secret) {
+		[for n, x in _effects if x.sink.credential != _|_ if list.Contains(x._envSecrets, x.sink.credential.secret) {
 			"effect \(n) lists its credential's \(x.sink.credential.secret) among the handler's secrets"
 		}],
 		// The names an effect's cluster keeps for the wake: the ticker's
@@ -2959,6 +3062,146 @@ import (
 		}],
 	])
 	_invokeRefusal: [if len(_invokeViolations) == 0 {true}, _invokeViolations[0]][0] & true
+
+	// A read: an effect that is a GET (#ExternalEffect.request), invoked by a
+	// state; its input read from the row, which keeps it until the answer
+	// lands, and its count the interpreter's.
+	_reads: {for n, x in _effects if x.request != _|_ {(n): x}}
+	_readVars: {for n, x in _reads {
+		(n): [if regexp.Match("[{]", x.request.path) for e in regexp.FindAll("[{][^}]*[}]", x.request.path, -1) for v in strings.Split(strings.Trim(e, "{}?&"), ",") {v}]
+	}}
+	_readViolations: list.Concat([
+		[for n, x in _reads if x.request.body != _|_ {
+			"effect \(n) is a GET, which carries no body (RFC 9110 §9.3.1): what it sends is its path and query"
+		}],
+		[for n, x in _reads
+		for w, there in {
+			key:         x.key != _|_
+			idempotent:  x.sink.idempotent != _|_
+			reentry:     x.reentry != _|_
+			note:        x.note != _|_
+			attempts:    x.attempts != _|_
+			secrets:     x.secrets != _|_
+			endowments:  x.endowments != _|_
+			contentType: x.sink.contentType != _|_
+		} if there {
+			"effect \(n) is a read and declares \(w): a GET is safe (RFC 9110 §9.2.1), so nothing claims it, and it has no handler and sends no body"
+		}],
+		[for n, x in _reads
+		for b in list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]]) {
+			"effect \(n) is a GET on bridge \(b): a bridge stands in for a sink that does not speak HTTP, so there is nothing of it to GET"
+		}],
+		[for n, x in _reads if x.sink.ai != _|_ {
+			"effect \(n) is a GET on the AI gateway, which answers only what is posted to it"
+		}],
+		[for n, _ in _reads if A.capabilities.auth == _|_ {
+			"effect \(n) is a read, and the app declares no auth: a read spends its sink's credential, so only a signed-in writer asks one"
+		}],
+		[for n, x in _reads if list.Contains(A.meta.targets, "cloudflare") {
+			"effect \(n) is a read, which the edge's airlock does not perform: name another target"
+		}],
+		[for n, x in _reads for v in _readVars[n] if x.input[v] == _|_ {
+			"effect \(n)'s path names \(v), which its input does not"
+		}],
+		[for n, x in _reads for k, _ in x.input if !list.Contains(_readVars[n], k) {
+			"effect \(n)'s input \(k) is sent nowhere: its path names it in no expression"
+		}],
+		[for n, x in _reads for k, v in x.input if (v & string) == _|_ && (v & number) == _|_ && (v & bool) == _|_ && (v & {raw: string}) == _|_ {
+			"effect \(n)'s input \(k) is no string, number or boolean, which is all a path or a query carries"
+		}],
+		[for n, x in _reads if x.cacheControl != _|_ if regexp.Match("(^|, ?)private(,|=|$)", x.cacheControl) {
+			"effect \(n) declares its answers private, and the airlock's cache is shared by every row's read (RFC 9111 §5.2.2.7)"
+		}],
+		[for n, x in _reads for i in _invokes if i.src == n
+		for k, v in x.input if (v & string) != _|_ if strings.HasPrefix(v, "OLD.") || v == "NEW.\(A.state.mecha.rows[i.machine].field)" || v == "NEW.\(x.count)" || v == "NEW.\(x.incarnation)" {
+			"effect \(n)'s input \(k) reads \(v): a read reads the row it enters its state with, which keeps those fields until the answer lands, and its state and count fields are the interpreter's"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		if len([for f in A.state.entities[en].fields if f.name == _reads[n].count if f.type == "int32" || f.type == "int" {f}]) == 0 {
+			"effect \(n) counts its entries in \(_reads[n].count), which is no int32 field of \(en)"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		if len([for f in A.state.entities[en].fields if f.name == _reads[n].incarnation if f.type == "uuid" if f.generated == _|_ if f.pk == _|_ || !f.pk {f}]) == 0 {
+			"effect \(n) names its row's incarnation \(_reads[n].incarnation), which is no uuid field of \(en) that is neither generated nor a primary key"
+		}],
+		// Each machine's interpreter refuses any other writer's change to a
+		// count, another machine's increments among them.
+		[for n, x in _reads for n2, x2 in _reads if n < n2 if x.count == x2.count
+		for i in _invokes if i.src == n for i2 in _invokes if i2.src == n2 if i.machine != i2.machine
+		if A.state.mecha.rows[i.machine].entity == A.state.mecha.rows[i2.machine].entity {
+			"effects \(n) and \(n2) count their entries in \(x.count), and two machines invoke them: each machine counts in a field of its own"
+		}],
+		// Each machine's interpreter sets an incarnation at the insert, so a
+		// second would replace the one the first enqueued with.
+		[for n, x in _reads for n2, x2 in _reads if n < n2 if x.incarnation == x2.incarnation
+		for i in _invokes if i.src == n for i2 in _invokes if i2.src == n2 if i.machine != i2.machine
+		if A.state.mecha.rows[i.machine].entity == A.state.mecha.rows[i2.machine].entity {
+			"effects \(n) and \(n2) name their row's incarnation in \(x.incarnation), and two machines invoke them: each machine names it in a field of its own"
+		}],
+		[for n, x in _reads if x.incarnation == x.count {
+			"effect \(n) names \(x.count) both its count and its incarnation"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		for f in A.state.entities[en].fields if f.name == _reads[n].count if f.generated != _|_ {
+			"effect \(n) counts its entries in \(f.name), which is generated: PostgreSQL computes it after the interpreter, which writes the count"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens for i in _invokes if i.src == n
+		if _reads[n].count == A.state.mecha.rows[i.machine].field || len([for f in A.state.entities[en].fields if f.name == _reads[n].count if f.pk != _|_ if f.pk {f}]) > 0 {
+			"effect \(n) counts its entries in \(_reads[n].count), which is its machine's state field or a primary key"
+		}],
+	])
+	_readRefusal: [if len(_readViolations) == 0 {true}, _readViolations[0]][0] & true
+	// A secret field (#Field.secret) is opened only while the effect naming
+	// it runs. So no client keeps a copy of its row, nothing the database
+	// derives, checks, indexes or seeds reads it, and an effect reaches it
+	// through `secrets` alone: an input is frozen into the ledger, and a key is
+	// the sink's idempotency key.
+	_secretFields: [for en, e in A.state.entities for f in e.fields if f.secret != _|_ {entity: en, field: f}]
+	_secretReads:  {for s in _secretFields {(s.entity): (s.field.name): "\\b(NEW|OLD)\\.\"?\(s.field.name)\"?(\\b|$)"}}
+	_secretViolations: list.Concat([
+		// The seal binds the value to the row it was typed for, by its key.
+		[for s in _secretFields let e = A.state.entities[s.entity] if len([for f in e.fields if f.pk {f}]) != 1 {
+			"entity \(s.entity) field \(s.field.name) is secret, and \(s.entity) has no one-field primary key to seal it to"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.durability != "server" {
+			"entity \(s.entity) field \(s.field.name) is secret, and \(s.entity) is \(e.durability): only a server entity's rows stay out of every client's copy"
+		}],
+		[for s in _secretFields for k in ["cel", "generated", "default", "ref", "unique"] if s.field[k] != _|_ {
+			"entity \(s.entity) field \(s.field.name) is secret, and states \(k): the column is always NULL, so nothing derives, checks or relates its value"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.invariant != _|_
+		for x in [e.invariant.cel, if e.invariant.check != _|_ {e.invariant.check}] if x =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity): its invariant reads the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for g in e.fields if g.generated != _|_ if g.generated =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity) field \(g.name) is generated from the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.indexes != _|_ for ix in e.indexes if ix.on =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity) indexes the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for u in e.uniques if list.Contains(u.cols, s.field.name) {
+			"entity \(s.entity) unique \(u.name) names the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for r in e.seed if r[s.field.name] != _|_ {
+			"entity \(s.entity) seeds the secret field \(s.field.name)"
+		}],
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if _secretReads[en] != _|_ for f, read in _secretReads[en]
+		for k, v in _effects[n].input
+		let sql = [if (v & string) != _|_ {v}, if (v & {raw: string}) != _|_ {v.raw}, ""][0] if sql =~ read {
+			"effect \(n) input \(k) reads the secret field \(f): an input is frozen into the ledger, so the effect names it in secrets"
+		}],
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if _secretReads[en] != _|_ for f, _ in _secretReads[en] if _effects[n].key != _|_ if list.Contains(_effects[n].key, f) {
+			"effect \(n) keys on the secret field \(f): a key is the sink's idempotency key and the ledger's"
+		}],
+		[for n, x in _effects for f in x._fieldSecrets if _effectEntityNames[n] != _|_ for en in _effectEntityNames[n]
+		if len([for g in A.state.entities[en].fields if g.name == f if g.secret != _|_ {g}]) == 0 {
+			"effect \(n) names {field: \"\(f)\"} in secrets, which is no secret field of \(en): a field that is no secret belongs in its input"
+		}],
+		[for s in _secretFields if len([for n, x in _effects if _effectEntityNames[n] != _|_ if list.Contains(_effectEntityNames[n], s.entity) if list.Contains(x._fieldSecrets, s.field.name) {n}]) == 0 {
+			"entity \(s.entity) field \(s.field.name) is secret, and no effect names it in secrets: nothing would ever read it"
+		}],
+	])
+	_secretRefusal: [if len(_secretViolations) == 0 {true}, _secretViolations[0]][0] & true
 
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([
@@ -3050,10 +3293,10 @@ import (
 		// Past a bridge nothing is the platform's to promise, and a bridge
 		// answers no query by key, so a bridged effect states what a repeat
 		// costs rather than claiming idempotence or a reconciliation.
-		[for n, x in _effects if x.sink.bridge != _|_ if x.sink.idempotent {
+		[for n, x in _effects if x.request == _|_ if x.sink.bridge != _|_ if x.sink.idempotent {
 			"effect \(n) reaches bridge \(x.sink.bridge) as an idempotent sink: past a bridge nothing is the platform's to promise"
 		}],
-		[for n, x in _effects if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
+		[for n, x in _effects if x.request == _|_ if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
 			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or repeat"
 		}],
 	])

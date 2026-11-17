@@ -731,6 +731,76 @@ Deno.test("an input reads a field the entity has, quoted", async () => {
   assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, `'it''s', NEW."total"))`);
 });
 
+// The fixture's Payment holding a PIN its reader types once, which `charge`
+// names beside an environment variable.
+const PIN = `{name: "pin", type: "string", secret: true},`;
+const pinned = (effect = `secrets: ["PIX_KEY", {field: "pin"}]`, field = PIN) =>
+  paymentProgram({ effect }).replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          ${field}`);
+
+Deno.test("a secret field reaches its effect's handler through the airlock's table, and its row holds NULL", async () => {
+  const program = pinned();
+  const files = await emitFiles(program);
+  const machines = files["services/database/migrations/010_machines.sql"].text;
+  // The write moves the sealed value and empties the column before any other
+  // trigger, the interpreter included, sees the row; a value in the clear is
+  // refused without being repeated.
+  assertStringIncludes(machines, `IF NEW."pin" IS NOT NULL AND NEW."pin" !~ '^seal1\\.[A-Za-z0-9_-]{16}\\.(?:[A-Za-z0-9_-]{128}){4}$' THEN
+    RAISE EXCEPTION 'payment.pin takes a value sealed to the airlock''s key, and this one is not' USING ERRCODE = 'invalid_parameter_value';`);
+  assertStringIncludes(machines, `PERFORM set_config('pronto_secret.k' || md5('payment' || chr(10) || 'pin' || chr(10) || NEW."id"::text), coalesce(NEW."pin", '-'), true);`);
+  assertStringIncludes(machines, `RAISE EXCEPTION 'payment is offered one row twice in one transaction, which a secret field cannot tell apart'`);
+  assertStringIncludes(machines, `NEW."pin" := NULL;`);
+  assertStringIncludes(machines, `CREATE TRIGGER "0_payment_pin_secret"\n  BEFORE INSERT OR UPDATE ON "payment"`);
+  // Kept only after a write that wrote the row: an insert turned away by a
+  // conflict, onto another reader's row, keeps nothing.
+  assertStringIncludes(machines, `INSERT INTO "airlock"."secret" ("tbl", "row", "field", "value", "expires_at")
+    VALUES ('payment', jsonb_build_object('id', NEW."id"), 'pin', sealed, clock_timestamp() + interval '300 seconds')`);
+  assertStringIncludes(machines, `CREATE TRIGGER "0_payment_pin_secret_kept"\n  AFTER INSERT OR UPDATE ON "payment"`);
+  assertEquals(machines.indexOf(`"0_payment_pin_secret"`) < machines.indexOf(`CREATE TRIGGER "trg_payment_status_machine"`), true);
+  // The claim freezes the input alone.
+  assertStringIncludes(machines, `jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
+  const tables = files["services/database/migrations/005_create_tables.sql"].text;
+  assertStringIncludes(tables, `"pin" text CONSTRAINT "payment_pin_secret" CHECK ("pin" IS NULL)`);
+  const manifest = JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge;
+  assertEquals([manifest.secrets, manifest.secretFields], [["PIX_KEY"], ["pin"]]);
+  // The page learns which fields to seal, and the edge reads the same manifest.
+  assertEquals(files["shell/shell.json"].data.schema.payment.fields.find((f: { name: string }) => f.name === "pin"), { name: "pin", secret: true, type: "string", required: false });
+  // The environment requires the variable, and holds the seal key, the local
+  // stack's falling back to the repository's development one.
+  const cluster = await cue(["export", "-", "-e", "_cluster.surface.targets", "--out", "json"], program);
+  assertEquals(cluster.success, true, cluster.stderr);
+  const targets = JSON.parse(cluster.stdout);
+  assertEquals(Object.keys(targets.airlock.compose.environment).filter((k) => /PIX|PIN|SEAL/i.test(k)).sort(), ["AIRLOCK_SEAL_DEV", "AIRLOCK_SEAL_KEY", "AIRLOCK_SEAL_KEY_PREVIOUS", "PIX_KEY"]);
+  // The local stack says so, which alone lets the airlock take the development key.
+  assertEquals(targets.airlock.compose.environment.AIRLOCK_SEAL_DEV, "local");
+  assertEquals(targets.airlock.compose.environment.AIRLOCK_SEAL_KEY.startsWith("${AIRLOCK_SEAL_KEY:-MII"), true);
+  // The airlock brings its secret tables at its start (mecha's seal-tables.ts),
+  // so the cluster's upgrade and its steps are what they were.
+  assertEquals(targets["airlock-upgrade"].dockerfile.epilogue[0].includes("airlock.secret"), false);
+});
+
+Deno.test("a secret field touches nothing that keeps, derives or relates its value", async () => {
+  const at = (from: string, to: string) => pinned().replace(from, to);
+  const cases: [string, string][] = [
+    [pinned(`secrets: [{field: "pin"}]\n      input: {pin: "NEW.pin"}`), "effect charge input pin reads the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}]\n      input: {pin: {raw: "upper(NEW.\\"pin\\")"}}`), "effect charge input pin reads the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}]\n      key: ["id", "pin"]`), "effect charge keys on the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}, {field: "total"}]`), `effect charge names {field: \\"total\\"} in secrets, which is no secret field of Payment`],
+    [pinned(`secrets: ["PIX_KEY"]`), "entity Payment field pin is secret, and no effect names it in secrets"],
+    [at(`durability: "server"`, `durability: "live"`), "entity Payment field pin is secret, and Payment is live"],
+    [pinned(undefined, `{name: "pin", type: "string", secret: true, cel: "size(this) == 4"},`), "entity Payment field pin is secret, and states cel"],
+    [pinned().replace(`{name: "status", type: "string"},`, `{name: "status", type: "string", pk: true},`), "entity Payment field pin is secret, and Payment has no one-field primary key to seal it to"],
+    [pinned(undefined, `{name: "pin", type: "string", secret: true, default: "'0000'"},`), "entity Payment field pin is secret, and states default"],
+    [at(`fields: [`, `indexes: [{on: "pin"}]\n        fields: [`), "entity Payment indexes the secret field pin"],
+    [at(`fields: [`, `invariant: cel: "this.pin != this.failure"\n        fields: [`), "entity Payment: its invariant reads the secret field pin"],
+    [at(`fields: [`, `seed: [{id: "00000000-0000-0000-0000-000000000001", pin: "1234"}]\n        fields: [`), "entity Payment seeds the secret field pin"],
+  ];
+  for (const [program, why] of cases) assertStringIncludes(await refusal(program), why);
+  // A string a reader types, never stored, so never required; its five minutes are the platform's.
+  for (const field of [`{name: "pin", type: "int32", secret: true},`, `{name: "pin", type: "string", secret: true, required: true},`, `{name: "pin", type: "string", secret: true, ttl: "1h"},`]) {
+    assertEquals((await cue(["vet", "-c", "-"], pinned(undefined, field))).success, false, field);
+  }
+});
+
 Deno.test("a row in an invoking state keeps its key and is not deleted until its outcome", async () => {
   const sql = (await emitFiles(paymentProgram({ effect: `key: ["id", "failure"]` })))["services/database/migrations/010_machines.sql"].text;
   assertStringIncludes(sql, `IF TG_OP = 'DELETE' THEN\n    IF OLD."status" IN ('charging') THEN\n      RAISE EXCEPTION '% in % awaits an outcome and is not deleted'`);

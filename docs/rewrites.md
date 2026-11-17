@@ -69,3 +69,35 @@ The alternatives not taken:
 - **A [signal](signals.md)**, which sends one event to one row and answers nothing of
   it, or **a container hatch with a door**, which serves any path at the cost of a
   service to write, run and bound.
+
+## A path another system calls
+
+A path another system calls with its own credential is a rewrite like any
+other: the request's `Authorization` reaches PostgREST, which switches to the
+[declared token role](identity.md#token-roles-and-trusted-issuers) the token
+names, and the function's grant decides. Onfly's expense service answers
+`POST /expense/advance-payment/{id}/residual` to an automation alone; the
+endpoint is the application's SQL and one rewrite:
+
+```cue
+state: {
+    tokenRoles: residual_bot: note: "the expense automation, which derives an advance payment's residual"
+    rewrites: "advance-residual": {source: "/expense/advance-payment/:id/residual", destination: "/crud/rpc/advance_residual", methods: ["POST"]}
+    rawMigrations: [{name: "020_advance_residual.sql", src: "sql/advance_residual.sql"}]
+}
+```
+
+```sql
+CREATE FUNCTION advance_residual() RETURNS json LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO advance_payment (amount, parent_id)
+  SELECT p.amount - p.settled, p.id FROM advance_payment p
+  WHERE p.id = split_part(current_setting('request.headers', true)::json ->> 'x-rewrite-path', '/', 4)::uuid
+  RETURNING row_to_json(advance_payment)
+$$;
+REVOKE EXECUTE ON FUNCTION advance_residual() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION advance_residual() TO residual_bot;
+```
+
+A person's token reaches the function and is refused (`403`), anon likewise
+(`401`), and a token the issuer signed for another app's audience never
+reaches it.

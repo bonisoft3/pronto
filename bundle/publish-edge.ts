@@ -29,6 +29,7 @@ import { migrateKeptDirectory, previousDeployment, rollbackRefusedMigration } fr
 import { keptJwtSecrets, selectedRouteKeys, validateJwtMode } from './publish-edge-secrets.ts'
 import { prepareStorage } from './publish-edge-storage.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
+import { releaseSealKey } from './edge-seal.ts'
 import { requireLocalCluster } from './edge-deployment.ts'
 
 /** One hop's deadline: a stalled stream to the data directory held a publish
@@ -184,7 +185,7 @@ await refuseMissingHatchSecrets({
 })
 // The airlock's dispatcher (edge-dispatcher.ts): its queue exists before the
 // object's script names it, and the effects' secrets are the dispatcher's alone.
-let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; routes: Record<string, Record<string, string[][]>>; containers: string[]; isolates?: string[] } | undefined
+let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; routes: Record<string, Record<string, string[][]>>; containers: string[]; isolates?: string[]; seal?: boolean } | undefined
 try { airlock = JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))) }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (airlock) {
@@ -225,6 +226,31 @@ if (airlock) {
   }
   const exists = await new Deno.Command(wrangler, { args: ['queues', 'info', airlock.queue], cwd: out, env, stdin: 'null', stdout: 'null', stderr: 'null' }).output()
   if (!exists.success) console.log(await runWrangler(['queues', 'create', airlock.queue]))
+}
+// The seal key a secret field is sealed to: the dispatcher's private half, the
+// object's public half, from this publish's environment or already deployed,
+// never made here (edge-seal.ts).
+let sealDispatcher: Record<string, string> = {}
+if (airlock?.seal) {
+  const dispatcher = path.join(out, airlock.deployment)
+  // mecha's seal.ts, the one the airlock opens with, from the mecha this publish is handed.
+  const seal = await import(String(pathToFileURL(path.join(mecha, 'services/airlock/seal.ts')))) as { sealKeys: (key: string) => Promise<{ current: { kid: string; public: JsonWebKey } }> }
+  const names = async (config: string) => (JSON.parse(await runWrangler(['secret', 'list', '--config', config, '--format', 'json'])) as { name: string }[]).map(b => b.name)
+  const released = await releaseSealKey({
+    given: Deno.env.get('AIRLOCK_SEAL_KEY'),
+    previous: Deno.env.get('AIRLOCK_SEAL_KEY_PREVIOUS'),
+    dev: await Deno.readTextFile(path.join(mecha, 'services/airlock/dev-seal.key')),
+    kidOf: async (key) => (await seal.sealKeys(key)).current.kid,
+    held: async () => ({ dispatcher: await previousVersion(dispatcher) === null ? [] : await names(dispatcher), object: previous === null ? [] : await names(authConfig) }),
+    publicOf: async (key) => {
+      const keys = await seal.sealKeys(key)
+      return JSON.stringify({ kid: keys.current.kid, key: keys.current.public })
+    },
+  })
+  if (released) {
+    Object.assign(secrets, released.object)
+    sealDispatcher = released.dispatcher
+  }
 }
 const secretsDir = await Deno.makeTempDir({ prefix: 'publish-edge-' })
 const secretsFile = path.join(secretsDir, 'secrets.json')
@@ -365,7 +391,7 @@ if (airlock) {
   try {
     const dispatcherSecrets = path.join(dispatcherDir, 'airlock.json')
     const names = [...airlock.secrets, ...airlock.providers.flat(), ...selectedRouteKeys(airlock.routes, name => Deno.env.get(name)).flat()]
-    await Deno.writeTextFile(dispatcherSecrets, JSON.stringify(Object.fromEntries(names.flatMap(name => Deno.env.get(name) ? [[name, Deno.env.get(name)!]] : []))), { mode: 0o600 })
+    await Deno.writeTextFile(dispatcherSecrets, JSON.stringify({ ...Object.fromEntries(names.flatMap(name => Deno.env.get(name) ? [[name, Deno.env.get(name)!]] : [])), ...sealDispatcher }), { mode: 0o600 })
     // An isolate's Worker exists before the dispatcher whose service binding
     // names it. Every path is checked before any deploys, so a bad one leaves
     // no isolate of this release published.

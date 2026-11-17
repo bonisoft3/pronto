@@ -529,8 +529,22 @@ export def main [
 	# compose refuses to render a provider whose client is unset.
 	let release_providers = (do { cd $app_source_dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
 	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $release_providers)
+	# An issuer the release trusts, TRUSTED_JWKS, for the roles the program
+	# declares: its public keys are checked here, before anything is applied,
+	# and digested so a change of keys rolls crud. Unset, crud verifies the
+	# stack's own tokens alone.
+	let declared = (open ($app_info.cue_path | path dirname | path join .pronto cluster.json) | get -o declaredRoles | default [])
+	let jwks = ($env.TRUSTED_JWKS? | default "")
+	if ($declared | is-empty) and ($jwks | is-not-empty) {
+		error make { msg: $"TRUSTED_JWKS is set, but ($app_info.name) declares no token role an issuer's token could name" }
+	}
+	let trusted = if ($jwks | is-empty) { null } else {
+		let checked = (with-env {PGRST_JWT_SECRET: ("x" | fill -c "x" -w 32), TRUSTED_JWKS: $jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
+		if $checked.exit_code != 0 { error make { msg: $"TRUSTED_JWKS is refused: ($checked.stderr | str trim)" } }
+		{jwks: $jwks, digest: ($jwks | hash sha256), audience: ($env.TRUSTED_AUDIENCE? | default "")}
+	}
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate)} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if $trusted == null { {} } else { {trustedKeysDigest: $trusted.digest, trustedAudience: $trusted.audience} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file)
 	rm $pushed_file
 
@@ -596,8 +610,25 @@ export def main [
 		{apiVersion: "v1", kind: "Secret", metadata: {name: $"($workload_name)-service-token", namespace: $target_ns}, data: {SERVICE_JWT: ($token | encode base64)}} | to json | kubectl apply --server-side --field-manager=pronto-runtime -f -
 	}
 
+	# crud's key set: the stack's own secret beside the issuer's public keys,
+	# composed here because PostgREST fetches no JWKS and its image has no shell.
+	# A key set that changed under an unchanged issuer, the stack's own secret
+	# rotated, rolls crud below, since its digest names the issuer's keys alone.
+	mut trusted_changed = false
+	if $trusted != null {
+		kubectl wait --for=condition=Ready $"externalSecret/($workload_name)-auth-secrets" -n $target_ns --timeout=120s
+		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64)
+		let composed = (with-env {PGRST_JWT_SECRET: $secret, TRUSTED_JWKS: $trusted.jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
+		if $composed.exit_code != 0 { error make { msg: "crud's key set could not be composed from the cluster's secret and TRUSTED_JWKS" } }
+		let keys = ($composed.stdout | str trim)
+		let held = (kubectl get secret $"($workload_name)-trusted-keys" -n $target_ns -o json | complete)
+		$trusted_changed = ($held.exit_code == 0) and (($held.stdout | from json | get -o data.PGRST_JWKS | default "" | decode base64 | decode utf-8) != $keys)
+		{apiVersion: "v1", kind: "Secret", metadata: {name: $"($workload_name)-trusted-keys", namespace: $target_ns}, data: {PGRST_JWKS: ($keys | encode base64)}} | to json | kubectl apply --server-side --field-manager=pronto-runtime -f -
+	}
+
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
+	if $trusted_changed { kubectl rollout restart $"deployment/($app_info.name)-crud" -n $target_ns }
 	let runtime_names = ($runtime | columns)
 	for name in $runtime_names {
 		kubectl rollout status $"deployment/($app_info.name)-($name)" -n $target_ns --timeout=900s

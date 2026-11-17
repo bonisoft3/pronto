@@ -406,6 +406,34 @@ Deno.test("the appliance does not start without a secret an effect declares", as
   assert(given.success, new TextDecoder().decode(given.stderr));
 });
 
+// A secret field's seal key is the appliance's own: the repository's
+// development key is the local stack's, and the appliance refuses it.
+Deno.test("the appliance does not start without a seal key of its own", async () => {
+  const pinned = paymentProgram({ effect: 'secrets: [{field: "pin"}]' })
+    .replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          {name: "pin", type: "string", secret: true},`)
+    .replace("targets: []", 'targets: ["docker"]');
+  const rd = await releaseDocker(pinned);
+  const line = rd.dockerfile.epilogue.find((l) => l.includes("/usr/local/bin/appliance-entrypoint.sh"))!;
+  const dir = await Deno.makeTempDir();
+  const script = `${dir}/entrypoint.sh`;
+  const write = line.replace(/^RUN /, "").replace(/ > \/usr\/local\/bin\/appliance-entrypoint\.sh && chmod 755 \/usr\/local\/bin\/appliance-entrypoint\.sh$/, ` > ${script}`);
+  assert((await new Deno.Command("sh", { args: ["-c", write] }).output()).success, "the entrypoint does not write");
+  await Deno.writeTextFile(script, (await Deno.readTextFile(script)).replace(/for n in [^\n]*\n[^\n]*\ndone\n/, ""));
+  const start = (key: string, previous = "") => new Deno.Command("sh", { args: [script, "true"], env: { AIRLOCK_SEAL_KEY: key, AIRLOCK_SEAL_KEY_PREVIOUS: previous } }).output();
+  const missing = await start("");
+  assertStringIncludes(new TextDecoder().decode(missing.stderr), "AIRLOCK_SEAL_KEY is required");
+  const dev = (await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/dev-seal.key", import.meta.url))).trim();
+  const refused = await start(dev);
+  assert(!refused.success, "started with the development key");
+  assertStringIncludes(new TextDecoder().decode(refused.stderr), "AIRLOCK_SEAL_KEY is the development key in the repository");
+  // However its base64 is wrapped, which a key's import ignores; as the previous key too.
+  assert(!(await start(dev.replace(/(.{64})/g, "$1\n"))).success, "started with the development key wrapped");
+  assert(!(await start(dev.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""))).success, "started with the development key in base64url");
+  assert(!(await start("a-key-of-its-own", dev)).success, "started with the development key as the previous one");
+  const own = await start("a-key-of-its-own");
+  assert(own.success, new TextDecoder().decode(own.stderr));
+});
+
 // An effect's answered bytes go to the blob plane, which the appliance does not
 // run: refused, like the gateway and the computations.
 Deno.test("an appliance with effects and the blob plane is refused", async () => {

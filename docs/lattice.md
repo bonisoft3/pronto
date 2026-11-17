@@ -119,6 +119,7 @@ replay and a `put` be stated twice.
 | durability × seed, partial unique | `#Entity`: `device` refuses `seed`; a unique's `where` only below the cluster | yes, `cue vet` |
 | durability × validation edge | `validations.ts`: a cluster entity's edge to a `tab` or `device` one | yes, when `derive.ts` runs |
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
+| durability × secret field | `#App._secretViolations`: only a `server` entity holds one, and no derivation, index, input or key reads it ([[decisions/2026-11-16-secret-fields\|secret fields]]) | yes, `cue vet` |
 | durability × read | `#App.#read` (`read.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
 | effect level × `refused` arrow | `machineLint` reads the effect target's durability from `shell.yaml`; every compensable effect owes the arrow | yes, at lint ([machines](https://github.com/bonisoft3/omnishell/blob/v0.24.1/docs/machines.md#effects)) |

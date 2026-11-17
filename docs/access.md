@@ -153,6 +153,40 @@ subtly wrong floor, and a correction to the floor reaches every app by
 migration rather than by regeneration. The floor holds even when the
 generator is bypassed.
 
+## Declared token roles
+
+A [declared token role](identity.md#token-roles-and-trusted-issuers) is a
+Postgres role a token names, in `state.tokenRoles`, and the policies above
+stand unchanged for it: each names `app_user`, so none admits it, and it holds
+no grant `002_grants.sql` gives the others. Unlike `service` it never
+bypasses the floor: a release refuses a declared role holding BYPASSRLS. What
+it may do is the app's own SQL, in the order of preference:
+
+- `GRANT EXECUTE` on a function it alone calls, after `REVOKE EXECUTE ... FROM
+  PUBLIC`, since Postgres lets PUBLIC execute a new function. A `SECURITY
+  DEFINER` function owned by the migration role writes what it writes, past
+  the floor, and nothing else;
+- a grant on a table with a policy `TO` the role, under the floor: its
+  subject is its token's `sub`, so `current_scopes()` is `public:` and
+  `user:<sub>`, and the rows it reaches are those, or what the policy adds.
+
+```sql
+CREATE FUNCTION advance_residual() RETURNS json LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$ ... $$;
+REVOKE EXECUTE ON FUNCTION advance_residual() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION advance_residual() TO residual_bot;
+```
+
+A token another issuer signed acts as a declared role and nothing else, and
+the cluster's own roles act only on a token naming the stack's own issuer: the
+floor's `app_pre_request` refuses a declared role to a token naming the stack's
+issuer or none, and the cluster's roles to one naming another
+([identity](identity.md#token-roles-and-trusted-issuers)).
+
+A role the database already holds is taken for a token role only if it holds
+no more than one: the emitted SQL refuses one that logs in, is a superuser,
+bypasses row-level security, creates roles or databases, replicates, or owns
+the database.
+
 ## The browser's mirror
 
 `shell.yaml` carries each table's access, and the store's `visible()`

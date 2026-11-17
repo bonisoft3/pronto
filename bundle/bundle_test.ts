@@ -340,6 +340,12 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       "CREATE COLLATION search (provider = icu, locale = 'und-u-ks-level1', deterministic = false);",
       'CREATE TABLE names (name text COLLATE search);',
       "INSERT INTO names VALUES ('Flamengo'), ('São Paulo'), ('Other');",
+      // The page's PGlite loads unaccent from the payload, as a generated
+      // search column over it needs (emit.cue's #unaccentSql).
+      'CREATE EXTENSION unaccent SCHEMA public;',
+      "CREATE FUNCTION immutable_unaccent(text) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT RETURN public.unaccent('public.unaccent'::regdictionary, $1);",
+      "CREATE TABLE meeting (title text, search tsvector GENERATED ALWAYS AS (to_tsvector('simple', immutable_unaccent(title))) STORED);",
+      "INSERT INTO meeting VALUES ('Reunião de equipe'), ('Almoço');",
       // A drain the page calls as the service role, over the rows it boots with.
       'CREATE ROLE service NOLOGIN BYPASSRLS; GRANT USAGE ON SCHEMA public TO service;',
       'CREATE TABLE tally_count (n int NOT NULL); GRANT SELECT ON tally TO service; GRANT ALL ON tally_count TO service;',
@@ -400,6 +406,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
         note: await rows('SELECT id, tally_id, note FROM tally_note'),
         read: await rows('SELECT id, n FROM tally_read ORDER BY id'),
         search: await rows("SELECT name FROM names WHERE name LIKE '%flamengo%' OR name LIKE '%sao%' ORDER BY name"),
+        unaccented: await rows("SELECT title FROM meeting WHERE search @@ plainto_tsquery('simple', immutable_unaccent('Reuniao'))"),
         counted: await rows('SELECT n FROM tally_count'),
       }))
       await db.close()
@@ -420,6 +427,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       note: [{ id: 'x', tally_id: 'b', note: "it's $derived$" }],
       read: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
       search: [{ name: 'Flamengo' }, { name: 'São Paulo' }],
+      unaccented: [{ title: 'Reunião de equipe' }],
       counted: [{ n: 2 }],
     })
   } finally {
