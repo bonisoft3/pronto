@@ -1,0 +1,10 @@
+# An effect whose origin only cloudflare reads, from a secret: k8s has no sink
+# to give its endpoint.
+services:
+  airlock:
+    image: unreached-airlock:test
+    environment:
+      AIRLOCK_DIR: /airlock
+      MESH_URL: http://airlock-mesh:3500
+  airlock-mesh:
+    image: unreached-airlock-mesh:test

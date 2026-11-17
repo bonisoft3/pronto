@@ -11,4 +11,7 @@ Kind: schema.#Environment & {
 	imagePullPolicy: "Always"
 	// Browsers and curl resolve every *.localhost name to loopback.
 	domainSuffix:    "localhost"
+	// kindnet lets a new pod's first connections through before its
+	// policies hold it.
+	policiesLate: true
 }

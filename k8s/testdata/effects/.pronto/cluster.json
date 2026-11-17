@@ -1,0 +1,17 @@
+{
+  "server": true,
+  "tokenRoles": ["anon", "app_user", "service"],
+  "bridges": [
+    {"name": "echo", "container": "echo", "port": 8080, "targets": ["docker", "cloudflare", "k8s"], "build": "echo-appliance", "isolate": {"entrypoint": "isolates/echo/main.ts", "files": ["isolates/echo/main.ts"], "memory": 64, "build": ""}},
+    {"name": "fetch", "container": "transport", "port": 8080, "targets": ["k8s"], "build": "transport-appliance"},
+    {"name": "pdf", "container": "pdf", "port": 8080, "targets": ["docker"], "build": "pdf-appliance"}
+  ],
+  "endpoints": {
+    "k8s": {
+      "charge": "https://api.acquirer.example",
+      "echo": "http://echo:8080",
+      "fetch": "http://transport:8080",
+      "render": "http://pdf:8080"
+    }
+  }
+}

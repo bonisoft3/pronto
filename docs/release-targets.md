@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Release targets
-description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, docker and gcp are built, and the other clouds and k8s are designed."
+description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, docker, gcp and k8s are built, and aws and azure are designed."
 ---
 
 # Release targets
@@ -26,7 +26,7 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
   `@`. `release` and `verify` default to `preview`.
 - A pronto **target** is a place a program is released to and verified
   against: `#Target` in `schema.cue`, which admits `pages`, `cloudflare`,
-  `docker`, `gcp` and `aws`, and not `azure` or `k8s`.
+  `docker`, `k8s`, `gcp` and `aws`, and not `azure`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
   ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.25.1/README.md#4-vertical-scalability-down-and-up)).
@@ -1043,11 +1043,12 @@ applies:
 | `gcp` | gcloud ([built](#gcp)) | Cloud Run | Cloud SQL |
 | `aws` | ACK | ECS Express Mode on Fargate | Aurora Serverless v2, from 0.5 ACU |
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
-| `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
+| `k8s` | `kubectl`, applying manifests rendered from CUE, against a named kube context | mecha's images, Deployments at the release's `replicas` (1 unless set) | CloudNativePG |
 
-The compute scales by itself; the floor is the database, and AWS's is the
-highest, since Aurora does not pause while logical replication is on. Project,
-account, region and domain are declarations on the cluster; credentials are
+The clouds' compute scales by itself, and k8s's holds the replicas the
+release states; the floor is the database, and AWS's is the highest, since
+Aurora does not pause while logical replication is on. Project, account,
+region and domain are declarations on the cluster; credentials are
 each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
 [clouds as built](https://github.com/bonisoft3/mecha/blob/v0.25.1/docs/deployment.md#clouds-as-built)
@@ -1069,6 +1070,157 @@ client secrets go to a separate Kubernetes Secret through stdin; the Deployment
 holds only Secret references and a digest that rolls auth when secrets change.
 Client secret values never enter the rendered workload manifests or temporary
 release metadata.
+
+### Effects on k8s
+
+A program that declares effects gets on k8s what compose gives it, from
+compose's own images: the airlock, its daprd (`airlock-mesh`), the ledger's
+upgrade and the bridges named for k8s
+([`k8s/schema/airlock.cue`](../k8s/schema/airlock.cue)).
+
+- **The daprd is a pod of its own**, never the airlock's sidecar: a sidecar
+  shares its pod's network, so the airlock would reach whatever its daprd
+  does. It runs standalone, as compose's does, on its image's resources (the
+  wall, the breaker, the blob plane's binding) and with no injector, each
+  effect's endpoint mounted over the image's from a ConfigMap. The image's
+  endpoints are the compose stack's, the docker target's; an effect's sink on
+  k8s (`sink.targets.k8s`, else its default) is what `.pronto/cluster.json`
+  carries as `endpoints.k8s`, and one with none there is refused.
+- **Compose's networks are NetworkPolicies.** The airlock reaches the
+  cluster's resolver on port 53, the database and its daprd, and only the
+  ticker's wake reaches it, on its health port. The resolver is
+  kube-system's `k8s-app: kube-dns` pods and the addresses the kubelets hand
+  pods as theirs, a NodeLocal DNSCache's among them, which the release reads
+  from each node's kubelet configuration or the environment states as
+  `resolvers`; a release that can do neither is refused. Only the airlock reaches the daprd, which reaches the resolver,
+  the bridges, the blob plane and every address outside the private, shared,
+  link-local and loopback ranges and the cluster's own: the release reads its
+  nodes' addresses and pod ranges and the API server's endpoints, since any
+  may be public. Only the daprd reaches a bridge, which reaches the resolver
+  and those outside addresses alone. This holds where the network plugin
+  applies an `ipBlock` to pod and node traffic as Kubernetes documents it; a
+  plugin that rewrites addresses on the way out may show a peer another.
+  Kubernetes always lets a pod and its own node reach each other, which no
+  policy can close: on its node, a bridge or the daprd reaches what listens
+  there, the kubelet among them, which its own authentication holds, and no
+  pod of the three holds a token for the API. A declared name that resolves
+  inward, the compose stack's residual, is not reached here.
+- **A bridge is none of the app's.** The app's own services admit its pods
+  by the app's name, and none of them admits a pod labelled
+  `pronto.dev/bridge`, so a bridge reaches neither the database nor a service
+  even before its policy holds it; the door alone admits anyone, as it does
+  the world.
+- **The wall is checked.** Only a network plugin that enforces NetworkPolicy
+  applies one, and nothing in the API says whether it does. Before any of the
+  airlock's pods starts, its policies applied, a probe as each role, wherever
+  the scheduler places it, must reach the world as its policy says and not a
+  listener open to any pod, and a control must reach that listener, so a
+  plugin that enforces nothing is refused before any of the airlock's code
+  runs. Once the airlock runs, the release starts short-lived probes on the airlock's image, one
+  labelled as the airlock, one as its daprd and one as each bridge, beside
+  each node a ready pod of the one it stands for runs on, so the policies hold
+  each as they hold that pod. They try the world in each address family the
+  airlock's pods hold an address in (`1.1.1.1:443`,
+  `[2606:4700:4700::1111]:443`), and the Services below at each address of
+  each ready pod behind them, every family's, never by a name a failing
+  resolver could hide. The airlock's must reach its database and its daprd and
+  neither the world nor a bridge; the daprd's the world and each bridge but
+  not the database; a bridge's the world but neither the database, the daprd
+  nor another bridge. None may reach a listener the release starts beside
+  them, open to any pod, which only each one's own egress policy keeps it
+  from, so a pod whose policy is missing is found; a control no policy holds
+  must reach that listener and neither the airlock, its daprd nor a bridge,
+  which their ingress keeps it from. A probe that cannot reach what it may
+  shows nothing (a network that lets nothing out among them), so it fails the
+  release as one that reaches what it may not does. The probes start once the
+  listener serves, each repeats until its finding holds three rounds running,
+  and they are deleted either way. A release whose wall is not certified, or
+  whose rollouts fail between the first of those pods starting and the wall's
+  certificate, scales the airlock, its daprd and its bridges to zero, so
+  nothing runs behind a wall not certified; one that fails after, the wall
+  certified, leaves them running inside it. kind's kindnet enforces
+  them; EKS needs the VPC CNI's network policy agent, AKS a network policy
+  engine. A spec with `networkPolicy.enabled: false` is refused.
+- **The wall is the airlock's own policies alone.** Policies add up, so
+  another that selects one of its pods, in a namespace the app shares, would
+  open what its own close wherever the probes do not look: the release refuses
+  one, its own aside, that could select them by the labels it gives them or
+  any an admission webhook might add, before it starts any of those pods,
+  scaling to zero those an earlier release runs, and again by the labels the
+  pods were admitted with, and an app released into a namespace of
+  the cluster's own (`default`, `kube-system`, `kube-public`,
+  `kube-node-lease`, `cnpg-system`, `dapr-system`,
+  `observability`, `external-secrets`, `envoy-gateway-system`), whose services
+  admit every pod of theirs and whose Services, the API server's among them,
+  a bridge's of the same name would take.
+- **What the wall is made of.** Kubernetes' NetworkPolicies alone, for TCP
+  and UDP as they define. A plugin's own policies (Cilium's, Calico's) that
+  select the airlock's pods are outside what the release checks and may add
+  to the wall's allowances, as may a plugin that lets through what
+  NetworkPolicy leaves undefined, ICMP among it: a cluster running either is
+  not one the release certifies, whatever its probes find. Its probes try
+  TCP; UDP the policies hold alike, and the release does not probe it.
+- **Where the wall holds.** On a plugin that holds a new pod to the policies
+  it has handled before the pod starts, as Kubernetes asks, from the pod's
+  first instant. One whose probe gets past the wall in any round does not,
+  and is refused unless the environment states `policiesLate`; kind's does, since kindnet lets a new pod's first connections through, and there
+  the wall is a development one: a bridge's first moments are outside its
+  own policy, the app's services refusing it all the same, and the
+  airlock's own Deno, allowed only the database, its daprd and its own port,
+  keeps it in meanwhile. The cluster's addresses are those of the release:
+  a node added since, its pod range among them, is excluded only from the
+  next release on, which matters where they are public. An address the
+  cluster serves to the internet, its door's among them, is the world's,
+  reached as any client of it reaches it. The probes certify the nodes the
+  pods ran on at the release, not those a pod moves to later.
+- **Secrets reach no manifest.** Every variable compose hands the airlock past
+  its wiring (`AIRLOCK_DIR`, `MESH_URL`, `BLOB_URL`, `PORT`) is an effect's
+  secret, which no effect may name as the wiring. Its value is read from the
+  release's own environment, never as compose resolved it (compose gives a
+  simulated effect's secret `simulator`), and a release whose environment
+  leaves one unset is refused. It is written to the Secret `<app>-airlock`
+  through stdin; the Deployment names each, and a digest of the values rolls
+  it when one changes. A bridge's environment goes as compose resolves it to
+  `<app>-bridge-<container>`.
+- **The seal key is the release's.** Where an effect reads a secret field,
+  the airlock opens it with `AIRLOCK_SEAL_KEY`, which the release takes from
+  its own environment into `<app>-airlock` as an effect's secret, beside
+  `AIRLOCK_SEAL_KEY_PREVIOUS` through a rotation (mecha's
+  `services/airlock/README.md#rotating-the-seal-key`); a change of either
+  rolls the airlock. It never makes one, refuses a release that sets none,
+  and refuses the repository's development key, the one compose's airlock
+  holds, however it is spelled; the airlock, never told it is the local
+  stack's (`AIRLOCK_SEAL_DEV`), refuses it too.
+- **A read goes out as an effect does**: its GET through the daprd, to the
+  sink its endpoint on k8s names, inside the same wall; its journal is
+  created by the ledger's upgrade below, on a fresh database and an older one
+  alike.
+- **The ledger's upgrade is a Job** on its compose image, after initdb and
+  before migrate as compose orders them. A database built before the program
+  declared its first effect has no queue or ledger, which only a fresh
+  database builds, so initdb refuses it, naming the cluster to delete.
+- **In the order the airlock goes out.** The bridges are applied with the
+  other Deployments and rolled out, then the daprd, whose endpoints name
+  them, then the airlock, so neither the airlock that runs nor its
+  successor spends an attempt on a bridge still starting. What an earlier
+  release deployed and this one does not, a bridge no longer on k8s or the
+  whole airlock where the program declares no effect, is removed. The
+  policies go first, so the wall never trails a pod: a release that moves an
+  effect from one bridge to another cuts the running daprd from the old one
+  before its successor serves, and a call meanwhile fails as a transport
+  does.
+- **The ticker wakes it** as in compose: `WAKE_URLS` names
+  `http://airlock:9997/healthz`, the airlock's Service.
+- **A bridge naming `k8s`** runs the image of its container's
+  `<container>-appliance` target, a container's or an isolate's, as a
+  Deployment behind a Service of the container's name, which the daprd dials
+  ([container bridges](container-bridges.md#k8s)). It stays at one replica:
+  nothing in front of it holds a call while it starts, so a call into a cold
+  bridge would fail as a transport does and spend an attempt. Its container's
+  name may not be one the release's own services hold.
+- **The AI gateway is not deployed.** Only the daprd calls it, so an effect
+  whose sink on k8s is the gateway is refused, and one that names another
+  sink for k8s (`sink.targets.k8s`) releases without it.
 
 ## Rejected
 

@@ -63,10 +63,34 @@ simulator is that pattern as a declaration.
 ## Targets
 
 `targets` names the release targets the real container is deployed on:
-`docker`, where the appliance runs it as a process, and `cloudflare`, where
-the airlock's dispatcher Worker runs it as a Cloudflare Container. k8s and gcp
-run no airlock, so naming another is refused. On a target the bridge is not
-deployed on, its effects settle `failed` without a call.
+`docker`, where the appliance runs it as a process, `cloudflare`, where the
+airlock's dispatcher Worker runs it as a Cloudflare Container, and `k8s`,
+where it is a Deployment the airlock's daprd calls. gcp runs no daprd for the
+airlock, so naming it is refused. On a target the bridge is not deployed on,
+its effects settle `failed` without a call, unless an effect names another
+sink for that target (`sink.targets`): an origin, or a bridge deployed there,
+which is called instead.
+
+### k8s
+
+The k8s release bakes the image of the container's `<container>-appliance`
+target, which nothing starts in the stack, and runs it as a Deployment,
+`<app>-bridge-<container>`, of one replica behind a Service of the
+container's name, so the airlock's daprd dials it at
+`http://<container>:<port>` as compose's does; a container named as one of
+the release's own Services is refused. Its process is the image's own, as on
+cloudflare: a container that only pulls an image, or whose process,
+directory, user, files, mounts, privileges, devices or kernel settings only
+compose states (`compose.command`, `entrypoint`, `working_dir`, `user`,
+`volumes`, `cap_add`, `shm_size` and the like), is refused for k8s. The environment compose gives the
+container reaches it from the Secret `<app>-bridge-<container>`, which the
+release writes through stdin. Its NetworkPolicy,
+`<app>-bridge-<container>`, stands for compose's
+`bridge-<name>-egress`: only the daprd reaches it, on its port, and it reaches
+the cluster's resolver and addresses outside the cluster's
+([[release-targets#Effects on k8s]]). An effect whose k8s sink
+(`sink.targets.k8s`) is a bridge that does not name k8s is refused: the
+airlock settles as not deployed only an effect whose own bridge it is.
 
 ### Cloudflare
 

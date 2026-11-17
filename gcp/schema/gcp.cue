@@ -479,6 +479,10 @@ import (
 							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
 							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
 							{name: "AIRLOCK_DIR", value: "/airlock"},
+							// The target an effect's bridge is settled by, which no
+							// bridge names: an effect whose sink here is the gateway
+							// is called, one whose sink is a bridge is not deployed.
+							{name: "AIRLOCK_TARGET", value: "gcp"},
 							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
 							if R.airlock.seal {(secretOf & {env: "AIRLOCK_SEAL_KEY", secret: sq.AIRLOCK_SEAL_KEY}).out},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])

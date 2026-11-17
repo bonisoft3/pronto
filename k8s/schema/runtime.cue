@@ -87,7 +87,7 @@ package schema
 			spec: {
 				podSelector: matchLabels: appLabels & {"app.kubernetes.io/component": svc}
 				policyTypes: ["Ingress", "Egress"]
-				ingress: [{from: [{podSelector: matchLabels: appLabels}]}]
+				ingress: [{from: [{podSelector: {matchLabels: appLabels, matchExpressions: [#notBridge]}}]}]
 				egress: [
 					{to: [{podSelector: matchLabels: appLabels}]},
 					{to: [{podSelector: matchLabels: {"cnpg.io/cluster": "\(app.name)-db"}}], ports: [{port: 5432, protocol: "TCP"}]},

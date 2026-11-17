@@ -1,0 +1,52 @@
+# The flattened project an app with effects resolves to: an effect through
+# an origin, one through a container bridge, one through an isolate bridge,
+# and one through a bridge only docker runs. ACQUIRER_KEY is a secret the
+# release's environment gave compose; an effect reads a secret field, so the
+# airlock holds the local stack's seal key, a stand-in for the development
+# one.
+services:
+  airlock:
+    image: effects-airlock:test
+    environment:
+      AIRLOCK_DIR: /airlock
+      AIRLOCK_TARGET: local
+      DATABASE_URL: postgres://postgres:dev-password@database:5432/effects
+      MESH_URL: http://airlock-mesh:3500
+      ORIGIN: https://localhost:30313
+      PORT: "9997"
+      ACQUIRER_KEY: sk_live_from_the_environment
+      AIRLOCK_SEAL_KEY: ZGV2LXNlYWwta2V5
+      AIRLOCK_SEAL_KEY_PREVIOUS: ""
+      AIRLOCK_SEAL_DEV: local
+  airlock-mesh:
+    image: effects-airlock-mesh:test
+    environment:
+      AIRLOCK_BRIDGES: fetch echo pdf
+      AIRLOCK_ORIGINS: https://api.acquirer.example
+      BRIDGE_ECHO_URL: http://echo:8080
+      BRIDGE_FETCH_URL: http://transport:8080
+      DAPR_HTTP_PORT: "3500"
+  airlock-upgrade:
+    image: effects-airlock-upgrade:test
+    environment:
+      PGHOST: database
+      PGPASSWORD: dev-password
+  ticker:
+    image: effects-ticker:test
+    environment:
+      CRUD_URL: http://crud:3000
+      SERVICE_JWT: dev-token
+      WAKE_URLS: http://airlock:9997/healthz
+  clock:
+    image: effects-clock:test
+    environment:
+      POKE_URL: http://ticker:9998
+      SERVICE_JWT: dev-token
+  echo-appliance:
+    image: effects-echo-appliance:test
+    environment:
+      PORT: "8080"
+  transport-appliance:
+    image: effects-transport-appliance:test
+    environment:
+      TRANSPORT_TOKEN: tt_from_the_environment

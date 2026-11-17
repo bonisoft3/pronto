@@ -27,6 +27,51 @@
       "attempts": 3,
       "handler": "effects/confirm.js",
       "bridge": {"name": "mail", "targets": ["docker"], "simulated": false}
+    },
+    "notify": {
+      "table": "fetch_request",
+      "field": "status",
+      "state": "notifying",
+      "onDone": "notified",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 3,
+      "handler": "effects/notify.js",
+      "edgeOrigin": "https://api.mail.example",
+      "bridge": {"name": "mail", "targets": ["docker", "cloudflare"], "simulated": false}
+    },
+    "relay": {
+      "table": "fetch_request",
+      "field": "status",
+      "state": "relaying",
+      "onDone": "relayed",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 3,
+      "handler": "effects/notify.js",
+      "edgeBridge": "fetch-pages",
+      "bridge": {"name": "mail", "targets": ["docker", "cloudflare"], "simulated": false}
+    },
+    "summarize": {
+      "table": "fetch_request",
+      "field": "status",
+      "state": "summarizing",
+      "onDone": "summarized",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 3,
+      "handler": "effects/notify.js",
+      "edgeAi": true,
+      "bridge": {"name": "mail", "targets": ["docker", "cloudflare"], "simulated": false}
     }
   }
 }

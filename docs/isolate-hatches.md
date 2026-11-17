@@ -82,6 +82,7 @@ isolate's WebAssembly files share a name.
 |---|---|---|---|
 | the local stack, under its `simulator` or `simulator: {}` | a bayt target pronto generates (`#IsolateContainer`), whose one cmd builds the module and whose process serves it: bayt runs both in the image (Debian, Deno from its pinned image) and on the host alike | V8's old-space limit, `memory` | the host's deadline |
 | docker | a process of the appliance: the airlock's own Deno running the host and the build copied from the `<hatch>-appliance` image, on a port from 9100; the appliance refuses to start with its door's `PORT` on that port | V8's old-space limit, `memory` | the host's deadline |
+| k8s | a Deployment of the `<hatch>-appliance` image, whose process is the host serving its build on the bridge's port, reached by the hatch's name ([[release-targets#Effects on k8s]]) | V8's old-space limit, `memory`, inside the pod's | the host's deadline |
 | cloudflare | a Worker of its own, `<dispatcher>-<bridge>` (past 63 characters, its head and a hash of the whole), with no route, deployed before the dispatcher that binds it by service | the platform's 128 MB per isolate | the platform's CPU limit |
 
 Outside Cloudflare the build runs behind a host (`#IsolateHost`), a
@@ -106,12 +107,12 @@ status stands for an answer the module never gave. A module that throws, or
 answers `Response.error()`, fails its call the same way; on Cloudflare the
 service binding's call fails alike.
 
-k8s and gcp run no airlock, so a bridge names `docker` and `cloudflare` only, as a
-container bridge does.
+gcp runs no daprd for the airlock, so a bridge names `docker`, `cloudflare`
+and `k8s` only, as a container bridge does.
 
 An isolate reaches the internet as a container bridge does: `--allow-net`
-outside Cloudflare, on the bridge's own egress network, and a Worker's
-outbound access there. The local stack runs it as any bridge: its
+outside Cloudflare, on the bridge's own egress network in compose and its own
+NetworkPolicy on k8s, and a Worker's outbound access there. The local stack runs it as any bridge: its
 `simulator`, or the module itself under `simulator: {}`. There the build lands beside the sources, under
 `.isolate/<hatch>/`, which pronto's `.isolate/.gitignore` keeps out of the
 repository.

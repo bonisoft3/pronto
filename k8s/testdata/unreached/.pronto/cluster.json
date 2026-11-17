@@ -1,0 +1,5 @@
+{
+  "server": true,
+  "tokenRoles": ["anon", "app_user", "service"],
+  "endpoints": {"k8s": {"charge": null}}
+}

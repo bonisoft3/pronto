@@ -118,6 +118,8 @@ Observability is implemented with zero architectural dispersion and an idle foot
 
 Every service runs the image the app's own compose project builds (database, migrate, crud, electric, auth, caddy, render), baked reproducibly (`SOURCE_DATE_EPOCH=0`, no provenance) so an unchanged source pushes the same digest and rolls nothing, and referenced by the tag and digest pushed. The database is mecha's database image; CloudNativePG reads its tag as the Postgres major.
 
+An app that declares effects also runs compose's airlock, its daprd and the bridges named for k8s, with compose's networks as NetworkPolicies and the ledger's upgrade as a Job before migrate ([effects on k8s](../docs/release-targets.md#effects-on-k8s)).
+
 The schema is built as compose builds it, by two Jobs on the app's images: `<app>-initdb` runs the database image's `/docker-entrypoint-initdb.d` once, on a fresh database (a database comment marks it built), and `<app>-migrate`, where the app has pgroll migrations, carries the schema forward on every release. The services are applied after both, so none starts on a missing schema.
 
 ---

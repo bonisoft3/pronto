@@ -203,3 +203,16 @@ Deno.test("a published isolate is pronto's module, written into the app", async 
   assert(!container.success, "a container hatch using a published isolate was accepted");
   assertStringIncludes(container.stderr, "hatches.pdf.uses: field not allowed");
 });
+
+// On k8s an isolate is a container bridge like any: a Deployment of the
+// image `<hatch>-appliance` builds, whose process is the host serving the
+// bundle on the bridge's port, which the airlock's daprd dials by the hatch's
+// name.
+Deno.test("an isolate on k8s runs its hatch's image, reached by the hatch's name", async () => {
+  const files = await emitFiles(program('{isolate: "pdf", targets: ["k8s"]}')) as unknown as Emitted & Record<string, { data: { endpoints?: unknown } }>;
+  assertEquals(files["services/airlock/effects.json"].data.effects!.charge.bridge, { name: "fetch", targets: ["k8s"], simulated: false });
+  assertEquals(files[".pronto/cluster.json"].data.endpoints, { k8s: { charge: "http://pdf:8080" } });
+  const target = (files["bayt.json"].data as unknown as { targets: Record<string, { entrypoint: { do: string }; dockerfile: { workdir: string } }> }).targets["pdf-appliance"];
+  assertEquals(target.entrypoint.do, `exec deno 'run' '--no-config' '--allow-net' '--allow-read' '--allow-run' '--allow-sys=networkInterfaces' '.isolate/pdf/host.js' '.isolate/pdf/entry.js' "$PORT" '50000' '96'`);
+  assertEquals(target.dockerfile.workdir, "/isolate");
+});

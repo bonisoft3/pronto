@@ -186,6 +186,9 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 // What a computation's or an effect's module may be endowed with.
 #CageEndowment: impl.#CageEndowment
+
+// What no effect's secret may be named: the airlock's own environment.
+#ReservedSecretName: impl.#ReservedSecretName
 #ComputationField: impl.#ComputationField
 
 // A bridge role.

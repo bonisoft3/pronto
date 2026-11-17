@@ -1152,6 +1152,9 @@ import (
 	}
 }
 
+// The release targets a bridge may run on: gcp runs no daprd for the airlock.
+#BridgeTargets: ["docker", "cloudflare", "k8s"]
+
 // Level 4: what a machine's invoking state asks of the world outside the
 // cluster, performed by mecha's airlock against one sink and recorded in the
 // ledger (docs/decisions/2026-10-03-external-effects.md).
@@ -1364,9 +1367,13 @@ import (
 #NamedOrigin: close({secret: #SecretName})
 
 // An environment variable an effect declares, never one the cluster's own
-// services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
-// dispatcher Worker and BRIDGE_<NAME>_URL addresses one on the mesh.
-#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|PGRST_JWKS|TRUSTED_JWKS|TRUSTED_AUDIENCE|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS|AIRLOCK_SEAL_KEY|AIRLOCK_SEAL_KEY_PREVIOUS|AIRLOCK_SEAL_PUBLIC|AIRLOCK_SEAL_DEV)$" & !~"^BRIDGE_"
+// services read, whose compose environments a value of it would reach and a
+// release would write as theirs, the airlock's own among them (mecha's
+// #ReservedSecretName: its seal keys, AIRLOCK_*, and crud's key set and
+// audience, PGRST_JWKS and TRUSTED_*), nor a bridge's: BRIDGE_<NAME> binds a
+// container on the dispatcher Worker and BRIDGE_<NAME>_URL addresses one on
+// the mesh.
+#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|PGRST_JWKS|TRUSTED_JWKS|TRUSTED_AUDIENCE|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|ELECTRIC_PASSWORD|AUTHENTICATOR_PASSWORD|WAKE_URLS|RCLONE_[A-Z0-9_]*|REDIS_URL|CRUD_URL|MESH_EVENTS_URL|POKE_INTERVAL|DUCKSTREAM_ENGINE|COMPUTE_STATE_DIR|FELDERA_COMPILATION_PROFILE|CADDY_TLS_HOST_PORT|WEBAUTHN_ORIGIN|WEBAUTHN_RP_ID|AI_TARGET|AI_LOCAL_[A-Z0-9_]*|OIDC_[A-Z0-9_]*)$" & !~mechaCluster.#ReservedSecretName & !~"^BRIDGE_"
 
 #ActivepiecesAlias:      string & =~"^[a-zA-Z][a-zA-Z0-9_]*$"
 #ActivepiecesPath:       string & =~"^\\./pieces/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"
@@ -1956,10 +1963,11 @@ import (
 		// ([[docs/container-bridges#Targets]]). `docker` lowers a bridge as a
 		// process of its appliance, so it needs the bridge's `appliance` form;
 		// `cloudflare` ships the container's own image as a Cloudflare
-		// Container of the dispatcher Worker, so its container needs a
-		// Dockerfile. Naming another is refused here rather than failing every
-		// call there.
-		bridges?: [string]~(Name,_):     mechaCluster.#Bridge & {name: Name, targets: *[] | [...("docker" | "cloudflare")]}
+		// Container of the dispatcher Worker, and `k8s` as a Deployment behind
+		// the airlock's daprd, so on both its container needs a Dockerfile.
+		// gcp runs no daprd for the airlock: naming it is refused here rather
+		// than failing every call there.
+		bridges?: [string]~(Name,_):     mechaCluster.#Bridge & {name: Name, targets: *[] | [...or(#BridgeTargets)]}
 		duckstreams?: [string]~(Name,_): #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —
@@ -3267,6 +3275,14 @@ import (
 		let reached = list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]])
 		for b in reached if _declaredBridges[b] == _|_ {
 			"effect \(n) reaches undeclared bridge: \(b)"
+		}],
+		// The airlock settles a bridge not deployed by the effect's own bridge
+		// (effects.json); one reached only through k8s's entry would be dialed
+		// there and never answer.
+		[for n, x in _effects if x.sink.targets != _|_ if x.sink.targets.k8s != _|_ if x.sink.targets.k8s.bridge != _|_
+		let b = x.sink.targets.k8s.bridge
+		if _declaredBridges[b] != _|_ if !list.Contains(_declaredBridges[b].targets, "k8s") if [if x.sink.bridge != _|_ {x.sink.bridge}, ""][0] != b {
+			"effect \(n) reaches bridge \(b) on k8s, which \(b) does not name in its targets"
 		}],
 		[for n, x in _effects
 		let defaults = len([if x.sink.origin != _|_ {1}]) + len([if x.sink.bridge != _|_ {1}]) + len([if x.sink.ai != _|_ {1}])

@@ -128,6 +128,14 @@ Deno.test('a bridge on cloudflare is lowered as a container of the dispatcher', 
     const { default: declared } = await import(`file://${out}/src/effect-declarations.js`)
     assert.deepEqual(declared.acquire.target, { kind: 'container', bridge: 'fetch-pages', binding: 'BRIDGE_FETCH_PAGES' })
     assert.deepEqual(declared.confirm.target, { kind: 'bridge', bridge: 'mail' })
+    // Its own bridge on docker alone, its sink on cloudflare an origin: the
+    // edge calls the origin.
+    assert.deepEqual(declared.notify.target, { kind: 'origin', url: 'https://api.mail.example' })
+    // Its sink on cloudflare another bridge, which runs there: the edge calls
+    // that one.
+    assert.deepEqual(declared.relay.target, { kind: 'container', bridge: 'fetch-pages', binding: 'BRIDGE_FETCH_PAGES' })
+    // Its sink on cloudflare the AI gateway, its bridge another target's.
+    assert.deepEqual(declared.summarize.target, { kind: 'tsbifrost' })
   } finally {
     await Deno.remove(out, { recursive: true })
   }
