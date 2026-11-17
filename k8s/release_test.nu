@@ -28,6 +28,7 @@ use release.nu [
 	controller-replicas
 	kube-items
 	drop-args
+	set-cpu
 	tunnel-proxy-kubernetes
 	get-operator-cache-dir
 	fetch-verified
@@ -35,6 +36,10 @@ use release.nu [
 	render-manifests
 	read-environment
 	auth-provider-environment
+	crud-schemas
+	database-base
+	crane-pinned
+	crane-bin
 	auth-provider-secret
 	runtime-services
 	airlock-sinks
@@ -93,6 +98,9 @@ def run-tests [] {
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
 	test_app_schemas
+	test_crud_schemas
+	test_database_base
+	test_crane_pinned
 	test_auth_providers
 	test_auth_provider_secrets
 	test_trusted_keys
@@ -155,6 +163,7 @@ def run-tests [] {
 	test_preview_origin_https
 	test_preview_delete_needs_a_preview
 	test_preview_schema_from
+	test_set_cpu
 
 	print "\nAll release-k8s tests passed!"
 }
@@ -389,6 +398,113 @@ def test_trusted_keys [] {
 	assert equal $aud "https://api.example/crud"
 }
 
+# PostgREST serves public alone unless the app's compose gives crud more (PRONTO-320): a node's
+# release names the same schemas the app's compose does, so /api/v1 is not a PGRST106.
+def test_crud_schemas [] {
+	print "test crud serves the schemas compose gives it, public alone by default..."
+	assert equal (crud-schemas {}) null
+	assert equal (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"}) "public,api_v1"
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let schema_of = {|rendered| $rendered | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers.0.env | where name == "PGRST_DB_SCHEMA" | first | get value }
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind")) "public"
+	let data = (mktemp -t crud.XXXXXX.json | str trim)
+	{App: {crud: {schemas: (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"})}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "public,api_v1"
+	# An app with a schema of its own: what compose gives crud, its API schemas kept (not "shop" alone).
+	{App: {database: {schemas: {app: "shop", floor: "public", mecha: "mecha"}}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "shop"
+	{App: {database: {schemas: {app: "shop", floor: "public", mecha: "mecha"}}, crud: {schemas: "shop,api_v1"}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "shop,api_v1"
+	{App: {crud: {schemas: "api_v1;drop"}}} | to json | save -f $data
+	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch { true })
+	rm $data
+	assert $refused
+}
+
+# A node has no global crane, so the release runs the one it pins (release-cron 2026-11-15 22:41 BRT: "No version is set for
+# shim: crane"), fetched and checked, never through a locked mise that refuses it (Studio's builder pod, PRONTO-618). Run with
+# the system's directories alone on PATH and mise locked, so neither a crane of this machine's own nor mise can answer for it.
+def test_crane_pinned [] {
+	print "test crane runs pinned and checked, with no crane or mise on PATH..."
+	# A cache of its own. Then what a release killed mid-extract leaves, a part of crane in its own folder, with no crane
+	# in place: the next release unpacks it whole and never takes the part.
+	let cache = (mktemp -d)
+	with-env {PATH: ["/usr/bin" "/bin"], MISE_LOCKED: "1", XDG_CACHE_HOME: $cache} {
+		assert (which crane | is-empty) "a crane is on the test's PATH"
+		let v = (crane-pinned version)
+		assert ($v | str contains "0.20.2") $"the pinned crane answers 0.20.2, not ($v)"
+		let bin = (crane-bin)
+		let dir = ($bin | path dirname)
+		assert ((ls $dir | where name =~ 'partial' | length) == 0) "an extract leaves no part behind"
+		assert ((ls ($dir | path dirname) | where name =~ '\.partial$' | length) == 0) "a fetch leaves no part behind"
+		# A release killed mid-extract: a tar that writes a part of crane where it is told to, then fails.
+		rm $bin
+		let stub = (mktemp -d)
+		"#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -C ] && d=\"$2\"; shift; done\nprintf half > \"$d/crane\"; exit 1\n" | save -f ($stub | path join "tar")
+		^chmod +x ($stub | path join "tar")
+		with-env {PATH: [$stub "/usr/bin" "/bin"]} {
+			assert ((try { crane-bin; false } catch { true })) "a failed extract fails the release"
+		}
+		rm -rf $stub
+		assert (not ($bin | path exists)) "a failed extract leaves no crane in place to be trusted"
+		assert ((crane-pinned version) | str contains "0.20.2") "the next release unpacks crane whole"
+	}
+	rm -rf $cache
+}
+
+def test_database_base [] {
+	print "test the primary runs the database's base image, so the app's SQL cannot recreate it..."
+	let base = $"bonitao/mecha-database:0.22.0@sha256:('a' | fill --character a --width 64)"
+	let dir = (mktemp -d)
+	let stage = "FROM libraries_mecha-database-image AS database
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY services/database/migrations/000_extensions.sql services/database/migrations/680_flags.sql \\
+  services/database/migrations/685_army.sql /docker-entrypoint-initdb.d/
+COPY --from=libraries_mecha-database-image /usr/share/mecha/initdb/899_role_passwords.sh /docker-entrypoint-initdb.d/899_role_passwords.sh
+ENTRYPOINT [\"docker-entrypoint.sh\",\"postgres\",\"-c\",\"wal_level=logical\"]
+HEALTHCHECK --interval=1s CMD [\"pg_isready\"]
+"
+	let tail = "\nFROM busybox:musl AS database_ctxs\nRUN touch /x\n"
+	let compose = {|ctx| {services: {database: {build: {context: $dir, dockerfile: "Dockerfile.database", target: "database", additional_contexts: {libraries_mecha-database-image: $ctx}}}}} | to yaml }
+	let with = {|stage_text| $"($stage_text)($tail)" | save -f ($dir | path join Dockerfile.database); do $compose $"docker-image://($base)" | database-base }
+	# A stage that only copies files onto the base: the base is the primary's, whatever it copies.
+	assert equal (do $with $stage) {ref: $base, name: "libraries_mecha-database-image"}
+	# Anything that could add an extension the full image has and the base lacks keeps the primary on the full image.
+	assert ((do $with $"($stage)RUN apt-get install -y postgresql-16-pgvector\n") | is-empty) "a RUN"
+	assert ((do $with $"($stage)ADD https://example.com/ext.so /usr/lib/\n") | is-empty) "an ADD"
+	assert ((do $with $"($stage)COPY --from=database_ctxs /x /x\n") | is-empty) "a copy from another stage"
+	# A base that is not pinned by digest, or not an image, is no base.
+	$"($stage)($tail)" | save -f ($dir | path join Dockerfile.database)
+	assert (do $compose "docker-image://bonitao/mecha-database:0.22.0" | database-base | is-empty) "no digest"
+	assert (do $compose "libraries_mecha-database-image" | database-base | is-empty) "not an image"
+	assert ({services: {database: {build: {context: $dir, dockerfile: "Dockerfile.database", target: "nope"}}}} | to yaml | database-base | is-empty) "no such stage"
+	assert ({services: {crud: {}}} | to yaml | database-base | is-empty) "no database"
+	rm -r $dir
+	# The cluster's image does not move with the full image: a release that only changes a replayed SQL file pushes
+	# another database digest, and the primary, which CloudNativePG recreates for a changed image, keeps its own.
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let digest = {|c| $"sha256:($c | fill --character $c --width 64)" }
+	let render = {|full base|
+		let data = (mktemp -t base.XXXXXX.json | str trim)
+		let pushed = ({database: {tag: "16", digest: (do $digest $full)}} | merge (if $base == "" { {} } else { {"database-base": {tag: "16", digest: (do $digest $base)}} }))
+		{App: {image: {pushed: $pushed}}} | to json | save -f $data
+		let yaml = (render-manifests $app.cue_path "kind" --data $data | from yaml)
+		rm $data
+		{
+			cluster: ($yaml | where kind == "Cluster" | first | get spec.imageName)
+			initdb: ($yaml | where kind == "Job" and metadata.name == "sample-initdb" | first | get spec.template.spec.containers.0.image)
+		}
+	}
+	let before = (do $render "1" "2")
+	let after = (do $render "3" "2")
+	assert equal $before.cluster $"localhost:5001/sample-database-base:16@(do $digest '2')"
+	assert equal $after.cluster $before.cluster "a changed replayed SQL file leaves the primary's image as it was"
+	assert equal $before.initdb $"localhost:5001/sample-database:16@(do $digest '1')"
+	assert equal $after.initdb $"localhost:5001/sample-database:16@(do $digest '3')" "and the Jobs replay it from the full image"
+	assert equal (do $render "1" "").cluster $"localhost:5001/sample-database:16@(do $digest '1')" "without a base the primary runs the full image, as before"
+}
+
 def test_schema_jobs [] {
 	print "test the schema is built by the app's own database and migrate images..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
@@ -479,6 +595,7 @@ def test_render_manifests_kind [] {
 	let db = ($yaml | from yaml | where kind == "Cluster" | first)
 	assert equal $db.spec.stopDelay 120 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
 	assert equal $db.spec.smartShutdownTimeout 15
+	assert ("primaryUpdateMethod" not-in ($db.spec | columns)) "one instance has no standby to switch over to"
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
 	for svc in ["database" "crud" "electric" "auth" "caddy" "render"] {
@@ -667,12 +784,16 @@ def test_render_ready_path_follows_its_runtime [] {
 }
 
 def test_crud_lives_on_its_own [] {
-	print "test crud is live on PostgREST's own /live and ready on /ready..."
+	print "test crud is live and ready on PostgREST's own /live, and starts on /ready..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let crud = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers | where name == "crud" | first)
 	# A database that restarts makes /ready fail; liveness on it restarted crud with every release (PRONTO-440).
 	assert equal $crud.livenessProbe.httpGet.path "/live"
-	assert equal $crud.readinessProbe.httpGet.path "/ready"
+	# Unready, crud leaves crud-dapr and Dapr answers 500, which pages take as final; Ready, PostgREST answers 503 (PRONTO-638).
+	assert equal $crud.readinessProbe.httpGet.path "/live"
+	assert equal $crud.startupProbe.httpGet.path "/ready"
+	assert equal $crud.startupProbe.periodSeconds 2
+	assert equal $crud.startupProbe.failureThreshold 150
 }
 
 def test_container_resources_and_files [] {
@@ -2014,12 +2135,17 @@ def test_database_ha [] {
 	assert equal $one.instances 1
 	for f in [enablePDB replicationSlots] { assert ($f not-in ($one | columns)) $"one instance renders no ($f), as before" }
 	assert ("synchronous" not-in ($one.postgresql | columns)) "nor synchronous replication"
+	assert ("primaryUpdateMethod" not-in ($one | columns)) "nor a switchover"
 	let three = (do $cluster {database: {instances: 3, parameters: {max_slot_wal_keep_size: "2GB"}}})
 	assert equal $three.instances 3
 	assert equal $three.postgresql.synchronous {method: "any", number: 1, dataDurability: "preferred"}
 	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
 	assert equal $three.enablePDB true
+	assert equal [$three.primaryUpdateMethod $three.primaryUpdateStrategy] ["switchover" "unsupervised"] "a primary change promotes a standby first"
 	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
+	assert ("resources" not-in ($one | columns)) "no postgres resources unless the release names them"
+	let sized = (do $cluster {containerResources: {postgres: {requests: {cpu: "100m"}, limits: {cpu: "1"}}}})
+	assert equal $sized.resources {requests: {cpu: "100m"}, limits: {cpu: "1"}} "the postgres container's own, from containerResources.postgres"
 	let strict = (do $cluster {database: {instances: 3, synchronous: {dataDurability: "required"}, haSlots: false, enablePDB: false}})
 	assert equal $strict.postgresql.synchronous.dataDurability "required"
 	assert ("replicationSlots" not-in ($strict | columns))
@@ -2046,7 +2172,21 @@ def test_electric_sticky [] {
 	let door = (open --raw ($pronto_dir | path join assets Caddyfile))
 	assert ($door | str contains "import electric-upstream-{$PRONTO_ELECTRIC_UPSTREAM:one}")
 	assert ($door | str contains "(electric-upstream-pods) {\n  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {")
-	assert ($door | str contains "lb_policy cookie pronto_electric {$ELECTRIC_SECRET}")
+	# A browser's first requests, cookieless and sent together, all go to one Electric, chosen by who the client is (PRONTO-624),
+	# in the door every app is written from and in the idiom's alike.
+	let policy = "lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {\n    fallback client_ip_hash\n  }"
+	assert ($door | str contains $policy) "the door places a cookieless browser by its address"
+	assert ((open --raw ($pronto_dir | path join idioms docker Caddyfile)) | str contains $policy) "the idiom's door places it the same way"
+	# The client address it hashes is read through the cluster's own proxies, strictly, so a hostPort ingress spreads its browsers too (PRONTO-628).
+	let servers = "servers {\n\t    trusted_proxies static private_ranges\n\t    trusted_proxies_strict\n\t    client_ip_headers Cf-Connecting-Ip X-Forwarded-For\n\t  }"
+	assert ((open --raw ($pronto_dir | path join resilience resilience.cue)) | str contains $servers) "the door reads the client address through the cluster's proxies"
+	assert ((open --raw ($pronto_dir | path join idioms docker Caddyfile)) | str contains ($servers | str replace --all "\t" "")) "the idiom's door reads it the same way"
+	# The chain it read is not passed on: every upstream is sent the door's peer, as before (PRONTO-628).
+	let strips = "(app) {\n  # The forwarded chain the door read its client from is not passed on"
+	for f in [($pronto_dir | path join assets Caddyfile) ($pronto_dir | path join idioms docker Caddyfile)] {
+		let text = (open --raw $f)
+		assert (($text | str contains $strips) and ($text | str contains "  request_header -X-Forwarded-For\n  request_header -X-Forwarded-Host\n  request_header -X-Forwarded-Proto\n")) $"($f) strips the forwarded chain before its upstreams"
+	}
 }
 
 def test_electric_slots [] {
@@ -2248,4 +2388,10 @@ def test_preview_schema_from [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --schema-from brawl-chess } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "--schema-from copies a schema into a preview")
+}
+
+def test_set_cpu [] {
+	let manifest = "        resources:\n          limits:\n            cpu: 100m\n            memory: 200Mi\n          requests:\n            cpu: 100m\n            memory: 100Mi\n        securityContext:\n"
+	assert equal ($manifest | set-cpu {request: "150m", limit: "500m"}) "        resources:\n          limits:\n            cpu: 500m\n            memory: 200Mi\n          requests:\n            cpu: 150m\n            memory: 100Mi\n        securityContext:\n"
+	assert equal ($OPERATORS | where name == "cnpg" | first | get cpu) {request: "150m", limit: "500m"}
 }

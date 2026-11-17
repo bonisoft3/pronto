@@ -42,7 +42,15 @@
   dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {
     refresh 5s
   }
-  lb_policy cookie pronto_electric {$ELECTRIC_SECRET}
+  # A browser with no cookie yet (its page's first requests, sent together) is placed by who it is,
+  # not at random: by its client address, which the door reads through the cluster's own proxies
+  # (the global `servers` options: Cloudflare's, else the gateway's forwarded one, else its own).
+  # Placed at random, each shape of one page could start on another Electric, every long-poll after
+  # it answered 409 until the cookie caught up: over HTTP/1.1's six connections that outlasted a
+  # sign-up (the rc's kill rehearsal, PRONTO-624; behind a hostPort ingress, PRONTO-628).
+  lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {
+    fallback client_ip_hash
+  }
   lb_try_duration 5s
   fail_duration 30s
 }
@@ -175,6 +183,13 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
+  # The forwarded chain the door read its client from is not passed on: each upstream is sent the
+  # door's peer, Host and scheme, as before the door trusted the cluster's proxies, so a player's
+  # address never leaves in it and no client-written X-Forwarded-Host or -Proto reaches one, nor
+  # changes the Electric cookie's attributes (PRONTO-628).
+  request_header -X-Forwarded-For
+  request_header -X-Forwarded-Host
+  request_header -X-Forwarded-Proto
   # Every request is a span, the child of the traceparent it arrived with (the
   # gateway's), and every upstream is sent the span's own; the access log names
   # its traceID. The exporter reads the standard OTEL_* environment.

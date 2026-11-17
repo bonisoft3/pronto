@@ -97,6 +97,8 @@ import (
 		// Filled by the release from what it pushed, so a deployment names the
 		// exact image. CloudNativePG refuses `latest` and a bare digest: it reads
 		// the database's tag as the Postgres major version.
+		// `database-base` is the image the database's own stage starts from, when the stage only
+		// copies files onto it: the cluster runs it, the Jobs run `database`.
 		pushed: [string]: {tag: string, digest: =~"^sha256:[0-9a-f]{64}$"}
 	}
 
@@ -237,6 +239,11 @@ import (
 		// owner before it signs the token. It does not turn keys on.
 		keyExchanged: *"" | =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 	}
+
+	// The schemas PostgREST serves (PGRST_DB_SCHEMA), as compose gives crud: the app's own schema
+	// (database.schemas.app, public by default) first, then its API schemas (capabilities.apiSchemas,
+	// PRONTO-320), such as "public,api_v1" or "shop,api_v1". The release fills it from compose.
+	crud: schemas: *database.schemas.app | =~"^[a-z_][a-z0-9_]{0,62}(,[a-z_][a-z0-9_]{0,62})*$"
 
 	runtime: [string]: {
 		env: [string]: string
