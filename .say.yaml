@@ -4,14 +4,20 @@ say:
       types:
         cmds:
           - do: "deno run --no-config --allow-read --allow-write=portable-types.ts refresh-portable-types.ts"
+  # secret-seal.test.ts and the distribution tests import omnishell's data-sync.js,
+  # which imports the gitignored data-plane bundle omnishell builds.
+  build:
+    rulemap:
+      omnishell-bundle:
+        priority: -2
+        cmds:
+          - do: "mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle"
   test:
     # The shorthand replaces the builtin's command; the rule below sorts ahead of
     # it on priority, because the builtin carries stop:true and a rule sorted
     # after it is emitted and never runs.
     do: "deno run --allow-read=. bounds.ts"
     rulemap:
-      # The scratch apps the distribution tests write run omnishell's CLI from
-      # its tree, which imports the data-plane bundle omnishell builds.
       omnishell-bundle:
         priority: -2
         cmds:
@@ -199,6 +205,10 @@ say:
       - pattern: '(?:#SaytVersion: +"|Sayt \*\*|bonisoft3/sayt/v)(?<v>\d+\.\d+\.\d+)'
         files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md]
     rulemap:
+      omnishell-bundle:
+        priority: -2
+        cmds:
+          - do: "mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle"
       types:
         cmds:
           - do: "deno check --config deno.json *.ts"
