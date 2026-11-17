@@ -149,9 +149,19 @@ type Contract = {
 const contract = async (): Promise<Contract> => {
   const emitter = await Deno.readTextFile(EMITTER);
   const prefix = new Map<string, string>();
-  for (const m of emitter.matchAll(/for k, v in D\.design\.(\w+) \{"  --([a-z-]*)\\\(k\)/g)) {
-    assert(!prefix.has(m[1]), `emit.cue spells the ${m[1]} bucket twice, so its CSS name is ambiguous`);
-    prefix.set(m[1], m[2]);
+  // A bucket may be spelled in more than one filtered loop (colours: the roles,
+  // then the shadow inks), so long as every loop is filtered and gives it the
+  // same CSS name. That the filters together cover the bucket is beyond this
+  // reading; an unfiltered loop spelled twice is still refused.
+  const filtered = new Map<string, boolean>();
+  for (const m of emitter.matchAll(/for k, v in D\.design\.(\w+)( if [^{\n]*)? \{"  --([a-z-]*)\\\(k\)/g)) {
+    const [, bucket, clause, css] = m;
+    assert(
+      !prefix.has(bucket) || (prefix.get(bucket) === css && filtered.get(bucket) && clause !== undefined),
+      `emit.cue spells the ${bucket} bucket twice, so its CSS name is ambiguous`,
+    );
+    filtered.set(bucket, clause !== undefined);
+    prefix.set(bucket, css);
   }
 
   const d = await cue(["export", "-", "-e", "out", "--out", "json"], probe("#Base"));
