@@ -223,8 +223,22 @@ import (
 				if release.database.instances > 1 {
 					postgresql: synchronous: release.database.synchronous
 				}
+				// A change the primary must restart for (a new image, a parameter) promotes a synchronised
+				// standby first and restarts the old primary after it (PRONTO-537): CloudNativePG's default,
+				// restart, took the primary down for about a minute while two standbys sat idle
+				// (release 853292bc, 2026-11-15 20:01 BRT). One instance has no standby to promote.
+				if release.database.instances > 1 {
+					primaryUpdateStrategy: "unsupervised"
+					primaryUpdateMethod:   "switchover"
+				}
 				if release.database.haSlots {
 					replicationSlots: highAvailability: enabled: true
+				}
+				// The postgres container's own requests and limits, where the release names them
+				// (containerResources.postgres): a namespace's LimitRange default (a Studio game's 250m)
+				// throttled it. Left out where none is named, so a database already running is not restarted.
+				if release.containerResources["postgres"] != _|_ {
+					resources: release.containerResources["postgres"]
 				}
 				if release.database.instances > 1 || !release.database.enablePDB {
 					enablePDB: release.database.enablePDB
@@ -238,7 +252,13 @@ import (
 				stopDelay:            120
 				// prontoMonitoringObj's queries; the operator adds its default ones beside them.
 				monitoring: customQueriesConfigMap: [{name: prontoMonitoringName, key: "queries"}]
-				imageName: (#appImage & {svc: "database"}).out
+				// The cluster runs the database's base image where the release pushed one (release.nu's
+				// database-base): the app's own SQL is replayed by the schema Jobs from the full image,
+				// so a change to it must not change the image CloudNativePG recreates the primary for.
+				imageName: [
+					if release.image.pushed["database-base"] != _|_ {(#appImage & {svc: "database-base"}).out},
+					(#appImage & {svc: "database"}).out,
+				][0]
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
 				postgresUID: 999
@@ -833,7 +853,8 @@ import (
 								name:  "PGRST_DB_URI"
 								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.id)"
 							},
-							{name: "PGRST_DB_SCHEMA", value: release.database.schemas.app},
+							// What compose gives crud (meta.schema's app schema, then capabilities.apiSchemas, PRONTO-320).
+							{name: "PGRST_DB_SCHEMA", value: release.crud.schemas},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 							{name: "PGRST_DB_PRE_REQUEST", value: "\(release.database.schemas.floor).app_pre_request"},
 							// As mecha's cluster states them (meta.schema).
@@ -860,9 +881,16 @@ import (
 							initialDelaySeconds: 5
 							periodSeconds:       10
 						}
+						// Readiness asks the same: a crud that is not Ready leaves the crud-dapr Service, and Dapr answers
+						// a call to a name with no address 500 (ERR_DIRECT_INVOKE), which a page takes as final. Kept Ready
+						// while the database is away, PostgREST answers 503 with Retry-After, which pages retry (PRONTO-638:
+						// the kill rehearsal's move failed 500 for the 3 min its primary was gone). /ready gates the start only.
+						// Up to 5 min to first answer /ready: past a release's rollout wait, so a crud that starts while the
+						// database recovers (a node's reboot) is not restarted first.
+						startupProbe: {httpGet: {path: "/ready", port: 3001}, periodSeconds: 2, failureThreshold: 150}
 						readinessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5

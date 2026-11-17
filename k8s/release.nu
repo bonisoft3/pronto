@@ -42,6 +42,11 @@ export const OPERATORS = [
 		checksum: "sha256:37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb"
 		namespace: "cnpg-system"
 		check_deployments: ["cnpg-controller-manager"]
+		# The manifest gives the controller 100m for both, and it throttled at that: measured on the node
+		# (2026-11-16, 10 clusters), 32-85m a 5 s sample, bursts above 100m, a quarter of its CFS periods
+		# throttled. It renews every primary's lease, so a starved run queue costs a failover; 150m
+		# requested keeps it a share when the node is busy, 500m lets a burst finish.
+		cpu: {request: "150m", limit: "500m"}
 	},
 	# The certificates CloudNativePG's barman-cloud plugin and the operator talk through.
 	{
@@ -159,7 +164,10 @@ export def fetch-verified [entry: record]: nothing -> string {
 		}
 	}
 
-	$data | save -f -r $cache_file
+	# Saved beside it under this process's name, then renamed: another release reading the cache sees the whole file or none.
+	let partial = $"($cache_file).($nu.pid).partial"
+	$data | save -f -r $partial
+	^mv -f $partial $cache_file
 	print $"  Verified sha256:($actual_hash)"
 	$cache_file
 }
@@ -197,6 +205,12 @@ export def drop-args [args: list]: string -> string {
 	$args | reduce -f $text {|a, t| $t | str replace --all --regex $"\(?m\)^[ \t]*- ['\"]?($a)['\"]?[ \t]*\r?\n" "" }
 }
 
+# A manifest whose container CPU request and limit are these, as text. The operator manifests that name one set the same
+# value for both (`cpu: 100m` under limits and under requests); a manifest with other values is left as it is.
+export def set-cpu [cpu: record]: string -> string {
+	$in | str replace --regex '(?m)^(\s+limits:\n\s+)cpu: \S+(\n\s+memory: \S+\n\s+requests:\n\s+)cpu: \S+' $"${1}cpu: ($cpu.limit)${2}cpu: ($cpu.request)"
+}
+
 # The StatefulSets an apply's stderr says it refused for an immutable field.
 export def immutable-statefulsets [stderr: string]: nothing -> list<string> {
 	$stderr | lines
@@ -213,9 +227,10 @@ def install-operator [entry: record, timeout: string] {
 	}
 
 	let fetched = (fetch-verified $entry)
-	let file = if ($entry.drop_args? | default [] | is-empty) { $fetched } else {
+	let file = if ($entry.drop_args? | default [] | is-empty) and ($entry.cpu? | is-empty) { $fetched } else {
 		let out = $"($fetched).hot.yaml"
-		open --raw $fetched | drop-args ($entry.drop_args) | save --force --raw $out
+		let text = (open --raw $fetched | drop-args ($entry.drop_args? | default []))
+		(if ($entry.cpu? | is-empty) { $text } else { $text | set-cpu $entry.cpu }) | save --force --raw $out
 		$out
 	}
 	if ($entry.kind? | default "") == "helm" {
@@ -714,6 +729,108 @@ export def node-registry-pg-major [registry: string, repo: string, digest: strin
 	let top = (do $get $"manifests/($digest)")
 	let manifest = if ($top.manifests? | is-not-empty) { do $get $"manifests/($top.manifests | first | get digest)" } else { $top }
 	do $get $"blobs/($manifest.config.digest)" | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
+}
+
+# The image the database's Dockerfile stage starts from, when the stage only copies files onto it: `{ref, name}` (the
+# pinned docker-image:// reference of its additional context, and that context's name), else null. `compose` is the app's
+# `docker compose config`. The primary then runs the base and the schema Jobs the full image (k8s.cue's imageName), so the
+# app's own SQL, which the image carries for them to replay, cannot recreate the primary; and the base has every
+# extension the full image's postgres needs, since the stage adds none: a RUN, an ADD, a copy from any other stage or a
+# base that is not pinned by digest gives null, and the cluster keeps running the full image.
+export def database-base []: string -> any {
+	let build = ($in | from yaml | get -o services.database.build)
+	if ($build | is-empty) { return null }
+	let target = ($build | get -o target | default "")
+	let file = ($build.context | path join ($build | get -o dockerfile | default "Dockerfile"))
+	if not ($file | path exists) { return null }
+	# One instruction a line, each with its continuation lines, comments gone.
+	let steps = (open --raw $file | str replace --all --regex '\\\n' ' ' | lines | each { str trim } | where {|l| $l != "" and not ($l | str starts-with "#") })
+	let stages = ($steps | enumerate | where {|s| $s.item =~ '(?i)^FROM\s' })
+	let stage = ($stages | where {|s| ($s.item | parse --regex '(?i)\sAS\s+(?<n>\S+)\s*$' | get -o n.0 | default "") == $target } | get -o 0)
+	if ($stage | is-empty) { return null }
+	let from = ($stage.item | split row " " | where $it != "" | get 1)
+	let upto = ($stages | where {|s| $s.index > $stage.index } | get -o 0.index | default ($steps | length))
+	let body = ($steps | skip ($stage.index + 1) | first (($upto - $stage.index - 1) | into int))
+	let ctx = ($build | get -o additional_contexts | default {} | get -o $from | default "")
+	if not ($ctx | str starts-with "docker-image://") or not ($ctx | str contains "@sha256:") { return null }
+	for line in $body {
+		let op = ($line | split row " " | first)
+		if not ($op =~ '(?i)^(ARG|WORKDIR|ENTRYPOINT|CMD|HEALTHCHECK|EXPOSE|ENV|LABEL|USER|STOPSIGNAL|COPY)$') { return null }
+		if ($op =~ '(?i)^COPY$') {
+			let src = ($line | parse --regex '--from=(?<f>\S+)' | get -o f.0)
+			if ($src | is-not-empty) and $src != $from { return null }
+		}
+	}
+	{ref: ($ctx | str replace "docker-image://" ""), name: $from}
+}
+
+# crane, at the version the release pins, fetched and checked as sops is (fetch-verified): a node has no global crane, and
+# mise's shim for it fails with "No version is set for shim: crane" (release-cron 2026-11-15 22:41 BRT, the first run on
+# gcp.57). Not through `mise x` (gcp.58-62): an app's mise runs locked, and its lock names no crane, so a machine that has
+# not installed it already refuses it ("No lockfile URL found ... (--locked mode)": Studio's builder pod, a game's Publish,
+# 2026-11-16 15:11 BRT, PRONTO-618). The checksums are the release's checksums.txt for each archive.
+const crane_version = "v0.20.2"
+const crane_checksums = {
+	"Darwin_x86_64": "ae2677fc68b05ee3a63fe7b1d599aa4a554610b9f9da499a0c39669f446d29ed"
+	"Darwin_arm64": "b47a8291d1069656bcfb8346dc9494f03e734d7a4058961fa53f0dfc9cb41abb"
+	"Linux_x86_64": "c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b"
+	"Linux_arm64": "aff0db48825124c9331ea310057214bd4e92c01aa2e414d539e9659841d9422a"
+}
+
+export def crane-platform []: nothing -> string {
+	let os = match $nu.os-info.name { "macos" => "Darwin", "linux" => "Linux", $o => (error make {msg: $"no pinned crane for ($o)"}) }
+	let arch = match $nu.os-info.arch { "x86_64" => "x86_64", "aarch64" => "arm64", $a => (error make {msg: $"no pinned crane for ($a)"}) }
+	$"($os)_($arch)"
+}
+
+# The pinned crane's binary, extracted once beside its checked archive in the operators' cache.
+export def crane-bin []: nothing -> string {
+	let platform = (crane-platform)
+	let name = $"go-containerregistry-($crane_version).($platform)"
+	let archive = (fetch-verified {
+		name: $name, ext: "tar.gz", checksum: $"sha256:($crane_checksums | get $platform)"
+		url: $"https://github.com/google/go-containerregistry/releases/download/($crane_version)/go-containerregistry_($platform).tar.gz"
+	})
+	# Extracted from this archive, checked just now, into a folder named by its checksum. Unpacked into a folder of this
+	# process's own and renamed into place, so a release killed mid-extract, or one beside it, never leaves or runs a part of it;
+	# owned by whoever runs the release, not by the archive's uid.
+	let dir = ((get-operator-cache-dir) | path join $"($name).($crane_checksums | get $platform | str substring 0..11)")
+	let bin = ($dir | path join "crane")
+	if not ($bin | path exists) {
+		mkdir $dir
+		let tmp = ($dir | path join $"partial.($nu.pid)")
+		mkdir $tmp
+		^tar --no-same-owner -xzf $archive -C $tmp crane
+		^chmod +x ($tmp | path join "crane")
+		^mv -f ($tmp | path join "crane") $bin
+		rm -rf $tmp
+	}
+	$bin
+}
+
+export def --wrapped crane-pinned [...args: string]: nothing -> string {
+	^(crane-bin) ...$args
+}
+
+# `database-base`'s image put in the node's registry as `<app>-database-base`, tagged with its Postgres major as the
+# database's is (CloudNativePG reads it), the digest the one it has everywhere: crane copies it as it is, so the image
+# the primary runs is the same on every release until the base itself is moved. The node's registry is reached through a
+# port-forward, as buildkit-images does. Answers the image's `{tag, digest}`.
+export def database-base-copy [base: record, app: string, --registry: string = ""]: nothing -> record {
+	let digest = ($base.ref | split row "@" | last)
+	let major = (crane-pinned config $base.ref | from json | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last)
+	# `registry`: where the release already reaches the node's registry (build.by "node": its SSH tunnel's local port);
+	# else a port-forward through the cluster's API, as buildkit-images reaches it.
+	let reg = if ($registry | is-empty) { port-forward pronto-registry registry $node_registry_port } else { null }
+	let host = if ($registry | is-empty) { $"127.0.0.1:($reg.port)" } else { $registry }
+	try {
+		crane-pinned copy --insecure $base.ref $"($host)/($app)-database-base:($major)" | ignore
+		if ($reg | is-not-empty) { stop-port-forward $reg }
+	} catch {|e|
+		if ($reg | is-not-empty) { stop-port-forward $reg }
+		error make {msg: $e.msg}
+	}
+	{tag: $major, digest: $digest}
 }
 
 # The node's registry through the release's SSH connection, on a free local
@@ -1543,6 +1660,12 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 	}
 }
 
+# The schemas PostgREST serves, as compose gives crud (PGRST_DB_SCHEMA): the app's own schema, then its API
+# schemas. Null where compose names none: the release's CUE then serves the app's schema alone.
+export def crud-schemas [environment: record]: nothing -> any {
+	$environment.PGRST_DB_SCHEMA?
+}
+
 export def auth-provider-secret [name: string, namespace: string, values: record]: nothing -> record {
 	{
 		apiVersion: "v1", kind: "Secret"
@@ -1640,7 +1763,7 @@ export def tenant-images [app_dir: string, compose: string, services: list<strin
 			^tar -xf ($out | path join $"($svc).tar") -C $layout
 			let repo = (tenant-repo $tenant $app $svc)
 			let first = if $svc == "database" { $"build-($builder)" } else { $tag }
-			let ref = (^crane push --insecure $layout $"($registry)/($repo):($first)" | str trim)
+			let ref = (crane-pinned push --insecure $layout $"($registry)/($repo):($first)" | str trim)
 			let digest = ($ref | split row "@" | last)
 			let final = if $svc == "database" {
 				let major = (node-registry-pg-major $registry $repo $digest)
@@ -1850,10 +1973,14 @@ export def main [
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
 	} else if $target_env.build.by == "buildkit" {
 		ensure-node-buildkit
-		buildkit-images $app_source_dir (compose-config $app_source_dir) $build_svcs $app_info.name $app_meta.image.tag --platform ($target_env.platform? | default "")
+		let compose = (compose-config $app_source_dir)
+		let images = (buildkit-images $app_source_dir $compose $build_svcs $app_info.name $app_meta.image.tag --platform ($target_env.platform? | default ""))
+		# The primary runs the database's base where its stage only copies files onto it (k8s.cue's imageName).
+		let base = ($compose | database-base)
+		if ($base | is-empty) { $images } else { $images | insert "database-base" (database-base-copy $base $app_info.name) }
 	} else {
 		let bake_targets = (bake-images $app_source_dir (compose-config $app_source_dir) $build_svcs --platform ($target_env.platform? | default ""))
-		$build_svcs | each {|svc|
+		let built = ($build_svcs | each {|svc|
 			let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 			# The database's tag is its Postgres major, which CloudNativePG reads; the
 			# official postgres base the image derives from states it as PG_MAJOR.
@@ -1868,7 +1995,11 @@ export def main [
 			}
 			let digest = (docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
 			{svc: $svc, ref: {tag: $tag, digest: $digest}}
-		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+		# A node's build (Docker here, pushed through the SSH tunnel) gives the primary the base as well (PRONTO-537):
+		# only the buildkit build did, so Bonk Chess's primary was recreated by every release that changed a replayed file.
+		let base = if $target_env.build.by == "node" and ($push_registry | is-not-empty) { (compose-config $app_source_dir | database-base) } else { null }
+		if ($base | is-empty) { $built } else { $built | insert "database-base" (database-base-copy $base $app_info.name --registry $push_registry) }
 	}
 	# What compose gives the migrate service beyond the database it names.
 	let migrate = if $has_migrate {
@@ -1879,9 +2010,10 @@ export def main [
 	# What release.cue sets is the release's, over compose's, as gcp/release.nu's auth.oidc is.
 	let fixed = (^cue export --expression App.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = (auth-provider-environment (compose-config $app_source_dir --json | get services.auth.environment | reject -o ...$fixed))
+	let crud_schemas = (crud-schemas (compose-config $app_source_dir --json | get -o services.crud.environment | default {}))
 	let own_env = (app-services-environment (compose-config $app_source_dir --json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge (if $crud_schemas == null { {} } else { {crud: {schemas: $crud_schemas}} }) | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file | if $is_tenant { tenant-manifests $tenant } else { $in })
 	rm $pushed_file
 
