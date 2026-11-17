@@ -746,12 +746,14 @@ def test_render_ready_path_follows_its_runtime [] {
 }
 
 def test_crud_lives_on_its_own [] {
-	print "test crud is live on PostgREST's own /live and ready on /ready..."
+	print "test crud is live and ready on PostgREST's own /live, and starts on /ready..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let crud = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers | where name == "crud" | first)
 	# A database that restarts makes /ready fail; liveness on it restarted crud with every release (PRONTO-440).
 	assert equal $crud.livenessProbe.httpGet.path "/live"
-	assert equal $crud.readinessProbe.httpGet.path "/ready"
+	# Unready, crud leaves crud-dapr and Dapr answers 500, which pages take as final; Ready, PostgREST answers 503 (PRONTO-638).
+	assert equal $crud.readinessProbe.httpGet.path "/live"
+	assert equal $crud.startupProbe.httpGet.path "/ready"
 }
 
 def test_container_resources_and_files [] {

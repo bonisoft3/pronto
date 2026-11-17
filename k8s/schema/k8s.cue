@@ -882,9 +882,16 @@ import (
 							initialDelaySeconds: 5
 							periodSeconds:       10
 						}
+						// Readiness asks the same: a crud that is not Ready leaves the crud-dapr Service, and Dapr answers
+						// a call to a name with no address 500 (ERR_DIRECT_INVOKE), which a page takes as final. Kept Ready
+						// while the database is away, PostgREST answers 503 with Retry-After, which pages retry (PRONTO-638:
+						// the kill rehearsal's move failed 500 for the 3 min its primary was gone). /ready gates the start only.
+						// Up to 5 min to first answer /ready: past a release's rollout wait, so a crud that starts while the
+						// database recovers (a node's reboot) is not restarted first.
+						startupProbe: {httpGet: {path: "/ready", port: 3001}, periodSeconds: 2, failureThreshold: 150}
 						readinessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5
