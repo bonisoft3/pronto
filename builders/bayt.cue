@@ -43,7 +43,7 @@ import (
 // and the image never disagree. Readers outside this package (Studio's
 // builder image) take it from here.
 #Playwright: {
-	version: regexp.FindSubmatch(#"playwright:v([0-9.]+)-"#, core.lock.images.playwright)[1]
+	version: regexp.FindSubmatch(#"playwright:v([0-9]+\.[0-9]+\.[0-9]+)"#, core.lock.images.playwright)[1]
 	marker:  ".playwright-chromium-\(version)"
 }
 
