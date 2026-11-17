@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	mechacluster "github.com/bonisoft3/pronto/clusters:mecha"
 	"github.com/bonisoft3/pronto/resilience"
 )
 
@@ -115,6 +116,8 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	// Where the app's tables and the floor's functions are (.pronto/cluster.json; the release fills it).
+	database: schemas: {app: *"public" | mechacluster.#SchemaName, floor: *"public" | mechacluster.#SchemaName, mecha: *"mecha" | mechacluster.#SchemaName}
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -399,9 +402,11 @@ import (
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
-						{name: "PGRST_DB_SCHEMA", value: "public"},
+						{name: "PGRST_DB_SCHEMA", value: R.database.schemas.app},
 						{name: "PGRST_DB_ANON_ROLE", value: "anon"},
-						{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+						{name: "PGRST_DB_PRE_REQUEST", value: "\(R.database.schemas.floor).app_pre_request"},
+						// As mecha's cluster states them (meta.schema).
+						if R.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: R.database.schemas.floor}},
 						// Cloud Run probes the instance's address, not loopback.
 						{name: "PGRST_SERVER_HOST", value: "*"},
 						{name: "PGRST_DB_POOL", value: "\(#Pools.crud)"},
@@ -421,6 +426,9 @@ import (
 						// The service refuses to start without its statement bound: compose's
 						// where it gives one, else resilience's client statement, in ms.
 						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
+						// Where the tables, the floor and its lists are, as mecha's cluster states them.
+						[for k, v in {MECHA_DB_SCHEMA: R.database.schemas.app, MECHA_FLOOR_SCHEMA: R.database.schemas.floor, MECHA_SCHEMA: R.database.schemas.mecha}
+							if R.auth.env[k] == _|_ {{name: k, value: v}}],
 						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {

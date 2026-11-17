@@ -589,6 +589,24 @@ Deno.test("the roles migration leaves electric's password to the deployment", as
   assertEquals(/PASSWORD/i.test(roles), false);
 });
 
+// An app's schemas reach every reader of them: the migration that makes the
+// schema, the floor at 003 for it, the door's Electric route (Electric reads a
+// bare table as public's) and the facts the release targets read. Unset, the
+// app is as before: public's tables, no schema made, the door unchanged.
+Deno.test("an app's schemas reach its migrations, its door and its release facts", async () => {
+  const at = (files: Record<string, { text: string }>, rel: string) => files[rel] as unknown as { text: string; data: { schemas: unknown } };
+  const plain = await emitFiles(paymentProgram());
+  assertEquals(at(plain, ".pronto/cluster.json").data.schemas, { app: "public", floor: "public", mecha: "mecha" });
+  assertEquals(plain["services/database/migrations/000_extensions.sql"].text.includes("CREATE SCHEMA"), false);
+  assertEquals(at(plain, "docker/Caddyfile").text.includes("uri query table"), false);
+  const own = await emitFiles(paymentProgram() + '\napp: meta: schemas: {app: "orders", floor: "mecha"}\n');
+  assertEquals(at(own, ".pronto/cluster.json").data.schemas, { app: "orders", floor: "mecha", mecha: "mecha" });
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "CREATE SCHEMA IF NOT EXISTS orders;");
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "SET search_path = orders, mecha");
+  assertStringIncludes(own["services/database/migrations/003_rls.sql"].text, "FUNCTION mecha.auth_uid()");
+  assertStringIncludes(at(own, "docker/Caddyfile").text, "uri query table orders.{query.table}");
+});
+
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
   const files = await emitFiles(bridged(MAIL_BRIDGE));
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl, "http://smtp:8080");
