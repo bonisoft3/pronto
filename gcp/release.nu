@@ -589,8 +589,8 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		let upper = ($it.name | str uppercase)
 		let ik = $"OIDC_($upper)_ISSUER"
 		let nk = $"OIDC_($upper)_INTERNAL"
-		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
-		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
+		let acc = if ($acc | get -o $ik | default "") =~ '^http://localhost:[0-9]+$' { $acc | upsert $ik $issuer } else { $acc }
+		if ($acc | get -o $nk | default "") =~ '^http://identity:[0-9]+/$' { $acc | upsert $nk $issuer } else { $acc }
 	})
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }

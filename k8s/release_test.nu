@@ -347,7 +347,7 @@ def test_auth_provider_secrets [] {
 	assert equal $public_client.oidcSecretDigest ""
 	let with_release_broker = (auth-provider-environment {
 		OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin"
-		OIDC_GOOGLE_ISSUER: "http://localhost:28443", OIDC_GOOGLE_INTERNAL: "http://identity:28443/"
+		OIDC_GOOGLE_ISSUER: "http://localhost:24681", OIDC_GOOGLE_INTERNAL: "http://identity:24681/"
 	} {google: {releaseIssuer: "https://id.example.com"}})
 	assert equal $with_release_broker.oidc.OIDC_GOOGLE_ISSUER "https://id.example.com"
 	assert equal $with_release_broker.oidc.OIDC_GOOGLE_INTERNAL "https://id.example.com"
