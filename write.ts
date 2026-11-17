@@ -36,7 +36,7 @@ import { compileFunction } from "./database-functions.ts";
 import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 import { sha256Hex } from "./facts.ts";
-import { inSchemas, isDefault, migrationPath, type Schemas } from "./schema-names.ts";
+import { inSchemas, isDefault, migrationPath, type Schemas, upgradeInSchemas } from "./schema-names.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string; inSchemas?: true };
 type Emission = {
@@ -45,7 +45,7 @@ type Emission = {
   checkout: Record<string, EmitFile>;
   terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string; statics: { file: string; target: string }[] } };
   build?: { meta?: { dir?: string } };
-  cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] } };
+  cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] }; state?: { effectInterpreters?: string } };
   development?: { statics: { file: string; target: string }[] };
   schemas: Schemas;
 };
@@ -164,7 +164,18 @@ async function exportEmission(): Promise<{ emission: Emission; drawing: Drawing 
   cortexSql(emission);
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
-  const graph = emission.files["bayt.json"].data as { files: Record<string, { say: Record<string, unknown> }> };
+  const graph = emission.files["bayt.json"].data as {
+    files: Record<string, { say: Record<string, unknown> }>;
+    targets?: Record<string, { dockerfile?: { epilogue?: string[] } }>;
+  };
+  // The airlock's upgrade replays the machines' interpreters, which their migration holds renamed for
+  // the app's schemas: the upgrade's copy is renamed the same way (schema-names.ts).
+  const upgrade = graph.targets?.["airlock-upgrade"]?.dockerfile?.epilogue;
+  if (upgrade !== undefined) {
+    const interpreters = emission.cluster?.state?.effectInterpreters ?? fail("the emission carries an airlock upgrade and no effectInterpreters to rename in it");
+    if (upgrade.length !== 1) fail(`the airlock upgrade's epilogue holds ${upgrade.length} entries, not the one script mecha writes`);
+    upgrade[0] = upgradeInSchemas(upgrade[0], interpreters, schemas);
+  }
   graph.files["checks.yaml"] = checks;
   const gates = graph.files["say.yaml"].say;
   const projected = projectGates(checks.say, gates);

@@ -1,5 +1,5 @@
-import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.11";
-import { inSchemas, type Schemas } from "./schema-names.ts";
+import { assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
+import { inSchemas, type Schemas, upgradeInSchemas } from "./schema-names.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 
 const DEFAULT: Schemas = { app: "public", floor: "public", mecha: "mecha", names: { floor: [], mecha: [], resolvers: [] } };
@@ -73,4 +73,26 @@ Deno.test("an escape string or a search_path naming $user is refused on schemas 
 Deno.test("the portable type DDL renames clean on schemas of its own: no escape string of its own", () => {
   const renamed = inSchemas(generateTypeSQL(), own);
   assertEquals(renamed.includes(`orders.portable_bytes`), true);
+});
+
+// mecha's airlock upgrade (#AirlockUpgradeSql) holds the machines' interpreters as an escape string
+// inside the DO block's, where the lexer reads no SQL: they are renamed as their migration is, and the
+// rest of the upgrade is left as it was.
+Deno.test("the airlock upgrade's interpreters are renamed as their migration is, the upgrade around them kept", () => {
+  const interpreters = "CREATE OR REPLACE FUNCTION \"trg\"() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$\n" +
+    "BEGIN DELETE FROM public.schedule WHERE name ~ '^it''s \\d$'; RETURN NEW; END $$;\n" +
+    "DROP TRIGGER IF EXISTS \"trg\" ON public.machine_timer_tick;";
+  // As mecha quotes a literal (#PostgresLiteral): backslashes and quotes doubled, in E'…'.
+  const quote = (t: string) => `E'${t.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
+  const upgrade = (i: string) => `SET LOCAL lock_timeout = '5s';\nLOCK TABLE airlock.external_effect_ledger IN ACCESS EXCLUSIVE MODE;\n` +
+    `DO ${quote(`BEGIN\n  IF EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'airlock' AND column_name = 'request') THEN\n` +
+      `    ALTER TABLE airlock.external_effect_ledger RENAME COLUMN request TO input;\n    EXECUTE ${quote(i)};\n  END IF;\nEND`)};`;
+  assertEquals(upgradeInSchemas(upgrade(interpreters), interpreters, DEFAULT), upgrade(interpreters));
+  const renamed = upgradeInSchemas(upgrade(interpreters), interpreters, own);
+  assertEquals(renamed, upgrade(`SET LOCAL search_path = orders, mecha;\n${inSchemas(interpreters, own)}`));
+  for (const name of ["orders.schedule", "orders.machine_timer_tick", "SET search_path = pg_catalog, orders, mecha, pg_temp"]) assertStringIncludes(renamed, name);
+  assertEquals(renamed.includes("public."), false);
+  // Not found as mecha quotes it, or found twice: the writer refuses rather than leave public's names.
+  assertThrows(() => upgradeInSchemas(upgrade("SELECT 1;"), interpreters, own), Error, "cannot rename them");
+  assertThrows(() => upgradeInSchemas(upgrade(interpreters) + upgrade(interpreters), interpreters, own), Error, "cannot rename them");
 });

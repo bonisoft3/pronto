@@ -118,6 +118,9 @@ a floor function to the floor's schema, a list to mecha's, anything else in
 `public` to the app's; a literal is renamed only where it names an object
 or is SQL text (a resolver's argument, a dynamic statement's piece), and
 `resolvers` lists the app's own functions whose first argument names one. The
+airlock's upgrade (mecha's `airlock-upgrade`), which replays the machines'
+interpreters over a retained ledger, carries them renamed the same way and
+under the same path, so its copy writes the schemas their migration does. The
 door names the schema to Electric, and the gcp and k8s targets read the
 schemas from `.pronto/cluster.json` for PostgREST and auth.
 

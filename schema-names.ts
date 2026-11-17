@@ -201,3 +201,24 @@ function rename(sql: string, s: Schemas): string {
   }
   return out;
 }
+
+// mecha's #PostgresLiteral: an escape string, its backslashes and quotes doubled.
+const escapeString = (text: string) => `E'${text.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
+// That literal as it reads inside another one: quoted again, without the outer E'…'.
+const nested = (text: string) => escapeString(escapeString(text)).slice(2, -1);
+
+/** mecha's airlock upgrade (#AirlockUpgradeSql) with the machines' interpreters it carries renamed for
+ * `s`, as their migration is, under the search_path every migration runs with. The interpreters sit
+ * in an escape string inside the DO block's, which the lexer does not read, so they are renamed before
+ * they are quoted and put back in the one place they hold; the rest of the upgrade names only
+ * `airlock`, which is mecha's own. */
+export function upgradeInSchemas(upgrade: string, interpreters: string, s: Schemas): string {
+  if (isDefault(s)) return upgrade;
+  const held = nested(interpreters);
+  const at = upgrade.indexOf(held);
+  if (at < 0 || upgrade.indexOf(held, at + 1) >= 0) {
+    throw new Error("the airlock upgrade does not carry its interpreters once, as mecha's #AirlockUpgradeSql quotes them: cannot rename them for the app's schemas");
+  }
+  const renamed = `SET LOCAL search_path = ${migrationPath(s)};\n${inSchemas(interpreters, s)}`;
+  return upgrade.slice(0, at) + nested(renamed) + upgrade.slice(at + held.length);
+}
