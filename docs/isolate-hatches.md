@@ -9,7 +9,7 @@ program builds. A bridge reaches it as it reaches a container
 code: capabilities: hatches: pdf: {
     kind:   "isolate"
     note:   "renders receipts from plain data"
-    stock:  "pdf" // pronto's own module (Stock isolates, below)
+    uses:   "pronto/pdf" // pronto's own module (Published isolates, below)
     memory: 96    // MiB of V8's old space, from 16 to 128; 128 when unset
 }
 code: state: bridges: pdf: {isolate: "pdf", targets: ["docker", "cloudflare"]}
@@ -124,16 +124,17 @@ bridges may share an isolate, as they share a container: on docker it is one
 process. On cloudflare a container is one bridge's, and an isolate is too: a
 bridge naming cloudflare shares its isolate with no other.
 
-## Stock isolates
+## Published isolates
 
-A stock isolate is a module pronto ships, which a hatch names by `stock` in
-place of `entrypoint` and `files`. Pronto writes it into the app beside its
-other generated files, under `.pronto/isolates/<stock>/`, its `main.ts`, its
+A published isolate is a module pronto ships, which a hatch names by `uses`,
+as `pronto/<name>`, in place of `entrypoint` and `files`; a `uses` naming no
+isolate pronto ships is refused. Pronto writes it into the app beside its
+other generated files, under `.pronto/isolates/<name>/`, its `main.ts`, its
 `deno.json` and its lock, and the hatch's `entrypoint` and `files` are those;
 from there it is built, served and bounded as any isolate. Its packages are
 pinned by its lock, so an app gets another version of one with another pronto.
 
-**`pdf`** renders a [pdfmake](https://pdfmake.github.io/docs/0.3/) document
+**`pronto/pdf`** renders a [pdfmake](https://pdfmake.github.io/docs/0.3/) document
 definition, the request's JSON body, as pdfmake renders it anywhere, in
 pdfmake's own default font, Roboto, whose four faces its bundle carries: a
 Worker reads no file, so a font is code. The PDF comes back as an effect's
@@ -170,4 +171,4 @@ bound is the isolate's, whatever the module does: a library whose work grows
 with its input belongs in one.
 
 pdfmake is such a library: it lays out whatever its definition describes, so
-the stock `pdf` isolate is where a program renders one.
+the published `pronto/pdf` isolate is where a program renders one.

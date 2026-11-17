@@ -1,6 +1,12 @@
 say:
   generate:
     rulemap:
+      # Pronto's build type-checks a tree that imports the data-plane bundle
+      # omnishell builds (interpreter/vendor/mecha-client.js, untracked).
+      omnishell-bundle:
+        priority: -2
+        cmds:
+          - do: "mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle"
       types:
         cmds:
           - do: "deno run --no-config --allow-read --allow-write=portable-types.ts refresh-portable-types.ts"
@@ -36,7 +42,7 @@ say:
           - do: "deno test --parallel --no-config --allow-read --allow-write --allow-run=cue,nu,sh read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts host-postgres.test.ts"
           - do: "deno test --config deno.json --allow-read --allow-write --allow-run=cue,sh bridge-targets.test.ts isolate-hatches.test.ts"
           - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
-      # pronto's stock isolates, built as every release builds them (their
+      # pronto's published isolates, built as every release builds them (their
       # packages fetched by the build's own process) and served by the host
       # that serves them outside Cloudflare, on loopback.
       isolates:

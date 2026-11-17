@@ -25,8 +25,9 @@ import (
 #Target: "pages" | "cloudflare" | "docker" | "k8s" | "gcp" | "aws"
 #Tier:   "browser" | "edge" | "container" | "k8s" | "cloud"
 
-// A module pronto ships for an isolate hatch to name (emit.cue's _stockIsolates).
-#StockIsolate: or([for s, _ in _stockIsolates {s}])
+// An isolate pronto publishes, as an isolate hatch's `uses` names it:
+// `pronto/<name>`, one of emit.cue's _publishedIsolates.
+#PublishedIsolate: or([for s, _ in _publishedIsolates {"pronto/\(s)"}])
 
 // A path relative to the app directory, resolved by derive and by the
 // terminal's module loader. No scheme and no `..`: the source is read from the
@@ -2153,13 +2154,14 @@ import (
 				entrypoint!: string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.(ts|js|mjs)$" & !~"(^|/)\\.\\.?(/|$)"
 				files:       [string, ...string] & [...(string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$" & !~"(^|/)\\.\\.?(/|$)")]
 				memory:      *128 | int & >=16 & <=128
-				// A stock isolate is one of pronto's own modules, which pronto writes
+				// A published isolate is a module pronto ships, which pronto writes
 				// beside the app's other generated files and names here
-				// ([[docs/isolate-hatches#Stock isolates]]).
-				stock?: #StockIsolate
-				if H.stock != _|_ {
-					entrypoint: ".pronto/isolates/\(H.stock)/main.ts"
-					files:      [for f, _ in _stockIsolates[H.stock] {".pronto/isolates/\(H.stock)/\(f)"}]
+				// ([[docs/isolate-hatches#Published isolates]]).
+				uses?: #PublishedIsolate
+				if H.uses != _|_ {
+					let N = strings.TrimPrefix(H.uses, "pronto/")
+					entrypoint: ".pronto/isolates/\(N)/main.ts"
+					files:      [for f, _ in _publishedIsolates[N] {".pronto/isolates/\(N)/\(f)"}]
 				}
 			}
 

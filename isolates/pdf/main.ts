@@ -1,5 +1,6 @@
-// pronto's stock pdf isolate (docs/isolate-hatches.md, Stock isolates): a
-// pdfmake document definition in, as the request's JSON body, its PDF out.
+// pronto's published pdf isolate, pronto/pdf (docs/isolate-hatches.md,
+// Published isolates): a pdfmake document definition in, as the request's JSON
+// body, its PDF out.
 // pdfmake renders as it does anywhere, in its own default font, Roboto, whose
 // faces its browser build carries as a virtual file system bundled here: a
 // Worker reads no file, so a font is code or it is nothing.

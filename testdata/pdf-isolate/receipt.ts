@@ -1,4 +1,4 @@
-// A document every release path renders through the stock pdf isolate: the
+// A document every release path renders through the published pdf isolate: the
 // same definition is the same bytes under Deno and on a Worker, its creation
 // date stated, as pdfkit otherwise dates it by the clock.
 export const receipt = {

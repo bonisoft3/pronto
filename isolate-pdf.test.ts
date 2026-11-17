@@ -1,4 +1,4 @@
-// pronto's stock pdf isolate (isolates/pdf, [[docs/isolate-hatches#Stock isolates]]),
+// pronto's published pdf isolate (isolates/pdf, [[docs/isolate-hatches#Published isolates]]),
 // built as every release builds it (mecha's #IsolateBuild): its module answers
 // a document definition with that document's PDF, and behind the host that
 // serves it outside Cloudflare (#IsolateHost) a document's size is bounded by
@@ -21,7 +21,7 @@ async function built(host: boolean): Promise<string> {
     stdout: "inherit",
     stderr: "inherit",
   }).output();
-  assert(build.success, "the stock pdf isolate does not build");
+  assert(build.success, "the published pdf isolate does not build");
   return out;
 }
 
@@ -36,7 +36,7 @@ const statement = (rows: number) => ({
   }],
 });
 
-Deno.test("the stock pdf isolate answers a document definition with its PDF", async () => {
+Deno.test("the published pdf isolate answers a document definition with its PDF", async () => {
   const out = await built(false);
   try {
     const { default: module } = await import(`file://${out}/entry.js`) as { default: { fetch(request: Request): Promise<Response> } };
@@ -72,7 +72,7 @@ Deno.test("the stock pdf isolate answers a document definition with its PDF", as
   }
 });
 
-Deno.test("behind the host, the stock pdf isolate's heap bounds the document", async () => {
+Deno.test("behind the host, the published pdf isolate's heap bounds the document", async () => {
   const out = await built(true);
   const port = 19000 + Math.floor(Math.random() * 1000);
   const host = new Deno.Command(Deno.execPath(), {

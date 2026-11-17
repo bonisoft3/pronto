@@ -50,10 +50,10 @@ Deno.test("an isolate's Worker runs under workerd, its WebAssembly a module", as
   }
 })
 
-// pronto's stock pdf isolate as its Worker, from the sources pronto writes
+// pronto's published pdf isolate as its Worker, from the sources pronto writes
 // into an app (isolates/pdf): the receipt it renders under Deno is the same
 // bytes here.
-Deno.test("the stock pdf isolate's Worker renders under workerd the bytes Deno renders", async () => {
+Deno.test("the published pdf isolate's Worker renders under workerd the bytes Deno renders", async () => {
   const out = await Deno.realPath(await Deno.makeTempDir())
   try {
     const [echo] = await clusterBridges(app)

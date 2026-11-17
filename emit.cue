@@ -48,11 +48,12 @@ _caddyfileAsset:   _ @embed(file="assets/Caddyfile", type=text)
 _cdcTypesAsset:    _ @embed(file="assets/cdc-types.blobl", type=text)
 _cdcCarriersAsset: _cdcTypesAsset
 
-// pronto's stock isolates, each a module of its own under isolates/<name>/,
-// which an isolate hatch names by `stock` and the emission writes into the app
-// under .pronto/isolates/<name>/, where the hatch's build reads it as it reads
-// any other ([[docs/isolate-hatches#Stock isolates]]).
-_stockIsolates: pdf: {
+// The isolates pronto publishes, each a module of its own under
+// isolates/<name>/, which an isolate hatch names by `uses: "pronto/<name>"` and
+// the emission writes into the app under .pronto/isolates/<name>/, where the
+// hatch's build reads it as it reads any other
+// ([[docs/isolate-hatches#Published isolates]]).
+_publishedIsolates: pdf: {
 	"main.ts":   {format: "js", text: _ @embed(file="isolates/pdf/main.ts", type=text)}
 	"deno.json": {format: "text", text: _ @embed(file="isolates/pdf/deno.json", type=text)}
 	"deno.lock": {format: "text", text: _ @embed(file="isolates/pdf/deno.lock", type=text)}
@@ -6003,8 +6004,10 @@ _pgrollDir: "services/database/pgroll"
 		if len([for _, h in E.code.capabilities.hatches if h.kind == "isolate" {h}]) > 0 {
 			".isolate/.gitignore": {format: "text", text: "*\n"}
 		}
-		for _, h in E.code.capabilities.hatches if h.kind == "isolate" if h.stock != _|_ for f, file in _stockIsolates[h.stock] {
-			".pronto/isolates/\(h.stock)/\(f)": file
+		for _, h in E.code.capabilities.hatches if h.kind == "isolate" if h.uses != _|_
+		let N = strings.TrimPrefix(h.uses, "pronto/")
+		for f, file in _publishedIsolates[N] {
+			".pronto/isolates/\(N)/\(f)": file
 		}
 		".pronto/development/shell.json": {
 			format: "json"
