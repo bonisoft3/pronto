@@ -20,6 +20,8 @@ const tunnel_gateway = "pronto-gateway"
 # and the loopback port it listens on, which #Environment.registry names.
 const node_registry = "registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e"
 const node_registry_port = 5000
+# The airlock's seal key and the previous one a rotation keeps.
+const seal_keys = [AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS]
 # What a registry is asked for a manifest: any of the four kinds a build pushes.
 const registry_accept = "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
 
@@ -1122,8 +1124,9 @@ export def check-backup-secrets [objects: list, namespace: string] {
 }
 
 # The airlock's secrets (airlock.secrets) are the operator's, in the app's namespace: without one the
-# airlock never starts, and the effects enqueued meanwhile wait unseen.
-export def check-airlock-secrets [objects: list, namespace: string] {
+# airlock never starts, and the effects enqueued meanwhile wait unseen. A seal key's value is read, to
+# refuse the repository's development key (`dev_key`, any spelling) before anything rolls.
+export def check-airlock-secrets [objects: list, namespace: string, --dev-key: string = ""] {
 	let refs = ($objects | where kind == "Deployment" and spec.template.metadata.labels."app.kubernetes.io/component"? == "airlock"
 		| each {|d| $d.spec.template.spec.containers.0.env } | flatten
 		| where {|e| $e.name != "PGPASSWORD" and $e.valueFrom?.secretKeyRef? != null }
@@ -1136,6 +1139,14 @@ export def check-airlock-secrets [objects: list, namespace: string] {
 		}
 		if $ref.key not-in ($got.stdout | lines) {
 			error make { msg: $"airlock.secrets: Secret ($ref.name) in ($namespace) needs ($ref.key), which an effect reads \(kubectl create secret generic ($ref.name) -n ($namespace) --from-file=($ref.key)=/dev/stdin\)" }
+		}
+		if $ref.key in $seal_keys and ($dev_key | is-not-empty) {
+			let held = (do { ^kubectl get secret $ref.name -n $namespace -o $"jsonpath={.data.($ref.key)}" } | complete)
+			if $held.exit_code != 0 { error make { msg: $"airlock.secrets: reading Secret ($ref.name) in ($namespace): ($held.stderr | str trim)" } }
+			let value = ($held.stdout | str trim | decode base64 | decode utf-8)
+			if (seal-key-bytes $value) == (seal-key-bytes $dev_key) {
+				error make { msg: $"($ref.key) in Secret ($ref.name) is the repository's development key, which only the local stack seals to: give this deployment a key of its own" }
+			}
 		}
 	}
 }
@@ -1313,10 +1324,26 @@ def reads-variable [text: string, k: string]: nothing -> bool {
 	($text | str replace -a '$$' '') =~ ('\$\{?' + $k + '([^A-Za-z0-9_]|$)')
 }
 
+# The repository's development seal key, which compose's airlock defaults AIRLOCK_SEAL_KEY to
+# (`${AIRLOCK_SEAL_KEY:-<key>}`), or "" where the project has none.
+export def airlock-dev-seal-key [raw: record]: nothing -> string {
+	let value = (env-entries ($raw.services.airlock? | default {}) | where key == AIRLOCK_SEAL_KEY | get -o 0.value | default "" | into string)
+	$value | parse --regex '^\$\{AIRLOCK_SEAL_KEY:-(?<key>[^}$]*)\}$' | get -o 0.key | default ""
+}
+
+# A seal key as the bytes it decodes to (hex), in either base64 alphabet, padded or not, wrapped
+# or not, so one spelling of the development key is every spelling; "" for an empty or invalid one.
+export def seal-key-bytes [key: string]: nothing -> string {
+	let s = ($key | str replace -a -r '[\s=]' '' | str replace -a '-' '+' | str replace -a '_' '/')
+	if ($s | is-empty) { return "" }
+	try { ($s + ('' | fill -c '=' -w ((4 - ($s | str length) mod 4) mod 4))) | decode base64 | encode hex } catch { "" }
+}
+
 # The variables compose requires of the airlock, each an effect's secret: `${K:?…}`, or
 # `${K:-simulator}` where a simulator stands in for the sink locally. Read from the project before
 # interpolation (`config --no-interpolate`), since a release takes each from a Secret, never from
-# the operator's environment. Any other variable the airlock reads from the environment fails it,
+# the operator's environment, and the airlock's seal keys (AIRLOCK_SEAL_KEY and the optional
+# AIRLOCK_SEAL_KEY_PREVIOUS, `${K:-…}` in compose). Any other variable the airlock reads from the environment fails it,
 # but those the release sets itself (DATABASE_URL, ORIGIN).
 export def airlock-secrets [raw: record]: nothing -> list<string> {
 	# Compose merges an env_file into the environment, so its values would reach the manifests as plain variables.
@@ -1326,8 +1353,11 @@ export def airlock-secrets [raw: record]: nothing -> list<string> {
 		}
 	}
 	let entries = (env-entries ($raw.services.airlock? | default {}))
-	let secret = {|e| $e.value != null and (($e.value | into string) starts-with ("${" + $e.key + ":?") or ($e.value | into string) == ("${" + $e.key + ":-simulator}")) }
-	let unknown = ($entries | where {|e| not (do $secret $e) and $e.key not-in ["DATABASE_URL" "ORIGIN"] and ($e.value == null or (($e.value | into string | str replace -a '$$' '') =~ '\$\{?[A-Za-z_]')) } | get key)
+	# The seal key and the previous one a rotation keeps are the airlock's own: compose's local stack
+	# defaults each (`${K:-…}`: the repository's development key, or empty), the release takes each
+	# from a Secret. AIRLOCK_SEAL_DEV says the local stack is one, and no release is.
+	let secret = {|e| $e.value != null and (($e.value | into string) starts-with ("${" + $e.key + ":?") or ($e.value | into string) == ("${" + $e.key + ":-simulator}") or ($e.key in $seal_keys and ($e.value | into string) =~ ('^\$\{' + $e.key + ':-[^}$]*\}$'))) }
+	let unknown = ($entries | where {|e| not (do $secret $e) and $e.key not-in ["DATABASE_URL" "ORIGIN" "AIRLOCK_SEAL_DEV"] and ($e.value == null or (($e.value | into string | str replace -a '$$' '') =~ '\$\{?[A-Za-z_]')) } | get key)
 	if ($unknown | is-not-empty) {
 		error make { msg: $"the airlock reads ($unknown | str join ', ') from the environment, which release@k8s neither takes from a Secret nor sets: an effect's secret is `${K:?…}` \(or `${K:-simulator}`\)" }
 	}
@@ -1452,10 +1482,12 @@ export def runtime-services [compose: record, --secrets: list<string> = [], --si
 			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
 		}
 		let own_secrets = if $name == "airlock" { $secrets } else { [] }
+		# The seal keys and AIRLOCK_SEAL_DEV are compose's local stack's: a release's key is a Secret's, never compose's default.
+		let airlock_own = if $name == "airlock" { [...$seal_keys AIRLOCK_SEAL_DEV] } else { [] }
 		# airlock-mesh's peers past its daprd are compose's: runtime.cue states this target's sinks.
 		let compose_peers = if $name == "airlock-mesh" { $vars | columns | where {|k| $k in [AIRLOCK_ORIGINS AIRLOCK_BRIDGES TSBIFROST_URL] or $k =~ '^BRIDGE_.*_URL$' } } else { [] }
 		$acc | insert $name {
-			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING ...$own_secrets ...$compose_peers)
+			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING ...$own_secrets ...$compose_peers ...$airlock_own)
 			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
 			serviceToken: ("SERVICE_JWT" in $vars)
 			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
@@ -1482,13 +1514,19 @@ export def release-plan [runtime: record, services: list<string>, blob_svcs: lis
 
 # What the compose project runs beside the cluster (runtime.cue), on every cluster but metal,
 # whose release names its services itself (App.services, App.blobs) and runs no other.
-export def release-runtime [app_dir: string, env_name: string]: nothing -> record {
+export def release-runtime [
+	app_dir: string
+	env_name: string
+	--named: list<string> = [] # the variables the release's airlock.secrets names
+]: nothing -> record {
 	if $env_name == "metal" or not ($app_dir | path join compose.yaml | path exists) { return {} }
 	let compose = (compose-config $app_dir --json)
 	let facts = ($app_dir | path join .pronto cluster.json)
 	if ("airlock" in $compose.services) and not ($facts | path exists) { error make { msg: $"($facts) is missing: generate the app before releasing it" } }
 	let sinks = if "airlock" in $compose.services { airlock-sinks (open $facts) } else { {} }
-	runtime-services $compose --secrets (airlock-secrets (compose-raw $app_dir)) --sinks $sinks
+	# The previous seal key is a rotation's: a Secret only where the release names one for it.
+	let secrets = (airlock-secrets (compose-raw $app_dir) | where {|k| $k != "AIRLOCK_SEAL_KEY_PREVIOUS" or $k in $named })
+	runtime-services $compose --secrets $secrets --sinks $sinks
 }
 
 export def render-manifests [
@@ -1503,7 +1541,8 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	let runtime = (release-runtime ($cue_path | path dirname) $env_name)
+	let named = (do { cue export --expression App.airlock.secrets --out json $cue_path ...(if ($data | is-not-empty) { [$data] } else { [] }) } | complete)
+	let runtime = (release-runtime ($cue_path | path dirname) $env_name --named (if $named.exit_code == 0 { $named.stdout | from json | columns } else { [] }))
 	let airlock = if "airlock" in $runtime { {airlock: {sinks: $facts.k8sSinks}} } else { {} }
 	{App: ({database: ({tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])} | merge (schema-facts $facts)), runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -2066,7 +2105,7 @@ export def main [
 	let deployments_yaml = (do $of_kind "Deployment")
 	let jobs_yaml = (do $of_kind "Job")
 	check-backup-secrets ($released | from yaml) $target_ns
-	check-airlock-secrets ($released | from yaml) $target_ns
+	check-airlock-secrets ($released | from yaml) $target_ns --dev-key (if "airlock" in $runtime { airlock-dev-seal-key (compose-raw $app_source_dir) } else { "" })
 	# A tenant's publisher may write some kinds and not others, and admission holds its hosts: the API
 	# server is asked first, so a refusal fails the release before it has changed anything.
 	if $is_tenant {
@@ -2133,7 +2172,7 @@ export def main [
 	mut trusted_changed = false
 	if $trusted != null {
 		kubectl wait --for=condition=Ready $"externalSecret/($workload_name)-auth-secrets" -n $target_ns --timeout=120s
-		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64)
+		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64 | decode utf-8)
 		let composed = (with-env {PGRST_JWT_SECRET: $secret, TRUSTED_JWKS: $trusted.jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
 		if $composed.exit_code != 0 { error make { msg: "crud's key set could not be composed from the cluster's secret and TRUSTED_JWKS" } }
 		let keys = ($composed.stdout | str trim)

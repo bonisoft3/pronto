@@ -46,6 +46,8 @@ use release.nu [
 	airlock-peers
 	airlock-peer-secrets
 	airlock-secrets
+	airlock-dev-seal-key
+	seal-key-bytes
 	airlock-stand-ins
 	airlock-shared-secrets
 	airlock-build-refusals
@@ -93,6 +95,7 @@ def run-tests [] {
 	test_release_plan
 	test_airlock_runtime
 	test_airlock_compose_reads
+	test_airlock_seal_key
 	test_airlock_in_cluster_sinks
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
@@ -2068,6 +2071,68 @@ esac
 	assert ((do $run absent) | str contains "needs SINK_TOKEN") (do $run absent)
 	let denied = (do $run denied)
 	assert (($denied | str contains "Forbidden") and not ($denied | str contains "needs")) $"another failure is itself: ($denied)"
+	rm -r $bin
+}
+
+def test_airlock_seal_key [] {
+	print "test the airlock's seal keys: Secrets in the release, the development key refused, none without secret fields..."
+	let dev = "REVWLUtFWS1GT1ItVEVTVFM"
+	let dir = ($fixtures_dir | path join effects-seal)
+	rm -rf $dir
+	cp -r ($fixtures_dir | path join effects) $dir
+	let compose = ($dir | path join compose.yaml)
+	let with_seal = (open --raw $compose | str replace "      MAIL_KEY: ${MAIL_KEY:-simulator}\n" $"      MAIL_KEY: ${MAIL_KEY:-simulator}\n      AIRLOCK_SEAL_DEV: local\n      AIRLOCK_SEAL_KEY: ${AIRLOCK_SEAL_KEY:-($dev)}\n      AIRLOCK_SEAL_KEY_PREVIOUS: ${AIRLOCK_SEAL_KEY_PREVIOUS:-}\n")
+	assert ($with_seal | str contains "AIRLOCK_SEAL_KEY_PREVIOUS") "the fixture takes the seal variables"
+	let plain = (open --raw $compose)
+	$with_seal | save -f $compose
+	let raw = (compose-raw $dir)
+	assert equal (airlock-secrets $raw | sort) [AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS MAIL_KEY PAGER_KEY SINK_TOKEN]
+	assert equal (airlock-dev-seal-key $raw) $dev
+	let all = {SINK_TOKEN: "effects-sinks", MAIL_KEY: "effects-mail", PAGER_KEY: "effects-pager", AIRLOCK_SEAL_KEY: "effects-seal"}
+	let data = (mktemp -t seal.XXXXXX.json | str trim)
+	let render = {|secrets|
+		{App: {airlock: {secrets: $secrets}, networkPolicy: {internet: "airlock"}}} | to json | save -f $data
+		with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { render-manifests ($dir | path join release.cue) gke --data $data | from yaml }
+	}
+	let airlock_env = {|objs| $objs | where kind == "Deployment" and metadata.name == "effects-airlock" | first | get spec.template.spec.containers.0.env }
+	# The current key from its Secret; the previous one, a rotation's, only where the release names it.
+	let vars = (do $airlock_env (do $render $all))
+	let key = ($vars | where name == AIRLOCK_SEAL_KEY | first)
+	assert ($key.value? == null) "the seal key has no value of its own"
+	assert equal $key.valueFrom.secretKeyRef {name: effects-seal, key: AIRLOCK_SEAL_KEY}
+	assert equal ($vars | where name in [AIRLOCK_SEAL_KEY_PREVIOUS AIRLOCK_SEAL_DEV] | length) 0 "no previous key unnamed, and no AIRLOCK_SEAL_DEV"
+	let rotated = (do $airlock_env (do $render ($all | insert AIRLOCK_SEAL_KEY_PREVIOUS "effects-seal-old")))
+	assert equal ($rotated | where name == AIRLOCK_SEAL_KEY_PREVIOUS | first | get valueFrom.secretKeyRef) {name: effects-seal-old, key: AIRLOCK_SEAL_KEY_PREVIOUS}
+	assert equal ($rotated | where name == AIRLOCK_SEAL_DEV | length) 0
+	let unplaced = (try { do $render ($all | reject AIRLOCK_SEAL_KEY); "" } catch {|e| $e.msg })
+	assert ($unplaced | str contains "AIRLOCK_SEAL_KEY") $"an unplaced seal key fails the release: ($unplaced)"
+	rm $data
+	# No secret field, no seal variables: the airlock's secrets are the effects' alone.
+	$plain | save -f $compose
+	assert equal (airlock-secrets (compose-raw $dir) | sort) [MAIL_KEY PAGER_KEY SINK_TOKEN]
+	assert equal (airlock-dev-seal-key (compose-raw $dir)) ""
+	rm -rf $dir
+	# The development key is refused in any spelling; another key, an unset previous one and an
+	# unnamed Secret all pass the check, which reads the key's value and prints none.
+	assert equal (seal-key-bytes $dev) (seal-key-bytes "REVWLUtFWS1GT1ItVEVTVFM=")
+	assert equal (seal-key-bytes "-_-_") (seal-key-bytes "+/+/")
+	let bin = (mktemp -d)
+	"#!/bin/sh
+case \"$*\" in
+  *secret?dev?*jsonpath*) printf %s \"$DEV_B64\" ;;
+  *jsonpath*) printf %s \"$OWN_B64\" ;;
+  *) printf 'AIRLOCK_SEAL_KEY\\n' ;;
+esac
+" | save -f ($bin | path join kubectl)
+	chmod +x ($bin | path join kubectl)
+	let deployment = {|name| [{kind: Deployment, spec: {template: {metadata: {labels: {"app.kubernetes.io/component": airlock}}, spec: {containers: [{env: [
+		{name: AIRLOCK_SEAL_KEY, valueFrom: {secretKeyRef: {name: $name, key: AIRLOCK_SEAL_KEY}}}
+	]}]}}}}] }
+	let run = {|name| with-env {PATH: ($env.PATH | prepend $bin), DEV_B64: ("REVWLUtFWS1GT1ItVEVTVFM=" | encode base64), OWN_B64: ("b3duLWtleS1vZi10aGUtZGVwbG95bWVudA==" | encode base64)} { try { check-airlock-secrets (do $deployment $name) effects --dev-key $dev; "" } catch {|e| $e.msg } } }
+	assert equal (do $run own) ""
+	let refused = (do $run dev)
+	assert ($refused | str contains "development key") $refused
+	assert not ($refused | str contains "REVWLUtFWS1GT1ItVEVTVFM") "the refusal prints no key"
 	rm -r $bin
 }
 

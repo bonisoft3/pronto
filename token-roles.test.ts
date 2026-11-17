@@ -23,11 +23,16 @@ Deno.test("a declared token role is a role a token names, which holds nothing bu
   ELSIF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = 'residual_bot' AND (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))) THEN
     RAISE EXCEPTION`);
   // PostgREST switches only to a role granted its login, and applies the
-  // bounds of one granted it.
-  assertEquals(roles.match(/^GRANT (.*) TO authenticator;$/m)?.[1], `anon, service, "residual_bot"`);
-  assertStringIncludes(roles, `ALTER ROLE "residual_bot" SET statement_timeout`);
+  // bounds of one granted it. The fork's 001 restates both idempotently: a
+  // loop granting each role (SET only, no INHERIT) and a row of the bounds'
+  // VALUES list per role.
+  assertStringIncludes(roles, `FOREACH r IN ARRAY ARRAY['anon', 'service', 'residual_bot'] LOOP`);
+  assertStringIncludes(roles, `EXECUTE format('GRANT %I TO authenticator WITH INHERIT FALSE, SET TRUE', r);`);
+  assertStringIncludes(roles, `('residual_bot', 'statement_timeout', '5s'),`);
+  assertStringIncludes(roles, `('residual_bot', 'lock_timeout', '2s'),`);
+  assertStringIncludes(roles, `('residual_bot', 'idle_in_transaction_session_timeout', '10s')`);
   // It bypasses nothing: no attribute but NOLOGIN, no grant of any kind.
-  assertEquals(/ALTER ROLE "residual_bot" (?!SET )/.test(roles), false);
+  assertEquals(/ALTER ROLE "residual_bot" /.test(roles), false);
   for (const [name, f] of Object.entries(files)) {
     if (!name.endsWith(".sql") || name.endsWith("001_roles.sql")) continue;
     assertEquals((f.text ?? JSON.stringify(f.data)).includes("residual_bot"), false, name);
@@ -51,7 +56,21 @@ Deno.test("a declared token role is a role a token names, which holds nothing bu
   // A name that is a keyword is a role all the same.
   const keyword = (await emitFiles(served(`{select: {note: "x"}}`)))["services/database/migrations/001_roles.sql"].text;
   assertStringIncludes(keyword, `CREATE ROLE "select" NOLOGIN;`);
-  assertStringIncludes(keyword, `ALTER ROLE "select" SET lock_timeout`);
+  assertStringIncludes(keyword, `('select', 'lock_timeout', '2s'),`);
+});
+
+Deno.test("the roles reconcile restates the floor and the list in the app's own schemas", async () => {
+  const program = served(residual, `["docker", "k8s"]`) + "\napp: meta: schemas: {app: \"shop\", floor: \"lists\", mecha: \"mlists\"}\n";
+  const reconciled = await cue(["export", "-", "-e", "_cluster.state.reconcile.roles", "--out", "text"], program);
+  if (!reconciled.success) throw new Error(reconciled.stderr);
+  const sql = reconciled.stdout;
+  // The floor is mecha's #Tenancy for these schemas, and the list is the configured one's.
+  assertStringIncludes(sql, "CREATE OR REPLACE FUNCTION lists.app_pre_request()");
+  assertStringIncludes(sql, "CREATE TABLE IF NOT EXISTS mlists.token_role");
+  assertStringIncludes(sql, "INSERT INTO mlists.token_role VALUES ('residual_bot') ON CONFLICT DO NOTHING;\nDELETE FROM mlists.token_role WHERE role_name NOT IN ('residual_bot');\n");
+  assertEquals(sql.includes("public.app_pre_request"), false);
+  assertEquals(/(?<![a-z_])mecha\.token_role/.test(sql), false);
+  assertEquals(/(?<![a-z_])public\.token_role/.test(sql), false);
 });
 
 Deno.test("crud verifies an issuer's token by the release's key set and for its own audience alone", async () => {

@@ -2081,13 +2081,16 @@ _sqlType: {
 // before it has neither.
 #tokenRolesSql: {
 	roles: [...string]
+	// The cluster's schemas: the floor and the list are restated in them, as
+	// 003's is, and the list is the configured mecha schema's.
+	schema: {app: string, floor: string, mecha: string}
 	let quoted = strings.Join([for r in roles {"'\(r)'"}], ", ")
-	out: mecha.#TenancySql + "\n" +
+	out: (mecha.#Tenancy & {"schema": schema}).out + "\n" +
 		"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
 		"GRANT \(strings.Join([for r in roles {"\"\(r)\""}], ", ")) TO authenticator;\n" +
 		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "") +
-		"INSERT INTO mecha.token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
-		"DELETE FROM mecha.token_role WHERE role_name NOT IN (\(quoted));\n"
+		"INSERT INTO \(schema.mecha).token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
+		"DELETE FROM \(schema.mecha).token_role WHERE role_name NOT IN (\(quoted));\n"
 }
 
 #publicUpdateSql: {
@@ -3550,7 +3553,7 @@ _pgrollDir: "services/database/pgroll"
 					public_access: strings.Join([for e in updateOnly {(#publicUpdateSql & {"e": e}).out}], "\n\n")
 				}
 				if D.code.state.tokenRoles != _|_ if len(D.code.state.tokenRoles) > 0 {
-					roles: (#tokenRolesSql & {roles: list.SortStrings([for n, _ in D.code.state.tokenRoles {n}])}).out
+					roles: (#tokenRolesSql & {schema: meta.schema, roles: list.SortStrings([for n, _ in D.code.state.tokenRoles {n}])}).out
 				}
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
@@ -3569,8 +3572,9 @@ _pgrollDir: "services/database/pgroll"
 			// them by default; a handler is its bundle, which derive writes from
 			// effects/<name>.js (effect-bundle.ts).
 			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
-				name:    n
-				handler: "services/airlock/effects/\(n).js"
+				name: n
+				// A read's answer is its request's, which has no handler to run.
+				if x.request == _|_ {handler: "services/airlock/effects/\(n).js"}
 				// The compose stack is the docker target's.
 				(#SinkAt & {sink: x.sink, target: "docker"}).out
 				if x.request != _|_ {read: true}
@@ -5078,7 +5082,13 @@ _pgrollDir: "services/database/pgroll"
 				// Each effect's sink on a Kubernetes release, which writes the
 				// airlock's daprd's endpoints and egress from them (null: none).
 				if E.code.state.effects != _|_ if len(E.code.state.effects) > 0 {
-					k8sSinks: {for n, x in E.code.state.effects {(n): (#SinkAt & {sink: x.sink, target: "k8s"}).out}}
+					// An origin named by a secret is the dispatcher's read on cloudflare (#NamedOrigin) and a
+					// target that declares k8s refuses it at vet; where k8s is not declared the sink is none
+					// here, so the release names the effect rather than the render failing on it.
+					k8sSinks: {for n, x in E.code.state.effects {
+						let at = (#SinkAt & {sink: x.sink, target: "k8s"}).out
+						(n): [if at != null if at.origin != _|_ if at.origin.secret != _|_ {null}, at][0]
+					}}
 				}
 				// The bridges a release lowers past the cluster: each container's
 				// port, release targets and the cluster target building its image,

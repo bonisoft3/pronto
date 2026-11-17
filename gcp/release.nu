@@ -616,6 +616,11 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		let set = ($own | get -o $n | default [])
 		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value | where {|e| $e.key not-in $set }
 			| reduce -f {} {|e, all| $all | insert $e.key ($peers | get $n | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
+		# A sidecar airlock would take compose's development seal key as its own: only the service's airlock
+		# has the key made and checked (has_seal), so one that reads secret fields states its key in GCP.sidecars.
+		if $n == "airlock" and ($compose_env | columns | any {|k| $k in [AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS AIRLOCK_SEAL_DEV] }) {
+			error make {msg: "release@gcp does not seal secret fields for an airlock run as a GCP.sidecars entry: its seal key would be compose's development key. Run the airlock as the service's own, or set AIRLOCK_SEAL_KEY in the sidecar's env"}
+		}
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }

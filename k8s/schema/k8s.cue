@@ -531,6 +531,19 @@ import (
 					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
 					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
 					  # the step is run again, up to three times.
+					  # The airlock's job key (mecha's job_key.sql, a step of its own that initdb
+					  # places only on a fresh volume) reaches a database built before it, ahead of
+					  # the replays: the machines' interpreters (010) and an app's own migrations
+					  # enqueue effect jobs through airlock.job_key, and the next effect-state write
+					  # would fail without it. Idempotent, and again once the airlock's step below
+					  # has made its schema, for a database that had none.
+					  jobkey() {
+					    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock_job_key.sql 2>/dev/null || true); do
+					      echo "initdb: applying $f"
+					      psql -v ON_ERROR_STOP=1 -Xq -f "/docker-entrypoint-initdb.d/$f"
+					    done
+					  }
+					  if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")" = t ]; then jobkey; fi
 					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null) $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
 					    f=/docker-entrypoint-initdb.d/$step
 					    if [ -f "$f" ]; then echo "initdb: replaying $step"
@@ -545,6 +558,7 @@ import (
 					      done
 					    fi
 					  done
+					  jobkey
 					  exit 0
 					fi
 					source /usr/local/bin/docker-entrypoint.sh

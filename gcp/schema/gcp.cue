@@ -737,6 +737,27 @@ import (
 	// and before the service rolls, as the k8s release's migrate Job: its image
 	// is the release's `schema`, migrate's with the database's initdb directory,
 	// so one job starts once, not twice.
+	// The token roles the program declares, beside the schema's own: the roles a
+	// release may name that an older database lacks. Made here, as 001_roles.sql
+	// makes them (emit.cue's #tokenRole, the same refusal of one that stands with
+	// more than a token role holds), ahead of the grant below and the replays,
+	// since migrate's reconcile restates them only after both.
+	let declaredRoles = [for r in R.database.tokenRoles if !list.Contains(["anon", "app_user", "service"], r) {r}]
+	let declaredRolesSql = strings.Join([for r in declaredRoles {
+		"""
+			DO $role$ BEGIN
+			  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+			    CREATE ROLE "\(r)" NOLOGIN;
+			  ELSIF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = '\(r)' AND (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))) THEN
+			    RAISE EXCEPTION 'role \(r) stands with more than a token role holds, which a token naming it would act with';
+			  END IF;
+			END $role$;
+			"""
+	}], "\n")
+	let declaredRolesStep = [if len(declaredRoles) > 0 {
+		"  # A token role the program declared after this database was built is made now, before the\n  # grant below and the replays, which may grant it something.\n  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'\n\(declaredRolesSql)\nSQL"
+	}, ""][0]
+
 	let initdbEnv = [
 		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
 		{name: "PGUSER", value: "postgres"},
@@ -784,6 +805,7 @@ import (
 							export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
+							\(declaredRolesStep)
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
 							  # entity's table and a new field's column, every policy, trigger and
 							  # publication, the status charts' triggers (010_machines), the mecha machines' code (found by its
@@ -791,6 +813,17 @@ import (
 							  # migrations, each idempotent, run again, keeping every row. Live traffic
 							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
 							  # SECURITY); being idempotent, the step is run again, up to three times.
+							  # The airlock's job key (mecha's job_key.sql, a step of its own that initdb
+							  # places only on a fresh volume) reaches a database built before it, ahead of
+							  # the replays: the machines' interpreters (010) and an app's own migrations
+							  # enqueue effect jobs through airlock.job_key, and the next effect-state write
+							  # would fail without it. Idempotent; a database with no airlock schema has no
+							  # effect state to enqueue from.
+							  for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock_job_key.sql 2>/dev/null || true); do
+							    if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")" = t ]; then echo "initdb: applying $f"
+							      psql -v ON_ERROR_STOP=1 -Xq -f "/docker-entrypoint-initdb.d/$f"
+							    fi
+							  done
 							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(R.database.replays, " ")); do
 							    f=/docker-entrypoint-initdb.d/$step
 							    if [ -f "$f" ]; then echo "initdb: replaying $step"

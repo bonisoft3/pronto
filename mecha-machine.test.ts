@@ -754,6 +754,11 @@ Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes 
   }
   assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: {origin: "https://b.example", service: {name: "ledger", namespace: "payments"}}, idempotent: true}`)), "names one of origin, bridge and service for target k8s");
   assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: service: {name: "Ledger.x", namespace: "payments"}, idempotent: true}`)), "name");
+  // A named origin is the edge's: a program declaring k8s is refused, with the reason, and one that
+  // does not leaves the effect no sink on k8s, which the release names before it renders anything.
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: {docker: origin: "https://a.example", k8s: origin: {secret: "VENDOR_URL"}}, idempotent: true}`).replace("targets: []", 'targets: ["k8s"]')), "names its origin by the secret VENDOR_URL, which only cloudflare reads: give target k8s an origin or a bridge");
+  const undeclared = await emitFiles(bridged("", `sink: {origin: "https://a.example", targets: {docker: origin: "https://a.example", k8s: origin: {secret: "VENDOR_URL"}}, idempotent: true}`));
+  assertEquals(JSON.parse(JSON.stringify(undeclared[".pronto/cluster.json"])).data.k8sSinks, { charge: null });
 });
 
 // Regression: the origin was compiled into effects.json, so one tree could not

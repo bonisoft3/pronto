@@ -149,7 +149,8 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     const mechaPublished = JSON.parse(await cue(repo, ["export", "./plugins/pronto/clusters:mecha", "-e", "published", "--out", "json"])) as Record<string, string>;
     assert(JSON.stringify(Object.keys(mechaPublished).sort()) === JSON.stringify([...mechaImages].sort()), `clusters/mecha.cue published keys (${Object.keys(mechaPublished).sort().join(",")}) do not cover #Images (${[...mechaImages].sort().join(",")})`);
     for (const [svc, ref] of Object.entries(mechaPublished)) {
-      assert(ref.startsWith(`bonitao/mecha-${svc}:${tools["github:bonisoft3/mecha"]}@sha256:`), `clusters/mecha.cue published.${svc} (${ref}) does not match mecha ${tools["github:bonisoft3/mecha"]}`);
+      // The upstream image (bonitao/) or the fork's (ghcr.io/bsoneca/), at a release or a fork's prerelease of one, by digest.
+      assert(new RegExp(`^(bonitao|ghcr\\.io/bsoneca)/mecha-${svc}:\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$`).test(ref), `clusters/mecha.cue published.${svc} (${ref}) is not an exact mecha image by digest`);
     }
     const omnishellRuntime = (await cue(repo, ["export", "./plugins/pronto/terminals:omnishell", "-e", "published.runtime", "--out", "text"])).trim();
     assert(omnishellRuntime.startsWith(`bonitao/omnishell:${tools["github:bonisoft3/omnishell"]}@sha256:`), `terminals/omnishell.cue published.runtime (${omnishellRuntime}) does not match omnishell ${tools["github:bonisoft3/omnishell"]}`);

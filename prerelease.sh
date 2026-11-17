@@ -56,6 +56,12 @@ def edit(p, f):
     s = open(p).read(); t = f(s); assert t != s, p; open(p, 'w').write(t)
 for dep, v in (('mecha', mecha_v), ('omnishell', omnishell_v)):
     edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/' + dep + r'@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{v}"', s))
+# The adapters pin the runtimes their toolchains name (clusters/mecha.cue, terminals/omnishell.cue: `#Version`),
+# which an app's .mise.toml gets: the prerelease's own, so an app bootstrapped from it runs the fork's mecha and omnishell.
+def pin(p, v):
+    s = open(p).read(); t, n = re.subn(r'^#Version: "[^"]+"$', f'#Version: "{v}"', s, flags=re.M); assert n == 1, p; open(p, 'w').write(t)
+pin('clusters/mecha.cue', mecha_v)
+pin('terminals/omnishell.cue', omnishell_v)
 edit('distribution/config.cue', lambda s: re.sub(r'#Version:(\s+)"([^"]+)"', lambda m: f'#Version:{m.group(1)}"{pronto_v}" // was "{m.group(2)}"', s, count=1))
 registry = 'github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/omnishell=ghcr.io/bsoneca/cue-modules,registry.cue.works'
 edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh), a default that an app sets again.\n\t\t// Open (...), so an app may still set another mise env var beside it.\n\t\tenv: {{CUE_REGISTRY: *"{registry}" | string, ...}}\n', 1))

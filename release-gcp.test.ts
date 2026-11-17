@@ -184,6 +184,32 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
+Deno.test("a database built before the airlock's job key gets it, ahead of the replays", async () => {
+  const sql = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  // initdb places 013_airlock_job_key.sql on a fresh volume only; the interpreters and an app's
+  // migrations enqueue through airlock.job_key, which the next effect-state write needs.
+  const key = sql.indexOf("ls [0-7][0-9][0-9]_airlock_job_key.sql");
+  assert(key > 0, sql);
+  assertStringIncludes(sql, `psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL"`);
+  assert(key < sql.indexOf("for step in 005_create_tables.sql"), "the job key goes in before the replays");
+  assert(key > sql.indexOf('echo "initdb: already built"'), "an already built database's branch");
+  assert(key < sql.indexOf("else\n  source /usr/local/bin/docker-entrypoint.sh"), "not the fresh build's, which initdb's own directory runs");
+});
+
+Deno.test("a token role added to a built database is made before the grant and the replays", async () => {
+  const job = async (roles: string) => (await built(release().replace('["anon", "app_user", "service"]', roles), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  const sql = await job('["anon", "app_user", "service", "residual_bot"]');
+  assertStringIncludes(sql, `CREATE ROLE "residual_bot" NOLOGIN;`);
+  assertStringIncludes(sql, "RAISE EXCEPTION 'role residual_bot stands with more than a token role holds");
+  const made = sql.indexOf(`CREATE ROLE "residual_bot" NOLOGIN;`);
+  assert(made > sql.indexOf('echo "initdb: already built"'));
+  assert(made < sql.indexOf("for step in 005_create_tables.sql"), "before the replays");
+  assert(made < sql.indexOf('GRANT anon, app_user, service, residual_bot TO postgres'), "before the grant");
+  assertStringIncludes(sql, 'GRANT anon, app_user, service, residual_bot TO postgres WITH INHERIT FALSE, SET TRUE');
+  // The schema's own roles are never remade, and an app declaring none gets no step.
+  assertEquals((await job('["anon", "app_user", "service"]')).includes("CREATE ROLE"), false);
+});
+
 Deno.test("a preview's initdb applies the tests' rows, and a release's never does", async () => {
   const run = async (extra: string) => {
     const r = await built(release(extra), "job");
