@@ -25,9 +25,10 @@ async function run(cmd: string, args: string[], stdin?: string) {
 const DRIVER = `
   import pg from "pg";
   import { deliverRead, performRead, pruneJournal } from "${new URL("airlock.ts", AIRLOCK).href}";
-  import { parseReads } from "${new URL("read.ts", AIRLOCK).href}";
+  import { parseReads, READ_JOURNAL_SQL } from "${new URL("read.ts", AIRLOCK).href}";
   const [connectionString, mesh, manifest, replay, steps] = Deno.args;
   const db = new pg.Pool({ connectionString, max: 2 });
+  await db.query(READ_JOURNAL_SQL);
   const a = { db, reads: parseReads(manifest), headers: {}, mesh, replay: replay === "replay" };
   const out = [];
   for (const s of JSON.parse(steps)) {
