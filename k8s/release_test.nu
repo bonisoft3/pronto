@@ -209,6 +209,10 @@ def test_schema_jobs [] {
 	assert ($yaml | str contains "name: sample-initdb")
 	assert ($yaml | str contains "image: localhost:5001/sample-database:latest")
 	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/*")
+	# initdb reloads PostgREST's schema cache itself on both branches (replay and fresh build): an app with no migrate Job otherwise serves PGRST204 for a new column.
+	let initdb = ($yaml | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first | get spec.template.spec.containers.0.command.2)
+	assert equal ($initdb | split row "NOTIFY pgrst, 'reload schema'" | length) 3
+	assert ($initdb | str contains "  done\n  # PostgREST reloads its schema cache only on this; an app with no migrate Job has no other sender.\n  psql -XqAc \"NOTIFY pgrst, 'reload schema'\"\n  exit 0")
 	assert ($yaml | str contains "name: sample-migrate")
 	assert ($yaml | str contains "image: localhost:5001/sample-migrate:latest")
 	assert ($yaml | str contains "value: schedule")

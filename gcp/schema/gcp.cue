@@ -637,6 +637,8 @@ import (
 							  docker_process_init_files /docker-entrypoint-initdb.d/*
 							  psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
 							fi
+							# PostgREST reloads its schema cache only on this; an app with no migrate service has no other sender.
+							psql -XqAc "NOTIFY pgrst, 'reload schema'"
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"

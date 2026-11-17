@@ -94,6 +94,9 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   // refused seat, found in production), and so does a new entity's table.
   assertStringIncludes(c.command[2], `for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do`);
   assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
+  // A release that only replays (a new column) leaves PostgREST's schema cache stale (PGRST204) unless initdb itself notifies, on both branches; an app with no migrate service has no other sender.
+  assertStringIncludes(c.command[2], `psql -XqAc "NOTIFY pgrst, 'reload schema'"`);
+  assert(c.command[2].indexOf("NOTIFY pgrst") > c.command[2].indexOf("\nfi\n"), "the notice follows both branches");
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");

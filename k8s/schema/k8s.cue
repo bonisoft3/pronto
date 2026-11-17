@@ -238,12 +238,15 @@ import (
 					  for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do
 					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
 					  done
+					  # PostgREST reloads its schema cache only on this; an app with no migrate Job has no other sender.
+					  psql -XqAc "NOTIFY pgrst, 'reload schema'"
 					  exit 0
 					fi
 					source /usr/local/bin/docker-entrypoint.sh
 					docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
 					docker_process_init_files /docker-entrypoint-initdb.d/*
 					psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
+					psql -XqAc "NOTIFY pgrst, 'reload schema'"
 					"""]
 			}).out
 		},
