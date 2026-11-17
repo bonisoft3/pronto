@@ -33,7 +33,7 @@ Darwin) cache=$HOME/Library/Caches ;;
 esac
 mise=${SAYT_MISE_BIN:-$cache/sayt/mise-v2026.8.11/mise}
 crane() { "$mise" exec 'github:google/go-containerregistry[bin=crane]@v0.20.2' -- crane "$@"; }
-cue() { "$mise" exec 'github:cue-lang/cue@0.16.1' -- cue "$@"; }
+cue() { "$mise" exec 'github:cue-lang/cue@0.18.0-rc.4' -- cue "$@"; }
 
 # A version once published never changes (but for --runtime-only, which keeps its module).
 if ! $runtime_only && crane digest "$MODULE:v$PRONTO_V" >/dev/null 2>&1; then echo "$MODULE:v$PRONTO_V is already published" >&2; exit 1; fi

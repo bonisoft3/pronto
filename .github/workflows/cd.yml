@@ -37,7 +37,7 @@ jobs:
       - name: Set up CUE
         uses: cue-lang/setup-cue@v1.0.1
         with:
-          version: 'v0.16.1'
+          version: 'v0.18.0-rc.4'
 
       # OIDC login to registry.cue.works — no token, no secret. The identity is
       # this workflow, which is what the cue.dev trust entry names.
