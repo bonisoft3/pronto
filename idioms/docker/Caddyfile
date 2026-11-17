@@ -2,6 +2,18 @@
 {
   admin off
   auto_https disable_redirects
+  # The client's address, where the door is reached through a proxy of the cluster's own (a private
+  # address: the gateway, cloudflared, a port-forward): Cloudflare's Cf-Connecting-Ip, else the
+  # forwarded chain's nearest address no such proxy wrote (strict). Electric's placement hashes it
+  # (PRONTO-624, PRONTO-628). Strictness guards the chain only: Cf-Connecting-Ip is as true as the
+  # ingress makes it (behind the tunnel Cloudflare writes it; on a hostPort ingress a client can),
+  # and a pod on a private address counts as a proxy, so the address places a browser and names it
+  # in the log, and decides nothing else. (app) strips the chain before any upstream.
+  servers {
+    trusted_proxies static private_ranges
+    trusted_proxies_strict
+    client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+  }
 }
 (bounded-crud) {
   transport http {
@@ -37,7 +49,15 @@
   dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {
     refresh 5s
   }
-  lb_policy cookie pronto_electric {$ELECTRIC_SECRET}
+  # A browser with no cookie yet (its page's first requests, sent together) is placed by who it is,
+  # not at random: by its client address, which the door reads through the cluster's own proxies
+  # (the global `servers` options: Cloudflare's, else the gateway's forwarded one, else its own).
+  # Placed at random, each shape of one page could start on another Electric, every long-poll after
+  # it answered 409 until the cookie caught up: over HTTP/1.1's six connections that outlasted a
+  # sign-up (the rc's kill rehearsal, PRONTO-624; behind a hostPort ingress, PRONTO-628).
+  lb_policy cookie pronto_electric {$ELECTRIC_SECRET} {
+    fallback client_ip_hash
+  }
   lb_try_duration 5s
   fail_duration 30s
 }
@@ -223,6 +243,13 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
+  # The forwarded chain the door read its client from is not passed on: each upstream is sent the
+  # door's peer, Host and scheme, as before the door trusted the cluster's proxies, so a player's
+  # address never leaves in it and no client-written X-Forwarded-Host or -Proto reaches one, nor
+  # changes the Electric cookie's attributes (PRONTO-628).
+  request_header -X-Forwarded-For
+  request_header -X-Forwarded-Host
+  request_header -X-Forwarded-Proto
   @terminal not path /docs/*
   header @terminal Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' {$PRONTO_RELEASE_SCRIPTS} 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default"
   @ladder path /docs/*
