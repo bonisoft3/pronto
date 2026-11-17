@@ -841,6 +841,10 @@ What bit on a real instance:
   raising `GCP.sqlGeneration` starts it on a new, empty instance
   (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
   untouched, until its owner deletes it.
+- **Every schema job is followed by a fresh service revision**, even when its
+  images and configuration are unchanged. PostgREST starts after migrations
+  finish and its `/ready` startup probe checks the new schema cache. The
+  release waits for that revision; it does not rely on a reload notification.
 - **The smallest tier admits about 25 connections**, so the instance is raised
   to 50. Crud's pool is capped at 5; Electric defaults to 5 and can be set with
   `GCP.electric.pool`. Its CPU and memory use `GCP.electric.cpu` (millicpu)
@@ -1195,6 +1199,10 @@ upgrade and the bridges named for k8s
   sink its endpoint on k8s names, inside the same wall; its journal is
   created by the ledger's upgrade below, on a fresh database and an older one
   alike.
+- **CRUD rolls after all schema Jobs complete**, even when its image and
+  configuration are unchanged. The release waits for the fresh Deployment
+  to pass PostgREST's `/ready` probe, which checks its connection and schema
+  cache. A failed rollout fails the release.
 - **The ledger's upgrade is a Job** on its compose image, after initdb and
   before migrate as compose orders them. A database built before the program
   declared its first effect has no queue or ledger, which only a fresh

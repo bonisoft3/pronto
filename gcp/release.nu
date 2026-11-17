@@ -2,6 +2,7 @@
 # otherwise they run Cloud Run beside Cloud SQL.
 
 use ../k8s/release.nu [resolve-app]
+use ../release-schema.nu [fresh-schema-runtime]
 use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
 use ../k8s/release.nu
@@ -477,6 +478,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# The migrate job an earlier release ran apart, which this one's job does.
 	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }
 	print $"gcp: (stamp) deploying ($plan.service)"
+	fresh-schema-runtime $plan.serviceYaml | save -f dist/gcp/service.yaml
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
 	if ($plan.iap? | default false) {
 		# Behind Identity-Aware Proxy only IAP's own agent invokes the service, and

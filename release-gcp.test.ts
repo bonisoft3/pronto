@@ -50,6 +50,8 @@ Deno.test("the door dials each upstream at its own port in the shared instance",
   // Cloud Run probes a container at the instance's address, not loopback: a
   // crud bound to 127.0.0.1 never answered /ready (found on a real revision).
   assertEquals(crud.env.find((e: { name: string }) => e.name === "PGRST_SERVER_HOST").value, "*");
+  // Fresh revisions must load their schema cache before Cloud Run admits them.
+  assertEquals(crud.startupProbe.httpGet.path, "/ready");
   assertEquals(env.ORIGIN, "https://bonkchess.com");
 });
 

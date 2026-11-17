@@ -6,6 +6,7 @@ const k8s_dir = path self .
 const fixtures_dir = path self testdata
 
 use std/assert
+use ../release-schema.nu [fresh-schema-runtime]
 
 use release.nu [
 	OPERATORS
@@ -401,6 +402,8 @@ def test_pods_hand_over [] {
 	print "test a replaced pod keeps serving while the mesh learns of its successor..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let docs = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment")
+	let crud = (fresh-schema-runtime ($docs | where metadata.name == sample-crud | first | to yaml) | from yaml)
+	assert equal ($crud.spec.template.spec.containers | where name == crud | first | get readinessProbe.httpGet.path) "/ready"
 	for c in ["crud" "electric" "auth" "caddy" "render"] {
 		let d = ($docs | where metadata.name == $"sample-($c)" | first)
 		assert equal ($d.spec.template.spec.containers | where name == $c | first | get lifecycle.preStop.sleep.seconds) 15 $"($c) pauses before it stops"

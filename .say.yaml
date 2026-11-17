@@ -76,6 +76,7 @@ say:
       k8s:
         priority: -1
         cmds:
+          - do: "nu release-schema_test.nu"
           - do: "nu k8s/release_test.nu"
       # The identity broker and identity.#Signin (docs/identity.md). The front
       # runs against a real Hydra, which mise fetches here and no consumer's

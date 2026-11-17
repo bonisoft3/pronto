@@ -9,6 +9,8 @@
 # sit beside it wherever pronto is installed, monorepo or mirror.
 const k8s_dir = path self .
 
+use ../release-schema.nu [fresh-schema-runtime]
+
 export const OPERATORS = [
 	{
 		name: "gateway-api-crds"
@@ -1156,23 +1158,20 @@ export def main [
 
 	# crud's key set: the stack's own secret beside the issuer's public keys,
 	# composed here because PostgREST fetches no JWKS and its image has no shell.
-	# A key set that changed under an unchanged issuer, the stack's own secret
-	# rotated, rolls crud below, since its digest names the issuer's keys alone.
-	let trusted_changed = if $trusted == null { false } else {
+	# The schema rollout below also picks up a rotated stack secret.
+	if $trusted != null {
 		kubectl wait --for=condition=Ready $"externalSecret/($workload_name)-auth-secrets" -n $target_ns --timeout=120s
 		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64)
 		let composed = (with-env {PGRST_JWT_SECRET: $secret, TRUSTED_JWKS: $trusted.jwks} { deno run --no-config --allow-env ($k8s_dir | path join .. trusted-keys.ts) | complete })
 		if $composed.exit_code != 0 { error make { msg: "crud's key set could not be composed from the cluster's secret and TRUSTED_JWKS" } }
 		let keys = ($composed.stdout | str trim)
-		let held = (kubectl get secret $"($workload_name)-trusted-keys" -n $target_ns -o json | complete)
-		let changed = ($held.exit_code == 0) and (($held.stdout | from json | get -o data.PGRST_JWKS | default "" | decode base64 | decode utf-8) != $keys)
 		{apiVersion: "v1", kind: "Secret", metadata: {name: $"($workload_name)-trusted-keys", namespace: $target_ns}, data: {PGRST_JWKS: ($keys | encode base64)}} | to json | kubectl apply --server-side --field-manager=pronto-runtime -f -
-		$changed
 	}
 
-	# A changed image digest rolls its deployment; an unchanged one has nothing
-	# to roll. The airlock's own go in the order it goes out through them: the
-	# bridges, then the daprd, whose endpoints name them, then the airlock, so
+	# CRUD rolls after the schema jobs even with an unchanged image; the other
+	# deployments roll when their templates change. The airlock's own go in
+	# the order it goes out through them: the bridges, then the daprd, whose
+	# endpoints name them, then the airlock, so
 	# neither the airlock that runs nor its successor spends an effect's
 	# attempts on a call nothing answers yet.
 	let named = {|name| $deployments_yaml | where {|d| $d =~ $"\(?m\)^  name: ($app_info.name)-($name)\\s*$" } }
@@ -1191,8 +1190,9 @@ export def main [
 			let image = ($airlock_yaml | first | from yaml | get spec.template.spec.containers.0)
 			verify-wall $app_info.name $target_ns $bridge_ports --before --image $image --own $own_policies --late=($target_env.policiesLate? | default false)
 		}
-		$deployments_yaml | where {|d| $d not-in $mesh_yaml and $d not-in $airlock_yaml } | str join "\n---\n" | kubectl-ok apply -f -
-		if $trusted_changed { kubectl-ok rollout restart $"deployment/($app_info.name)-crud" -n $target_ns }
+		$deployments_yaml | where {|d| $d not-in $mesh_yaml and $d not-in $airlock_yaml }
+			| each {|d| if ($d | from yaml | get metadata.name) == $"($app_info.name)-crud" { fresh-schema-runtime $d } else { $d } }
+			| str join "\n---\n" | kubectl-ok apply -f -
 		for name in $runtime_names {
 			kubectl-ok rollout status $"deployment/($app_info.name)-($name)" -n $target_ns --timeout=900s
 		}
@@ -1243,7 +1243,7 @@ export def main [
 	let components = ["crud" "electric" "auth" "caddy"] | append ($runtime_names | where {|s| $s in ["ticker" "rclone-s3" "imgproxy"] }) | append (if $has_render { ["render"] } else { [] })
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
-		kubectl rollout status $d -n $target_ns --timeout=180s
+		kubectl-ok rollout status $d -n $target_ns --timeout=180s
 	}
 
 	# The mesh is intrinsic to a k8s release: a pod the injector let through bare is a failed release.
