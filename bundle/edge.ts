@@ -37,7 +37,7 @@ import { writeEdgeCompute } from './edge-compute.ts'
 import { writeEdgeReader } from './edge-reader.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
 import { buildPglite } from './edge-pglite.ts'
-import { signInVars } from './edge-signin.ts'
+import { isLocalBroker, isLocalBrokerInternal, signInVars } from './edge-signin.ts'
 import { renderEffects } from './edge-effects.ts'
 import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
@@ -171,9 +171,10 @@ const blobVars: Record<string, string> = blobs ? {
 // the local broker signs in, once released, through its releaseIssuer, which
 // the cluster also reaches it by, as gcp/release.nu and k8s/release.nu read it.
 const releasedSignIn = Object.fromEntries(Object.entries(signIn).map(([p, cfg]) => {
-  const releaseIssuer = cfg.issuer === 'http://localhost:28443' ? providerRelease[p]?.releaseIssuer : undefined
+  // The local broker's issuer: a loopback port, one per app (identity/signin.cue's #LocalPort).
+  const releaseIssuer = isLocalBroker(cfg.issuer) ? providerRelease[p]?.releaseIssuer : undefined
   if (!releaseIssuer) return [p, cfg]
-  return [p, { ...cfg, issuer: releaseIssuer, ...(cfg.internal === 'http://identity:28443/' ? { internal: releaseIssuer } : {}) }]
+  return [p, { ...cfg, issuer: releaseIssuer, ...(isLocalBrokerInternal(cfg.internal) ? { internal: releaseIssuer } : {}) }]
 }))
 let authVars: Record<string, string>
 try { authVars = signInVars(releasedSignIn, (name) => Deno.env.get(name)) }

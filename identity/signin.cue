@@ -23,6 +23,9 @@
 package identity
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
 	"strings"
 
 	bayt "github.com/bonisoft3/bayt/core:bayt"
@@ -36,11 +39,18 @@ runtime:    "0.1.0"
 frontImage: *"denoland/deno:distroless-2.5.0@sha256:5c4530d4babe37ded3566803e9498e2b5d643b915cce701d8b7b82f87a86629e" | string
 hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
 
-// The broker a local launch runs, whose issuer an app names by default.
-localBroker: "http://localhost:28443"
+// The port of the broker a local launch runs, which is its issuer's: one per
+// app, hashed from its name as bayt hashes a launch's other ports (and as
+// pronto-identity's identity/host.cue does), so two apps' launches never share
+// it. A literal, since mecha's auth service takes the issuer as one.
+#LocalPort: {
+	name: string
+	out:  10000 + mod(strconv.ParseInt(strings.SliceRunes(hex.Encode(sha256.Sum256("pronto-identity/\(name)")), 0, 8), 16, 64), 22768)
+}
 // The variable that publishes the local broker's port. A capability's issuer
-// is literal, so the port must stay the one localBroker spells: host
-// integrate, which reassigns published ports, leaves this one alone.
+// is literal, so the port must stay the one the app's local broker spells
+// (#LocalPort): host integrate, which reassigns published ports, leaves this
+// one alone.
 issuerPortEnv: "IDENTITY_HTTP_PORT"
 
 #Signin: {
@@ -48,20 +58,26 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 	signin: {
 		// The broker as readers reach it, which is also its issuer: the
 		// operator's, so an application names nothing.
-		broker: *localBroker | #Url
+		broker: *S._localBroker | #Url
 		// Production broker issuer for release targets when `broker` stays
-		// `localBroker` so local `launch` and `integrate` still run Hydra.
+		// the app's local broker (`_localBroker`, on its own port) so local `launch` and
+		// `integrate` still run Hydra.
 		releaseBroker?: #Url
 		// The broker as the cluster reaches it: the local broker's service
-		// (below) by its name in compose, overridden on the host projection
-		// via auth's process-compose.env.
-		brokerInternal: *[if S._local {"http://identity:28443/"}, broker][0] | #Url | =~"^https?://[A-Za-z0-9.-]+(:[0-9]+)?/$"
+		// (below) by its name in compose, which the host projection reads as
+		// loopback. The slash ends the port where bayt's rewrite looks for an
+		// end (the auth service drops it): inside a `${VAR:-…}` default, `}`
+		// would follow.
+		brokerInternal: *[if S._local {"http://identity:\(S._port)/"}, broker][0] | #Url | =~"^https?://[A-Za-z0-9.-]+(:[0-9]+)?/$"
 		// The providers the app offers, each one the broker offers.
 		providers: *["google"] | [string & =~"^[a-z][a-z0-9]*$", ...string & =~"^[a-z][a-z0-9]*$"]
 	}
 
+	// The broker a local launch runs, whose issuer the app names by default.
+	_port:        (#LocalPort & {name: S.code.meta.name}).out
+	_localBroker: "http://localhost:\(S._port)"
 	// An operator's broker elsewhere is that operator's to run.
-	_local: S.signin.broker == localBroker
+	_local: S.signin.broker == S._localBroker
 
 	// Sign-in through the broker is the auth plane's own: there is none
 	// without it.
@@ -138,8 +154,9 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 						cmd: builtin: null
 						activate:    ""
 						healthcheck: {port: 28453, path: "/health/ready"}
-						// Fixed on the host as in a container: the front reaches them so.
-						expose: {public: port: 28453, admin: port: 28455}
+						// Per app on the host, each moved by its variable, as every
+						// other port of a launch: the front names them as its peer's.
+						expose: {public: {port: 28453, env: "SERVE_PUBLIC_PORT"}, admin: {port: 28455, env: "SERVE_ADMIN_PORT"}}
 						"process-compose": activate: "mise x --"
 						entrypoint: {
 							do:         _hydraCmd
@@ -166,8 +183,6 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 							URLS_SELF_ISSUER:                        S.signin.broker
 							URLS_LOGIN:                              "\(S.signin.broker)/login"
 							URLS_CONSENT:                            "\(S.signin.broker)/consent"
-							SERVE_PUBLIC_PORT:                       "28453"
-							SERVE_ADMIN_PORT:                        "28455"
 							OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
 							TTL_ID_TOKEN:                            "5m"
 						}
@@ -175,11 +190,11 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 					identity: bayt.healthcheck.http & {
 						cmd: builtin: null
 						activate:    ""
-						healthcheck: {port: 28443, path: "/health"}
+						healthcheck: {port: S._port, path: "/health"}
 						// The broker's issuer, which the browser and Google's redirect name:
 						// published by a person's launch alone, so concurrent integrate
 						// stacks share no host port; see issuerPortEnv.
-						expose: http: {port: 28443, host: 28443, publish: environment: issuerPortEnv}
+						expose: http: {port: S._port, host: S._port, publish: environment: issuerPortEnv}
 						"process-compose": activate: "mise x --"
 						entrypoint: {
 							do:         _frontCmd
@@ -228,7 +243,7 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 								GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
 								HYDRA_PUBLIC:         "http://identity-hydra:28453"
 								HYDRA_ADMIN:          "http://identity-hydra:28455"
-								PORT:                 "28443"
+								PORT:                 "\(S._port)"
 							}
 						}
 					}

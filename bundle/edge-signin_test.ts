@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { releasedIssuers, signInSecrets, signInVars } from './edge-signin.ts'
+import { isLocalBroker, isLocalBrokerInternal, releasedIssuers, signInSecrets, signInVars } from './edge-signin.ts'
 
 const env = (values: Record<string, string>) => (name: string) => values[name]
 
@@ -46,4 +46,15 @@ Deno.test("a release goes out only through an issuer a reader reaches: the local
   for (const local of ['http://localhost:28443', 'https://localhost:28443', 'http://127.0.0.1:28443', 'https://id.localhost', 'http://id.example.com']) {
     assert.throws(() => releasedIssuers(vars(local)), /OIDC_GOOGLE_ISSUER is .* a local broker/, local)
   }
+})
+
+Deno.test("an app's local broker is a loopback port of its own, not a fixed one", () => {
+  for (const port of ['28443', '24681', '10000']) {
+    assert.equal(isLocalBroker(`http://localhost:${port}`), true, port)
+    assert.equal(isLocalBrokerInternal(`http://identity:${port}/`), true, port)
+  }
+  for (const other of ['https://id.example.com', 'https://localhost:24681', 'http://localhost', 'http://localhost:24681/', undefined]) {
+    assert.equal(isLocalBroker(other), false, String(other))
+  }
+  assert.equal(isLocalBrokerInternal('http://identity:24681'), false)
 })

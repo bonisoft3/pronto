@@ -1690,8 +1690,8 @@ export def auth-provider-environment [environment: record, release_providers: re
 		let upper = ($it.name | str uppercase)
 		let ik = $"OIDC_($upper)_ISSUER"
 		let nk = $"OIDC_($upper)_INTERNAL"
-		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
-		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
+		let acc = if ($acc | get -o $ik | default "") =~ '^http://localhost:[0-9]+$' { $acc | upsert $ik $issuer } else { $acc }
+		if ($acc | get -o $nk | default "") =~ '^http://identity:[0-9]+/$' { $acc | upsert $nk $issuer } else { $acc }
 	})
 	let entries = ($merged | transpose key value | where {|e| $e.key starts-with "OIDC_" })
 	let secrets = ($entries | where {|e| $e.key ends-with "_CLIENT_SECRET" and $e.value != "" }
