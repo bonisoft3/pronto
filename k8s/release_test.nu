@@ -40,6 +40,7 @@ def run-tests [] {
 	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
+	test_crud_lives_on_its_own
 	test_render_manifests_eks
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -248,6 +249,16 @@ def test_read_environment [] {
 	assert equal (read-environment "kind" | get registry) "localhost:5001"
 	assert equal (read-environment "eks" | get platform) "linux/amd64"
 	assert equal (read-environment "aks" | get platform) "linux/amd64"
+}
+
+def test_crud_lives_on_its_own [] {
+	print "test crud is live and ready on PostgREST's own /live, and starts on /ready..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let crud = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers | where name == "crud" | first)
+	# /ready fails while the database is away: liveness on it restarts crud, readiness on it takes crud out of its Service.
+	assert equal $crud.livenessProbe.httpGet.path "/live"
+	assert equal $crud.readinessProbe.httpGet.path "/live"
+	assert equal $crud.startupProbe.httpGet.path "/ready"
 }
 
 def test_render_manifests_kind [] {
