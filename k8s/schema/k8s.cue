@@ -130,27 +130,29 @@ import (
 				// and the one auth and the schema Jobs connect as.
 				enableSuperuserAccess: true
 				superuserSecret: name: "\(release.name)-db-postgres"
-				managed: roles: [{
-					name:        "electric"
-					ensure:      "present"
-					login:       true
-					replication: true
-					bypassrls:   true
-					passwordSecret: name: "\(release.name)-electric-db"
-				}, {
-					// PostgREST's login. The operator revokes any membership this
-					// list leaves out, so it names every role a token can: the
-					// schema's, which the schema alone creates, 001_roles.sql on a
-					// fresh database and its `roles` reconcile on every release;
-					// the release then has the operator reconcile authenticator
-					// against them (release.nu).
-					name:    "authenticator"
-					ensure:  "present"
-					login:   true
-					inherit: false
-					inRoles: release.database.tokenRoles
-					passwordSecret: name: "\(release.name)-authenticator-db"
-				}]
+				if release.database.roles == "framework" {
+					managed: roles: [{
+						name:        "electric"
+						ensure:      "present"
+						login:       true
+						replication: true
+						bypassrls:   true
+						passwordSecret: name: "\(release.name)-electric-db"
+					}, {
+						// PostgREST's login. The operator revokes any membership this
+						// list leaves out, so it names every role a token can: the
+						// schema's, which the schema alone creates, 001_roles.sql on a
+						// fresh database and its `roles` reconcile on every release;
+						// the release then has the operator reconcile authenticator
+						// against them (release.nu).
+						name:    "authenticator"
+						ensure:  "present"
+						login:   true
+						inherit: false
+						inRoles: release.database.tokenRoles
+						passwordSecret: name: "\(release.name)-authenticator-db"
+					}]
+				}
 				bootstrap: initdb: {
 					database:       release.name
 					owner:          "postgres"
@@ -176,6 +178,7 @@ import (
 	// the cluster's database Service; every step otherwise runs as the image's
 	// entrypoint runs it. A database comment marks initdb done.
 	let schemaEnv = [
+		{name: "PGOPTIONS", value: "-c mecha.roles=\(release.database.roles)"},
 		{name: "PGHOST", value: "database"},
 		{name: "PGPORT", value: "5432"},
 		{name: "POSTGRES_USER", value: "postgres"},
@@ -231,6 +234,7 @@ import (
 				}]])
 				command: ["bash", "-c", """
 					set -euo pipefail
+					if [ "\(release.database.roles)" = external ]; then psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql; fi
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
@@ -274,7 +278,7 @@ import (
 				svc:       "migrate"
 				env: list.Concat([schemaEnv, [
 					{name: "DATABASE_URL", value: "postgres://postgres:$(PGPASSWORD)@database:5432/\(release.name)?sslmode=disable"},
-					for k, v in release.migrate.env {name: k, value: v},
+					for k, v in release.migrate.env if k != "PGOPTIONS" {name: k, value: v},
 				]])
 			}).out
 		},

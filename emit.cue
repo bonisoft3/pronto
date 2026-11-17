@@ -2001,11 +2001,31 @@ _sqlType: {
 // before it has neither.
 #tokenRolesSql: {
 	roles: [...string]
+	let declared = roles
 	let quoted = strings.Join([for r in roles {"'\(r)'"}], ", ")
-	out: mecha.#TenancySql + "\n" +
-		"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
+	_roleManaged: "DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
 		"GRANT \(strings.Join([for r in roles {"\"\(r)\""}], ", ")) TO authenticator;\n" +
-		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "") +
+		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "")
+	out: mecha.#TenancySql + "\n" + (mecha.#RoleMigration & {
+		managed: _roleManaged
+		contract: {
+			roles: {for r in declared {
+				(r): {
+					attributes:       mecha.#TokenRoleAttributes
+					notDatabaseOwner: true
+					settings: {
+						statement_timeout:                   "\(resilience.resilience.timeouts.statement.client)s"
+						lock_timeout:                        "\(resilience.resilience.timeouts.lock.client)s"
+						idle_in_transaction_session_timeout: "\(resilience.resilience.timeouts.idleInTransaction.client)s"
+					}
+				}
+			}}
+			memberships: {
+                authenticator: declared
+                for r in declared {(r): []}
+            }
+		}
+	}).out +
 		"INSERT INTO mecha.token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
 		"DELETE FROM mecha.token_role WHERE role_name NOT IN (\(quoted));\n"
 }
@@ -5012,13 +5032,40 @@ _pgrollDir: "services/database/pgroll"
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
 				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
-				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
+				_managed: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
 					"""
 						  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
 						    CREATE ROLE \(r) NOLOGIN;
 						  END IF;
 						"""
 				}], "\n") + "\n" + strings.Join([for r in E._declaredRoles {(#tokenRole & {role: r}).out + "\n"}], "") + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+
+				text: (mecha.#RoleMigration & {
+					managed: _managed
+					contract: {
+						roles: {
+							for r in _tokenRoles {
+								(r): {
+									attributes:       {rolcanlogin: false, rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolbypassrls: r == "service"}
+									notDatabaseOwner: list.Contains(E._declaredRoles, r)
+									let tier = [if r == "service" {"service"}, "client"][0]
+									settings: {
+										statement_timeout:                   "\(resilience.resilience.timeouts.statement[tier])s"
+										lock_timeout:                        "\(resilience.resilience.timeouts.lock[tier])s"
+										idle_in_transaction_session_timeout: "\(resilience.resilience.timeouts.idleInTransaction[tier])s"
+									}
+								}
+							}
+							authenticator: attributes: {rolcanlogin: true, rolinherit: false, rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolbypassrls: false}
+							electric: attributes:      {rolcanlogin: true, rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: true, rolbypassrls: true}
+						}
+						memberships: {
+                            authenticator: _tokenRoles
+                            for r in list.Concat([_tokenRoles, ["electric"]]) {(r): []}
+                        }
+						exactMemberships: true
+					}
+				}).out
 
 				// PostgREST's login, which switches to the role a request's token
 				// names; it applies that role's settings (the bounds below) only
@@ -5048,9 +5095,6 @@ _pgrollDir: "services/database/pgroll"
 					// #RolePasswordsStep), and a schema that set one would
 					// overwrite it whenever it ran.
 					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
-						"GRANT USAGE ON SCHEMA public TO electric;\n" +
-						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
-						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
 						""},
 				]
 
@@ -5066,11 +5110,15 @@ _pgrollDir: "services/database/pgroll"
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
+				_electric: "GRANT USAGE ON SCHEMA public TO electric;\n" +
+					"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
+					"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n"
+
 				if !E._authOn {
 					// The service role beside anon where only a wake brings it:
 					// the schedule tables, which anon never reaches, are its.
 					_grantees: [if E._serviceOn {"anon, service"}, "anon"][0]
-					text: """
+					text: _electric + """
 						GRANT USAGE ON SCHEMA public TO \(_grantees);
 						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \(_grantees);
 						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \(_grantees);
@@ -5082,7 +5130,7 @@ _pgrollDir: "services/database/pgroll"
 				// every row read or written goes through app_user or service,
 				// where 006's policies decide.
 				if E._authOn {
-					text: """
+					text: _electric + """
 						GRANT USAGE ON SCHEMA public TO anon, app_user, service;
 						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user, service;
 						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user, service;

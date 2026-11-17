@@ -24,6 +24,10 @@ say:
     # after it is emitted and never runs.
     do: "deno run --allow-read=. bounds.ts"
     rulemap:
+      role-ownership:
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-env --allow-net --allow-run role-ownership.integration.test.ts"
       omnishell-bundle:
         priority: -2
         cmds:

@@ -178,8 +178,10 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 // The dev service token, which crud's dev secret verifies.
 #DevServiceJwt: impl.#DevServiceJwt
 // The development seal key, the local stack's alone: a release refuses it.
-#DevSealKey: impl.#DevSealKey
-#TenancySql:    impl.#TenancySql
+#DevSealKey:          impl.#DevSealKey
+#TenancySql:          impl.#TenancySql
+#RoleMigration:       impl.#RoleMigration
+#TokenRoleAttributes: impl.#TokenRoleAttributes
 
 // What a sink's origin may be: the airlock's daprd dials it.
 #Origin: impl.#Origin

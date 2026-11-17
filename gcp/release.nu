@@ -85,7 +85,7 @@ def setup-marker [plan: record]: nothing -> string {
 def ensure-infrastructure [plan: record] {
 	let marker = (setup-marker $plan)
 	let key = ([
-		($plan | select -o project region repository preview names sqlTier sqlFlags | to json --raw)
+		($plan | select -o project region repository preview names sqlTier sqlFlags databaseRoles | to json --raw)
 		(scraped $plan | into string)
 		(open --raw $SELF)
 	] | str join (char nl) | hash sha256 | str substring 0..23)
@@ -100,9 +100,16 @@ def ensure-infrastructure [plan: record] {
 	ensure-secret $marker $plan.project $key | ignore
 }
 
+def role-password [name: string, project: string, ownership: string]: nothing -> string {
+	if $ownership == "external" { gc secrets versions access latest --secret $name --project $project } else { ensure-secret $name $project }
+}
+
 def set-up-project [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
+	if $plan.databaseRoles == "external" and not (exists sql instances describe $n.instance --project $p) {
+		error make {msg: $"externally managed roles require the existing Cloud SQL instance ($n.instance); its administrator must provision it"}
+	}
 	# A preview's release may not enable APIs: the project's first release did.
 	if ($plan.preview? | is-empty) {
 		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
@@ -140,9 +147,9 @@ def set-up-project [plan: record] {
 		}
 	}
 
-	let pg = (ensure-secret $n.secrets.POSTGRES_PASSWORD $p)
-	let electric = (ensure-secret $n.secrets.ELECTRIC_PASSWORD $p)
-	let authenticator = (ensure-secret $n.secrets.AUTHENTICATOR_PASSWORD $p)
+	let pg = (role-password $n.secrets.POSTGRES_PASSWORD $p $plan.databaseRoles)
+	let electric = (role-password $n.secrets.ELECTRIC_PASSWORD $p $plan.databaseRoles)
+	let authenticator = (role-password $n.secrets.AUTHENTICATOR_PASSWORD $p $plan.databaseRoles)
 	let jwt_secret = (ensure-secret $n.secrets.PGRST_JWT_SECRET $p)
 	ensure-secret $n.secrets.SERVICE_JWT $p (service-jwt $jwt_secret) | ignore
 	ensure-secret $n.secrets.ELECTRIC_SECRET $p | ignore
@@ -166,7 +173,7 @@ def set-up-project [plan: record] {
 		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
 	}
 	# The password the URLs carry is the user's, whichever came first.
-	gc sql users set-password postgres --instance $n.instance --project $p --password $pg | ignore
+	if $plan.databaseRoles == "framework" { gc sql users set-password postgres --instance $n.instance --project $p --password $pg | ignore }
 	if not (exists sql databases describe $n.database --instance $n.instance --project $p) {
 		gc sql databases create $n.database --instance $n.instance --project $p | ignore
 	}

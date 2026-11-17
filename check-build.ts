@@ -1,6 +1,6 @@
 // Cross-package contracts import mecha, app fixtures or subdirectories the
 // build stage does not copy (identity/); the repo tier checks them.
-const excluded = new Set(["endowments_test.ts", "mecha-snapshot.test.ts", "mecha-snapshot-materialize.test.ts", "mecha-snapshot-fixture.ts", "mecha-edge.integration.test.ts", "access.integration.test.ts", "duckstream-columns_test.ts", "database-functions-edge.integration.test.ts", "isolate-pdf.test.ts", "token-roles.integration.test.ts", "unaccent.integration.test.ts", "secret-seal.test.ts", "external-effects.integration.test.ts", "mecha-airlock.integration.test.ts"]);
+const excluded = new Set(["role-ownership.integration.test.ts", "endowments_test.ts", "mecha-snapshot.test.ts", "mecha-snapshot-materialize.test.ts", "mecha-snapshot-fixture.ts", "mecha-edge.integration.test.ts", "access.integration.test.ts", "duckstream-columns_test.ts", "database-functions-edge.integration.test.ts", "isolate-pdf.test.ts", "token-roles.integration.test.ts", "unaccent.integration.test.ts", "secret-seal.test.ts", "external-effects.integration.test.ts", "mecha-airlock.integration.test.ts"]);
 const files = [...Deno.readDirSync(".")]
   .filter((entry) => entry.isFile && entry.name.endsWith(".ts") && !excluded.has(entry.name))
   .map((entry) => entry.name)

@@ -1267,3 +1267,23 @@ upgrade and the bridges named for k8s
   Electric's shape protocol itself, and nothing in omnishell changes.
 - **A service worker in the page** — registration from a `blob:` URL is
   forbidden, and one document has nothing to precache.
+
+### Externally managed database roles
+
+Set `database: roles: "external"` in the GCP release or Kubernetes App
+configuration when the schema's roles and passwords belong to the database
+administrator. The default is `"framework"`. The choice reaches every
+schema-job connection through `PGOPTIONS`; initialization and subsequent
+releases validate the premade roles and fail on a mismatch. They never
+repair externally owned roles merely because their login has permission.
+The role contract is described in [Mecha deployment](https://github.com/bonisoft3/mecha/blob/v0.25.1/docs/deployment.md).
+
+On Kubernetes the external mode omits CloudNativePG's managed electric and
+authenticator roles and skips their reconciliation wait. The database
+operator still owns its administrative database and postgres credential;
+this setting does not replace the database deployment. On GCP the release
+also validates postgres's required BYPASSRLS and token-role SET memberships
+instead of changing them or rotating its password. The Cloud SQL instance and
+its three password secrets must already exist; missing credentials fail rather
+than generating passwords the external roles do not use. Supply the service credentials through the
+existing deployment secrets, matching the passwords the administrator set.

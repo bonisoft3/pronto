@@ -46,6 +46,7 @@ package schema
 	}
 
 	database: {
+		roles:   *"framework" | "external"
 		storage: string | *"1Gi"
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).

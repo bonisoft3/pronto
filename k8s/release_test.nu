@@ -59,6 +59,7 @@ def run-tests [] {
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
+	test_external_roles
 	test_auth_providers
 	test_auth_provider_secrets
 	test_trusted_keys
@@ -1029,4 +1030,20 @@ def test_airlock_refusals [] {
 	assert ($cnpg | str contains "names container effects-db-rw, which the database's Service names") $cnpg
 	# An app without effects renders no airlock.
 	assert ((render-manifests (resolve-app ($fixtures_dir | path join sample)).cue_path kind) | from yaml | where {|d| $d.metadata.name =~ airlock } | is-empty)
+}
+
+
+def test_external_roles [] {
+	print "test externally managed roles have no operator writer and every schema connection validates..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let extra = (mktemp --suffix .json)
+	{App: {database: {roles: "external"}, migrate: {env: {PGOPTIONS: "-c mecha.roles=framework"}}}} | to json | save -f $extra
+	let docs = (try { render-manifests $app.cue_path "kind" --data $extra | from yaml } catch {|e| rm $extra; error make $e })
+	rm $extra
+	let cluster = ($docs | where kind == "Cluster" | first)
+	assert (($cluster.spec.managed? | default {}) | is-empty)
+	for name in ["sample-initdb" "sample-migrate"] {
+		let container = ($docs | where kind == "Job" and metadata.name == $name | first | get spec.template.spec.containers.0)
+		assert equal ($container.env | where name == "PGOPTIONS" | first | get value) "-c mecha.roles=external"
+	}
 }

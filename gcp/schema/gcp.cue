@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bonisoft3/pronto/resilience"
+	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 )
 
 // #Release is an app on GCP: Cloud SQL for its database, and caddy, crud, auth
@@ -115,6 +116,7 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	database: roles:      *"framework" | "external"
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -593,6 +595,7 @@ import (
 	// is the release's `schema`, migrate's with the database's initdb directory,
 	// so one job starts once, not twice.
 	let initdbEnv = [
+		{name: "PGOPTIONS", value: "-c mecha.roles=\(R.database.roles)"},
 		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
 		{name: "PGUSER", value: "postgres"},
 		{name: "PGDATABASE", value: R.names.database},
@@ -602,6 +605,13 @@ import (
 		(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
 		(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
 	]
+	let ownerRoles = (mecha.#RoleMigration & {
+		managed: "ALTER ROLE postgres BYPASSRLS; GRANT \(strings.Join([for r in R.database.tokenRoles {"\"\(r)\""}], ", ")) TO postgres WITH INHERIT FALSE, SET TRUE;"
+		contract: {
+			roles: postgres: attributes: rolbypassrls: true
+			memberships: postgres: R.database.tokenRoles
+		}
+	}).out
 	let initdbNames = [for e in initdbEnv {e.name}]
 	job: {
 		apiVersion: "run.googleapis.com/v1"
@@ -625,7 +635,8 @@ import (
 							set -euo pipefail
 							# Validation migrations and machine writers run as this owner
 							# under forced RLS; switched roles still meet every policy.
-							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
+							if [ "\(R.database.roles)" = framework ]; then psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"; fi
+							if [ "\(R.database.roles)" = external ]; then psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql; fi
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
@@ -643,7 +654,9 @@ import (
 							fi
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
-							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
+							psql -v ON_ERROR_STOP=1 -Xq <<'OWNER_ROLES'
+							\(ownerRoles)
+							OWNER_ROLES
 							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
 						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
 							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
@@ -694,6 +707,7 @@ import (
 		if R.preview != "" {preview: R.preview}
 		names:    R.names
 		sqlTier:  R.sqlTier
+		databaseRoles: R.database.roles
 		sqlFlags: [if R.preview != "" {#PreviewSqlFlags}, #SqlFlags][0]
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
