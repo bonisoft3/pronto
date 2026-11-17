@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "pdfmake/": "npm:/pdfmake@0.3.13/"
+  }
+}

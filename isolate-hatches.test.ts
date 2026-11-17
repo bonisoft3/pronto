@@ -164,3 +164,39 @@ Deno.test("an isolate may sit at the app's root, and its WebAssembly files have 
   assert(!res.success, "two WebAssembly shims of one name were accepted");
   assertStringIncludes(res.stderr, "isolate hatch pdf has two files named add.wasm.js");
 });
+
+// A stock isolate is pronto's own module: the hatch names it, and the
+// emission writes it into the app, where its build reads it as any other.
+Deno.test("a stock isolate is pronto's module, written into the app", async () => {
+  const stock = '{kind: "isolate", note: "renders receipts", stock: "pdf", memory: 96}';
+  const files = await emitFiles(program('{isolate: "pdf", targets: ["docker", "cloudflare"]}', stock)) as unknown as Record<string, { format: string; text?: string; data?: { bridges?: { isolate: { entrypoint: string; files: string[] } }[] } }>;
+  const sources = ["main.ts", "deno.json", "deno.lock"];
+  for (const f of sources) {
+    const written = files[`.pronto/isolates/pdf/${f}`];
+    assert(written !== undefined, `.pronto/isolates/pdf/${f} is not written`);
+    assertEquals(written.text, await Deno.readTextFile(new URL(`./isolates/pdf/${f}`, import.meta.url)));
+  }
+  // main.ts says it is generated; the module's config and lock stay as Deno wrote them.
+  assertEquals(files[".pronto/isolates/pdf/main.ts"].format, "js");
+  assertEquals(files[".pronto/isolates/pdf/deno.lock"].format, "text");
+  const [bridge] = files[".pronto/cluster.json"].data!.bridges!;
+  assertEquals(bridge.isolate.entrypoint, ".pronto/isolates/pdf/main.ts");
+  assertEquals(bridge.isolate.files, sources.map((f) => `.pronto/isolates/pdf/${f}`));
+  // Its image builds from the files written, as any isolate's does.
+  const target = (files["bayt.json"].data as unknown as { targets: Record<string, { srcs: { globs: string[] }; cmd: Record<string, { do: string }> }> }).targets["pdf-appliance"];
+  assertEquals(target.srcs.globs, sources.map((f) => `.pronto/isolates/pdf/${f}`));
+  assertStringIncludes(target.cmd.builtin.do, "ISOLATE_ENTRYPOINT='.pronto/isolates/pdf/main.ts'");
+  // pdfmake is pinned to one version, the lock's.
+  assertStringIncludes(files[".pronto/isolates/pdf/deno.json"].text!, '"npm:/pdfmake@0.3.13/"');
+
+  // The module is pronto's: a hatch naming a stock isolate names no module of its own.
+  const res = await cue(["export", "-", "-e", "out"], program('{isolate: "pdf"}', stock.replace('stock: "pdf"', 'stock: "pdf", entrypoint: "isolates/pdf/main.ts"')));
+  assert(!res.success, "a stock isolate with an entrypoint of its own was accepted");
+  assertStringIncludes(res.stderr, "hatches.pdf.entrypoint: conflicting values");
+  const unknown = await cue(["export", "-", "-e", "out"], program('{isolate: "pdf"}', stock.replace('stock: "pdf"', 'stock: "xlsx"')));
+  assert(!unknown.success, "a stock isolate pronto does not ship was accepted");
+  assertStringIncludes(unknown.stderr, "hatches.pdf.stock: conflicting values");
+  const container = await cue(["export", "-", "-e", "out"], program('{isolate: "pdf"}', '{kind: "container", note: "a native transport", stock: "pdf"}'));
+  assert(!container.success, "a container hatch naming a stock isolate was accepted");
+  assertStringIncludes(container.stderr, "hatches.pdf.stock: field not allowed");
+});

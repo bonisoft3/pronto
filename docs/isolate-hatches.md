@@ -7,11 +7,10 @@ program builds. A bridge reaches it as it reaches a container
 
 ```cue
 code: capabilities: hatches: pdf: {
-    kind:       "isolate"
-    note:       "renders documents from plain data"
-    entrypoint: "isolates/pdf/main.ts"
-    files:      ["isolates/pdf/main.ts", "isolates/pdf/deno.json", "isolates/pdf/deno.lock"]
-    memory:     96 // MiB of V8's old space, from 16 to 128; 128 when unset
+    kind:   "isolate"
+    note:   "renders receipts from plain data"
+    stock:  "pdf" // pronto's own module (Stock isolates, below)
+    memory: 96    // MiB of V8's old space, from 16 to 128; 128 when unset
 }
 code: state: bridges: pdf: {isolate: "pdf", targets: ["docker", "cloudflare"]}
 code: state: effects: render: {
@@ -21,6 +20,17 @@ code: state: effects: render: {
 ```
 
 ## The module
+
+A hatch of the program's own module names it by `entrypoint` and `files`:
+
+```cue
+code: capabilities: hatches: sheet: {
+    kind:       "isolate"
+    note:       "writes spreadsheets from plain data"
+    entrypoint: "isolates/sheet/main.ts"
+    files:      ["isolates/sheet/main.ts", "isolates/sheet/deno.json", "isolates/sheet/deno.lock"]
+}
+```
 
 `entrypoint` is the module the bundle starts from, one of `files`, which hold
 everything it imports beside its packages: its `deno.json` and lock among
@@ -114,6 +124,43 @@ bridges may share an isolate, as they share a container: on docker it is one
 process. On cloudflare a container is one bridge's, and an isolate is too: a
 bridge naming cloudflare shares its isolate with no other.
 
+## Stock isolates
+
+A stock isolate is a module pronto ships, which a hatch names by `stock` in
+place of `entrypoint` and `files`. Pronto writes it into the app beside its
+other generated files, under `.pronto/isolates/<stock>/`, its `main.ts`, its
+`deno.json` and its lock, and the hatch's `entrypoint` and `files` are those;
+from there it is built, served and bounded as any isolate. Its packages are
+pinned by its lock, so an app gets another version of one with another pronto.
+
+**`pdf`** renders a [pdfmake](https://pdfmake.github.io/docs/0.3/) document
+definition, the request's JSON body, as pdfmake renders it anywhere, in
+pdfmake's own default font, Roboto, whose four faces its bundle carries: a
+Worker reads no file, so a font is code. The PDF comes back as an effect's
+answer carries bytes, `{"$blob": {base64, type: "application/pdf"}}`, since a
+handler's `sink.fetch` reads its sink's answer as JSON or text
+([the airlock](https://github.com/bonisoft3/mecha/blob/v0.24.0/services/airlock/README.md)); the
+handler answers it as it is, and the airlock stores the PDF in the cluster's
+blob plane and settles the URL it serves it at:
+
+```js
+// effects/render.js
+export async function issue(input, sink) {
+  const res = await sink.fetch("/", { method: "POST", body: input.document })
+  return res.status === 200 ? { done: { pdf: res.body } } : { failed: { status: res.status, reason: res.body } }
+}
+```
+
+What JSON cannot carry pdfmake does without: a function (a dynamic `header`
+or `footer`, a table `layout` of functions) has no JSON form, and `info`'s
+`creationDate` and `modDate` arrive as strings, which the module reads as
+dates; a definition that states none is dated by the clock that renders it,
+so only one that states them is the same bytes every time. A body that is no
+JSON is answered 400, and a definition pdfmake throws on 422, with its
+message: no retry would change either. A document past the hatch's heap or
+deadline fails as any isolate's call does. A table of 5,000 short rows, 132
+pages, renders in about 4 s in 96 MiB; twice that is past 128.
+
 ## Why an isolate
 
 A library run inside the caller's own sandbox, as an endowment is, can only be
@@ -121,3 +168,6 @@ bounded by checking its input, and a renderer or a parser has more loops and
 allocations its input drives than a check can enumerate. In an isolate the
 bound is the isolate's, whatever the module does: a library whose work grows
 with its input belongs in one.
+
+pdfmake is such a library: it lays out whatever its definition describes, so
+the stock `pdf` isolate is where a program renders one.
