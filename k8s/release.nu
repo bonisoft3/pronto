@@ -1660,9 +1660,10 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 	}
 }
 
-# The schemas PostgREST serves, as compose gives crud (PGRST_DB_SCHEMA): public, then an app's API schemas.
-export def crud-schemas [environment: record]: nothing -> string {
-	$environment.PGRST_DB_SCHEMA? | default "public"
+# The schemas PostgREST serves, as compose gives crud (PGRST_DB_SCHEMA): the app's own schema, then its API
+# schemas. Null where compose names none: the release's CUE then serves the app's schema alone.
+export def crud-schemas [environment: record]: nothing -> any {
+	$environment.PGRST_DB_SCHEMA?
 }
 
 export def auth-provider-secret [name: string, namespace: string, values: record]: nothing -> record {
@@ -2012,7 +2013,7 @@ export def main [
 	let crud_schemas = (crud-schemas (compose-config $app_source_dir --json | get -o services.crud.environment | default {}))
 	let own_env = (app-services-environment (compose-config $app_source_dir --json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues), crud: {schemas: $crud_schemas}} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge (if $crud_schemas == null { {} } else { {crud: {schemas: $crud_schemas}} }) | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }) | merge (if $is_tenant { {tenant: $tenant, tenantHost: $host} } else { {} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file | if $is_tenant { tenant-manifests $tenant } else { $in })
 	rm $pushed_file
 

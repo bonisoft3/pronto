@@ -853,9 +853,8 @@ import (
 								name:  "PGRST_DB_URI"
 								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.id)"
 							},
-							// An app's own schema (meta.schema, the line) names what PostgREST serves; otherwise what compose
-							// gives crud (capabilities.apiSchemas, PRONTO-320), public alone by default.
-							{name: "PGRST_DB_SCHEMA", value: [if release.database.schemas.app != "public" {release.database.schemas.app}, release.crud.schemas][0]},
+							// What compose gives crud (meta.schema's app schema, then capabilities.apiSchemas, PRONTO-320).
+							{name: "PGRST_DB_SCHEMA", value: release.crud.schemas},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 							{name: "PGRST_DB_PRE_REQUEST", value: "\(release.database.schemas.floor).app_pre_request"},
 							// As mecha's cluster states them (meta.schema).

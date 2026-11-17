@@ -369,7 +369,7 @@ def test_app_schemas [] {
 # release names the same schemas the app's compose does, so /api/v1 is not a PGRST106.
 def test_crud_schemas [] {
 	print "test crud serves the schemas compose gives it, public alone by default..."
-	assert equal (crud-schemas {}) "public"
+	assert equal (crud-schemas {}) null
 	assert equal (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"}) "public,api_v1"
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let schema_of = {|rendered| $rendered | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers.0.env | where name == "PGRST_DB_SCHEMA" | first | get value }
@@ -377,7 +377,12 @@ def test_crud_schemas [] {
 	let data = (mktemp -t crud.XXXXXX.json | str trim)
 	{App: {crud: {schemas: (crud-schemas {PGRST_DB_SCHEMA: "public,api_v1"})}}} | to json | save -f $data
 	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "public,api_v1"
-	{App: {crud: {schemas: "api_v1"}}} | to json | save -f $data
+	# An app with a schema of its own: what compose gives crud, its API schemas kept (not "shop" alone).
+	{App: {database: {schemas: {app: "shop", floor: "public", mecha: "mecha"}}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "shop"
+	{App: {database: {schemas: {app: "shop", floor: "public", mecha: "mecha"}}, crud: {schemas: "shop,api_v1"}}} | to json | save -f $data
+	assert equal (do $schema_of (render-manifests $app.cue_path "kind" --data $data)) "shop,api_v1"
+	{App: {crud: {schemas: "api_v1;drop"}}} | to json | save -f $data
 	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch { true })
 	rm $data
 	assert $refused
@@ -754,6 +759,8 @@ def test_crud_lives_on_its_own [] {
 	# Unready, crud leaves crud-dapr and Dapr answers 500, which pages take as final; Ready, PostgREST answers 503 (PRONTO-638).
 	assert equal $crud.readinessProbe.httpGet.path "/live"
 	assert equal $crud.startupProbe.httpGet.path "/ready"
+	assert equal $crud.startupProbe.periodSeconds 2
+	assert equal $crud.startupProbe.failureThreshold 150
 }
 
 def test_container_resources_and_files [] {
