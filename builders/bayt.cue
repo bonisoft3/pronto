@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"encoding/yaml"
 	"list"
+	"regexp"
 	"strings"
 
 	core "github.com/bonisoft3/bayt/core:bayt"
@@ -36,6 +37,15 @@ import (
 // bayt's own project schema, re-exported so a compiler (or anyone) can
 // validate a build graph directly by unifying against it.
 #Project: core.#project
+
+// The Playwright a browser check runs: the version of bayt's pinned image,
+// whose browsers the check's container carries, so the installer, the marker
+// and the image never disagree. Readers outside this package (Studio's
+// builder image) take it from here.
+#Playwright: {
+	version: regexp.FindSubmatch(#"playwright:v([0-9.]+)-"#, core.lock.images.playwright)[1]
+	marker:  ".playwright-chromium-\(version)"
+}
 
 #Toolchain: {
 	...
@@ -157,13 +167,13 @@ import (
 		})
 		let pw_dir = (if (($env.PLAYWRIGHT_BROWSERS_PATH? | default "") != "") { $env.PLAYWRIGHT_BROWSERS_PATH } else { $default_pw })
 		mkdir $pw_dir
-		let marker = ($pw_dir | path join ".playwright-chromium-1.61.1")
+		let marker = ($pw_dir | path join "\#(#Playwright.marker)")
 		let has_chromium = ((glob ($pw_dir | path join "chromium-*" | str replace -a (char -u 5c) "/") | length) > 0)
 		if (not ($marker | path exists)) or (not $has_chromium) {
 		  if $os == "linux" {
-		    ^mise x -- deno run -A --node-modules-dir=none npm:playwright@1.61.1 install --with-deps chromium
+		    ^mise x -- deno run -A --node-modules-dir=none npm:playwright@\#(#Playwright.version) install --with-deps chromium
 		  } else {
-		    ^mise x -- deno run -A --node-modules-dir=none npm:playwright@1.61.1 install chromium
+		    ^mise x -- deno run -A --node-modules-dir=none npm:playwright@\#(#Playwright.version) install chromium
 		  }
 		  "" | save -f $marker
 		}
