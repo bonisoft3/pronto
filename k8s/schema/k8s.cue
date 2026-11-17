@@ -518,9 +518,16 @@ import (
 							{name: "PGRST_ADMIN_SERVER_PORT", value: "3001"},
 						]
 						resources: release.resources
+						// Live and Ready ask whether PostgREST itself runs (/live), never whether the database answers
+						// (/ready). Liveness on /ready restarts crud whenever the database restarts. Readiness on it takes
+						// crud out of its Service while the database is away, so a sidecar such as Dapr finds no address
+						// and answers 500, which a client takes as final; kept Ready, PostgREST answers 503 with
+						// Retry-After, which a client retries. /ready gates the start only: up to 5 min, for a release
+						// that makes the database cluster and waits for its bootstrap.
+						startupProbe: {httpGet: {path: "/ready", port: 3001}, periodSeconds: 2, failureThreshold: 150}
 						livenessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5
@@ -528,7 +535,7 @@ import (
 						}
 						readinessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5
