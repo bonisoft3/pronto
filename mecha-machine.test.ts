@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { inSchemas, type Schemas, upgradeInSchemas } from "./schema-names.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
 Deno.test("SQL calls require a named SQL hatch and derive the machine's hatch references", async () => {
@@ -669,6 +670,34 @@ Deno.test("an app's schemas reach its migrations, its door and its release facts
   const door = at(own, "docker/Caddyfile").text;
   assertStringIncludes(door, "      uri query secret {$ELECTRIC_SECRET}\n      uri query table orders.{query.table}\n");
   assert(door.indexOf("uri /auth/shape/verify") < door.indexOf("uri query table orders."), "the table is named after the gate");
+});
+
+// The airlock's upgrade replays the machines' interpreters, which their migration holds in the app's
+// schemas: write.ts renames the upgrade's copy the same way, through mecha's own quoting of it.
+Deno.test("the airlock upgrade replays a timed machine's interpreters in the app's schemas, as its migration does", async () => {
+  const timed = paymentProgram({ machine: `
+        pending: {on: pay: "charging", after: "1000": "failed"}
+        charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
+        settled: type: "final"
+        failed: on: retry: "pending"` }) + `
+app: meta: schemas: {app: "orders", floor: "mecha"}
+_schemas: (pronto.#emit & {code: app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).schemas
+`;
+  const exported = await cue(["export", "-", "-e", '{upgrade: out["bayt.json"].data.targets["airlock-upgrade"].dockerfile.epilogue[0], interpreters: _cluster.state.effectInterpreters, migration: out["services/database/migrations/010_machines.sql"].text, schemas: _schemas}', "--out", "json"], timed);
+  if (!exported.success) throw new Error(exported.stderr);
+  const { upgrade, interpreters, migration, schemas } = JSON.parse(exported.stdout) as { upgrade: string; interpreters: string; migration: string; schemas: Schemas };
+  assertStringIncludes(interpreters, "public.schedule");
+  // Past the timer check that opens them, the interpreters are the migration's, which write.ts
+  // renames as it writes it.
+  assert(interpreters.startsWith("DO $$ BEGIN"), "a timed machine's interpreters open with its timer check");
+  const machine = interpreters.slice(interpreters.indexOf("END $$;\n") + "END $$;\n".length).trimStart();
+  assertStringIncludes(inSchemas(migration, schemas), inSchemas(machine, schemas));
+  const renamed = upgradeInSchemas(upgrade, interpreters, schemas);
+  assertEquals(renamed.includes("public."), false, "no name is left in public's schema");
+  for (const name of ["orders.schedule", "orders.machine_timer_tick", "SET LOCAL search_path = orders, mecha;"]) assertStringIncludes(renamed, name);
+  // Outside the interpreters, the upgrade is mecha's as it emitted it.
+  assert(renamed.startsWith(upgrade.slice(0, upgrade.indexOf("EXECUTE E''"))));
+  assert(renamed.endsWith(upgrade.slice(upgrade.lastIndexOf("'';\n  END IF;"))));
 });
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
