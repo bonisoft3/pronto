@@ -99,6 +99,6 @@ policy pronto owns over omnishell's mechanism: [screens.md](docs/screens.md).
 `release@<target>` rule on one tier: [release-targets.md](docs/release-targets.md).
 
 The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.24.1/docs/index.md),
-the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/index.md), and what is argued
+the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/index.md), and what is argued
 and not built is [`PENDING.md`](PENDING.md). Everything else:
 [docs/index.md](docs/index.md).

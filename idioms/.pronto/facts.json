@@ -11,7 +11,7 @@
   "artifact": [
     {"path":"program.cue","sha256":"fce66a85c5041a756bc11f6c5e1d0934220e956f324db333aeed62e959ee19c4","derived":false},
     {"path":"DESIGN.md","sha256":"c9bc72b3f10be238fe138f161387c0b3f33fcd93870a05d2e9fa4a17a6a26dce","derived":false},
-    {"path":"ir.html","sha256":"4ca474522006fd7c71f0bdad845a3884a0c0c1bf5c3bfeb36cacebd548cecc2f","derived":false},
+    {"path":"ir.html","sha256":"7211bdb58c4c0279eff87ed2e8bf97f7aa2423dfa5b5ba1b221f517ff3213923","derived":false},
     {"path":"acceptance.md","sha256":"37c3de8f47e18855d72001b9f14668952600b341a84277d41fc5fce0278c9bae","derived":false},
     {"path":".pronto/cel.json","sha256":"8e3f3ea654983cbd7d3ec0db953d0d17db3a71de0b32cd7ed7eda582c8198d85","derived":true},
     {"path":"program_cel.cue","sha256":"0564e862d3446d73b2bc29a2f301b427dfb8d786d7352ec20589d600c60b8c4e","derived":true},

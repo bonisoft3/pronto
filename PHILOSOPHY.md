@@ -124,7 +124,7 @@ takes its side.
   (VLDB 2023). Derived data as a query kept current under inserts, updates
   and retractions ([pipelines and schedules](docs/pipelines-and-schedules.md),
   [the lattice](docs/lattice.md), mecha's
-  [streaming joins](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/streaming-joins.md)).
+  [streaming joins](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/streaming-joins.md)).
 - **Order from the database, not from the replicas**: Shapiro, Preguiça,
   Baquero and Zawirski,
   [*Conflict-free Replicated Data Types*](https://inria.hal.science/inria-00609399/document)
@@ -133,7 +133,7 @@ takes its side.
   (2019) as the argument for a central authority over CRDTs. Pronto's
   authority is the Postgres WAL, read by change data capture with its LSN as
   the clock ([logical decoding](https://www.postgresql.org/docs/current/logicaldecoding.html);
-  mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/change-capture.md)), and
+  mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/change-capture.md)), and
   [ElectricSQL](https://electric-sql.com/docs/reference/anomalies), founded by
   the CRDT school and rebuilt on the same choice, carries that order into the
   browser (omnishell's [data](https://github.com/bonisoft3/omnishell/blob/v0.24.1/docs/data.md) and
@@ -230,7 +230,7 @@ takes its side.
   Hierarchy and parallel regions against state explosion, one coordination
   language from a browser row to a Postgres trigger (omnishell's
   [machines](https://github.com/bonisoft3/omnishell/blob/v0.24.1/docs/machines.md), mecha's
-  [machines](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/machines.md), [cortex](docs/cortex.md)).
+  [machines](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/machines.md), [cortex](docs/cortex.md)).
 - **Chinese Postman**: Kwan,
   [*Graphic programming using odd or even points*](https://scholar.google.com/scholar?q=%22Graphic+programming+using+odd+or+even+points%22)
   (Chinese Mathematics, 1962, translating the 1960 original); Edmonds and Johnson,
@@ -262,7 +262,7 @@ takes its side.
   (CACM 1978). Order without a global clock; Pronto uses the commit LSN to
   order committed database changes, giving its replicas the common authority
   described above
-  (mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.24.0/docs/change-capture.md)).
+  (mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/change-capture.md)).
 - **Online schema change**: Rae, Rollins, Shute, Sodhi and Vingralek,
   [*Online, Asynchronous Schema Change in F1*](https://www.vldb.org/pvldb/vol6/p1045-rae.pdf)
   (VLDB 2013), practised as expand and contract by
@@ -303,7 +303,7 @@ takes its side.
 - **The lake's own time**: Raasveldt and Mühleisen,
   [*DuckDB: an Embeddable Analytical Database*](https://mytherin.github.io/papers/2019-duckdbdemo.pdf)
   (SIGMOD 2019), and the [DuckLake manifesto](https://ducklake.select/manifesto/).
-  Mecha's [lake](https://github.com/bonisoft3/mecha/blob/v0.24.0/packages/lake/README.md) and the
+  Mecha's [lake](https://github.com/bonisoft3/mecha/blob/v0.25.0/packages/lake/README.md) and the
   DuckStream tier of [the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md).
 
 ## Testimonial

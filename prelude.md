@@ -11,7 +11,7 @@ these components; it only speaks up where it deviates from or extends them.
 
 ## Entities
 
-An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.24.0). Fields
+An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.25.0). Fields
 carry CEL constraints (`this` bound to the field value); rows may carry a
 row-level CEL invariant. Schema DDL, migrations, and API routes are generated
 from the program — there is nothing to hand-configure.
@@ -204,7 +204,7 @@ layer, not grounds for demoting a check to a slower one.
 ## Tiers
 
 Pronto names four rungs of
-[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.24.0/README.md#4-vertical-scalability-down-and-up)
+[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.25.0/README.md#4-vertical-scalability-down-and-up)
 — `browser`, `edge`, `container`, which is mecha's single machine, and `cloud`
 — of which the browser and the container are built; where an app is released,
 and what each target refuses, is [release targets](docs/release-targets.md).
