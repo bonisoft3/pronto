@@ -92,14 +92,16 @@ A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
 
 1. Each provider's client, registered once by the operator: for Google, a "Web
    application" OAuth client whose only redirect URI is
-   `<broker issuer>/callback/google` (`http://localhost:28443/callback/google`
-   on the operator's machine). Never an app's own URL.
+   `<broker issuer>/callback/google` (`http://localhost:<port>/callback/google`
+   on the operator's machine, the port each app's own, `#LocalPort` in
+   `identity/signin.cue`, so each app's port is registered with Google). Never an
+   app's own URL.
 2. `~/.config/pronto-identity/broker.env`, mode 600, never committed:
    `BROKER_ISSUER`, `BROKER_SECRET` (32+ characters; it derives every pairwise
    subject, so rotating it gives every person a new subject in every app), and
    `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`. Ask the operator to fill the
    secrets in themselves.
-3. `identity/serve.sh` serves it on Hydra at the issuer's port (28443), Hydra
+3. `identity/serve.sh` serves it on Hydra at the issuer's port (28443 standalone; an app's launch uses its own, `#LocalPort`), Hydra
    on SQLite under `~/.local/state/pronto-identity`. It speaks plain HTTP; TLS
    is the platform's.
 4. `identity/serve.sh release --project P --domain D --google-client-id C`

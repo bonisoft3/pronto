@@ -60,7 +60,8 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 		// operator's, so an application names nothing.
 		broker: *S._localBroker | #Url
 		// Production broker issuer for release targets when `broker` stays
-		// `localBroker` so local `launch` and `integrate` still run Hydra.
+		// the app's local broker (`_localBroker`, on its own port) so local `launch` and
+		// `integrate` still run Hydra.
 		releaseBroker?: #Url
 		// The broker as the cluster reaches it: the local broker's service
 		// (below) by its name in compose, which the host projection reads as

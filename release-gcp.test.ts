@@ -398,6 +398,8 @@ Deno.test("a release refuses a provider at a developer's address, or one the pro
   const google = (issuer: string, internal = issuer) => `OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin", OIDC_GOOGLE_ISSUER: "${issuer}", OIDC_GOOGLE_INTERNAL: "${internal}"`;
   for (const [oidc, why] of [
     [google("http://localhost:28443", "http://host.docker.internal:28443"), "localhost"],
+    // An app's own local broker port (identity/signin.cue's #LocalPort), any loopback port.
+    [google("http://localhost:24681", "http://host.docker.internal:24681"), "localhost"],
     [google("https://id.example.com", "http://host.docker.internal:28443"), "host.docker.internal"],
     [google("http://127.0.0.1:9000"), "127.0.0.1"],
   ]) {
