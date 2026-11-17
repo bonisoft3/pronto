@@ -20,14 +20,18 @@ export async function edgeImage(req: Request, env: ImagesEnvironment, cache: Pic
   const width = sized ? Number(sized[1]) : undefined
   if (width !== undefined && !widths.includes(width)) return new Response(null, { status: 400 })
   // Rows name the plane by its logical name on every target; a bucket a row
-  // written before that still spells is the same objects.
-  const transform = `/img/insecure/${width === undefined ? '' : `rs:fit:${width}:${width}/`}plain/s3://`
-  const prefix = raw
-    ? '/blobs/mecha-objects/'
-    : ['mecha-objects', env.IMAGE_SOURCE_BUCKET].filter(Boolean).map((b) => `${transform}${b}/`).find((p) => url.pathname.startsWith(p))
-  if (prefix === undefined || url.search) return new Response(null, { status: 400 })
+  // written before that still spells is the same objects. Reverse proxies
+  // with merge_slashes (Envoy, nginx) collapse s3:// to s3:/.
+  const base = `/img/insecure/${width === undefined ? '' : `rs:fit:${width}:${width}/`}plain/s3:`
+  const match = raw
+    ? { prefix: '/blobs/mecha-objects/', bucket: 'mecha-objects' }
+    : ['mecha-objects', env.IMAGE_SOURCE_BUCKET].filter((b): b is string => Boolean(b))
+        .flatMap((bucket) => [`${base}//${bucket}/`, `${base}/${bucket}/`].map((prefix) => ({ prefix, bucket })))
+        .find(({ prefix }) => url.pathname.startsWith(prefix))
+  if (match === undefined || url.search) return new Response(null, { status: 400 })
+  const rawKey = url.pathname.slice(match.prefix.length)
   let key: string
-  try { key = decodeURIComponent(url.pathname.slice(prefix.length)) } catch { return new Response(null, { status: 400 }) }
+  try { key = decodeURIComponent(rawKey) } catch { return new Response(null, { status: 400 }) }
   if (!key || key.split('/').some(part => !part || part === '.' || part === '..') || key.includes('\\')) return new Response(null, { status: 400 })
   const object = req.method === 'HEAD' ? await env.BLOB_OBJECTS.head(key) : await env.BLOB_OBJECTS.get(key)
   if (!object) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } })
@@ -43,6 +47,7 @@ export async function edgeImage(req: Request, env: ImagesEnvironment, cache: Pic
   if (req.method === 'HEAD') return new Response(null, { headers })
   if (raw) return new Response((object as ImageObject).body, { headers })
   const cacheUrl = new URL(req.url)
+  cacheUrl.pathname = `${base}//${match.bucket}/${rawKey}`
   cacheUrl.searchParams.set('__image_etag', etag)
   const cacheKey = new Request(cacheUrl)
   const cached = await cache.match(cacheKey)

@@ -294,7 +294,8 @@ imported pictures and `seedBlobs` alike, and `/blobs/mecha-objects/<key>` answer
 raw, read-only. R2 may ask for a card on the account.
 
 `code.capabilities.edgeImages` adds the image service above it, Cloudflare Images:
-`/img/insecure/plain/s3://mecha-objects/<key>` reads `<key>` and returns WebP.
+`/img/insecure/plain/s3://mecha-objects/<key>` (or `s3:/` behind a slash-merging
+reverse proxy) reads `<key>` and returns WebP.
 `mecha-objects` is the plane's logical name on every target, so a row's URL does not
 depend on where it was written; `sourceBucket` keeps a physical name older rows
 spelled. All objects in this bucket are public through those routes; it must not

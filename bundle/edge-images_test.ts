@@ -33,6 +33,9 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
   assertEquals(calls.map(c => (c as unknown[])[0]), ['get', 'input', 'transform', 'output'])
   await Promise.all(pending)
   assertEquals(await (await run(new Request(url)))!.text(), 'webp')
+  // Regression: Envoy and nginx merge_slashes collapse s3:// into s3:/ on proxied TWA origins;
+  // both spellings must answer and share one cached transformation.
+  assertEquals(await (await run(new Request('https://example.test/img/insecure/plain/s3:/original-bucket/snapcards/a.png')))!.text(), 'webp')
   assertEquals(calls.filter(c => (c as unknown[])[0] === 'output').length, 1)
   etag = 'new'
   await run(new Request(url))
@@ -53,6 +56,7 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
     '/img/insecure/rs:fit:640:640/plain/s3://other/snapcards/a.png',
     '/img/insecure/plain/s3://original-bucket/snapcards/a.png?width=10',
     '/img/insecure/plain/s3://original-bucket/snapcards/%2e%2e%2fa.png',
+    '/img/insecure/plain/s3:///original-bucket/snapcards/a.png',
   ]) assertEquals((await run(new Request(`https://example.test${path}`)))!.status, 400)
   assertEquals((await run(new Request(url, { method: 'POST' })))!.status, 405)
   assertEquals((await run(new Request(url.replace('a.png', 'missing.png'))))!.status, 404)
