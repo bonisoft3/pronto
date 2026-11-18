@@ -85,7 +85,7 @@ prepare and run the application; their validation counterparts judge it. Launch
 may succeed while lint fails. The implementation is in
 [[../builders/bayt.cue|the Pronto builder]],
 [Sayt dispatch](https://github.com/bonisoft3/sayt/blob/v0.49.1/bayt-task.nu), and
-[the verb dependency defaults](https://github.com/bonisoft3/bayt/blob/v0.72.4/stacks/sayt/sayt.cue).
+[the verb dependency defaults](https://github.com/bonisoft3/bayt/blob/v0.73.0/stacks/sayt/sayt.cue).
 
 Ordinary launch does not select the broad development configuration or the live
 presentation tree. It follows the generated application path. Watch launch

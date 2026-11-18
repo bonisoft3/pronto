@@ -27,7 +27,31 @@
     "healthcheck": {
       "test": [
         "CMD",
-        "httpcheck",
+        "/usr/local/lib/bayt/http200/busybox",
+        "sh",
+        "-ec",
+        "export CURL_CA_BUNDLE=\"$${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}\"; status=$$(\"$$@\"); [ \"$$status\" = 200 ] || { printf 'HTTP status %s, expected 200\\n' \"$$status\" >&2; exit 1; }",
+        "http200",
+        "/usr/local/lib/bayt/http200/curl",
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--head",
+        "--request",
+        "GET",
+        "--location",
+        "--max-redirs",
+        "9",
+        "--max-time",
+        "5",
+        "--proto",
+        "=http,https",
+        "--proto-redir",
+        "=http,https",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
         "http://127.0.0.1:8080/health"
       ],
       "interval": "5s",
@@ -250,12 +274,37 @@
     "copy": [
       {
         "from": {
-          "name": "tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa"
+          "name": "bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df"
         },
         "srcs": [
-          "/bin/httpcheck"
+          "/lazybox/share/ca-certificates/ca-certificates.crt"
         ],
-        "dst": "/usr/local/bin/httpcheck",
+        "dst": "/usr/local/lib/bayt/http200/ca.pem",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "name": "bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df"
+        },
+        "srcs": [
+          "/lazybox/libexec/static-curl"
+        ],
+        "dst": "/usr/local/lib/bayt/http200/curl",
+        "chmod": "755",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "name": "busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223"
+        },
+        "srcs": [
+          "/bin/busybox"
+        ],
+        "dst": "/usr/local/lib/bayt/http200/busybox",
         "chmod": "755",
         "link": true,
         "parents": false,
@@ -324,7 +373,31 @@
     "healthcheck": {
       "test": [
         "CMD",
-        "httpcheck",
+        "/usr/local/lib/bayt/http200/busybox",
+        "sh",
+        "-ec",
+        "export CURL_CA_BUNDLE=\"${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}\"; status=$(\"$@\"); [ \"$status\" = 200 ] || { printf 'HTTP status %s, expected 200\\n' \"$status\" >&2; exit 1; }",
+        "http200",
+        "/usr/local/lib/bayt/http200/curl",
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--head",
+        "--request",
+        "GET",
+        "--location",
+        "--max-redirs",
+        "9",
+        "--max-time",
+        "5",
+        "--proto",
+        "=http,https",
+        "--proto-redir",
+        "=http,https",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
         "http://127.0.0.1:8080/health"
       ],
       "interval": "5s",
@@ -375,14 +448,13 @@
     }
   },
   "healthcheck": {
-    "template": "http",
+    "template": "http200",
     "scheme": "http",
     "host": "127.0.0.1",
     "port": 8080,
     "path": "/health",
     "url": "http://127.0.0.1:8080/health",
-    "authorization": null,
-    "headers": [],
+    "headers": {},
     "interval": "5s",
     "start_interval": "500ms",
     "timeout": "5s",

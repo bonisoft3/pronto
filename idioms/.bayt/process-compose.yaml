@@ -8,12 +8,6 @@ processes:
     - -t
     - .bayt/Taskfile.yml
     - bayt:launch
-  "bayt:httpcheck":
-    entrypoint:
-    - bayt
-    - microcheck
-    - httpcheck
-    - --help
   launch:
     depends_on:
       caddy:
@@ -59,9 +53,6 @@ processes:
     - APP_URL=https://localhost:${CADDY_TLS_HOST_PORT:-28068}
     - SETTLE_TIMEOUT_MS=50000
   caddy:
-    depends_on:
-      "bayt:httpcheck":
-        condition: process_completed_successfully
     entrypoint:
     - mise
     - x
@@ -76,8 +67,12 @@ processes:
     - ORIGIN=${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT:-28068}}
     - PORT=${CADDY_HTTP_PORT:-28125}
     readiness_probe:
-      exec:
-        command: bayt microcheck httpcheck http://127.0.0.1:${CADDY_HTTP_PORT:-28125}/health
+      http_get:
+        scheme: http
+        host: 127.0.0.1
+        port: ${CADDY_HTTP_PORT:-28125}
+        path: /health
+        status_code: 200
       period_seconds: 5
       timeout_seconds: 5
       failure_threshold: 32

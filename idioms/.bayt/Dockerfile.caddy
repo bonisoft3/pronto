@@ -2,7 +2,9 @@
 FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS caddy
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --chmod=755 --from=tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa /bin/httpcheck /usr/local/bin/httpcheck
+COPY --from=bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df /lazybox/share/ca-certificates/ca-certificates.crt /usr/local/lib/bayt/http200/ca.pem
+COPY --chmod=755 --from=bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df /lazybox/libexec/static-curl /usr/local/lib/bayt/http200/curl
+COPY --chmod=755 --from=busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 /bin/busybox /usr/local/lib/bayt/http200/busybox
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY .cert[s] /certs/
 COPY --from=idioms-served /served/omnishell/ /omnishell/
@@ -13,7 +15,7 @@ COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/bayt.caddy.json ./.bayt/
 EXPOSE 8080
 EXPOSE 8443
 ENTRYPOINT ["sh","-c","case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; : > /etc/caddy/env; case \"$h\" in *:*) _p=${h##*:};; *) _p=8443;; esac; export CADDY_TLS_HOST_PORT=\"${CADDY_TLS_HOST_PORT:-$_p}\"; printf 'CADDY_TLS_HOST_PORT=%s\\n' \"$CADDY_TLS_HOST_PORT\" >> /etc/caddy/env; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; printf 'CADDY_TLS=%s\\n' \"$CADDY_TLS\" >> /etc/caddy/env; fi; PRONTO_RELEASE_SCRIPTS=$(cat /etc/caddy/release-scripts); export PRONTO_RELEASE_SCRIPTS; printf 'PRONTO_RELEASE_SCRIPTS=%s\\n' \"$PRONTO_RELEASE_SCRIPTS\" >> /etc/caddy/env; set -e -o pipefail; roots=$(caddy adapt --envfile /etc/caddy/env --config /etc/caddy/Caddyfile --adapter caddyfile | awk '{ while (match($0, /\"root\":\"[^\"]*\"/)) { print substr($0, RSTART + 8, RLENGTH - 9); $0 = substr($0, RSTART + RLENGTH) } }' | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; exec caddy run --envfile /etc/caddy/env --config /etc/caddy/Caddyfile --adapter caddyfile"]
-HEALTHCHECK --interval=5s --timeout=5s --retries=30 --start-period=10s CMD ["httpcheck","http://127.0.0.1:8080/health"]
+HEALTHCHECK --interval=5s --timeout=5s --retries=30 --start-period=10s CMD ["/usr/local/lib/bayt/http200/busybox","sh","-ec","export CURL_CA_BUNDLE=\"${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}\"; status=$(\"$@\"); [ \"$status\" = 200 ] || { printf 'HTTP status %s, expected 200\\n' \"$status\" >&2; exit 1; }","http200","/usr/local/lib/bayt/http200/curl","--disable","--silent","--show-error","--head","--request","GET","--location","--max-redirs","9","--max-time","5","--proto","=http,https","--proto-redir","=http,https","--output","/dev/null","--write-out","%{http_code}","http://127.0.0.1:8080/health"]
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS caddy_ctxs
 ARG BAYT_DIR

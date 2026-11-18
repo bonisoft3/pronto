@@ -48,163 +48,163 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 url_api = "https://api.github.com/repos/FiloSottile/mkcert/releases/assets/63709958"
 
 [[tools."github:bonisoft3/bayt"]]
-version = "0.72.4"
+version = "0.73.0"
 backend = "github:bonisoft3/bayt"
-specifiers = ["0.72.4"]
+specifiers = ["0.73.0"]
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103465"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494642"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64-musl"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103465"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494642"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103474"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494650"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64-musl"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103474"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494650"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-arm64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103477"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494641"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-x64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103475"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494646"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-arm64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103468"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494643"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-x64"]
-checksum = "sha256:dec223e9612dd917347a33cc2c0bb509d2295cf5e29190274f5e4603a5806423"
+checksum = "sha256:708869cb479d22807dd9b2bfae12bb03cf719995a53f01f32d4a6613ab7e6177"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.72.4/bayt-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/757103466"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.73.0/bayt-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/763494644"
 
 [[tools."github:bonisoft3/mecha"]]
-version = "0.25.1"
+version = "0.25.2"
 backend = "github:bonisoft3/mecha"
-specifiers = ["0.25.1"]
+specifiers = ["0.25.2"]
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317787"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571117"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64-musl"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317787"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571117"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317778"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571116"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64-musl"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317778"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571116"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-arm64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317785"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571114"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-x64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317791"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571110"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-arm64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317784"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571115"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-x64"]
-checksum = "sha256:7372d07ef12a076457afcd79bd02f533882ec11016b1ec1820f3206734a6ba66"
+checksum = "sha256:a31502d408712dea84f56d4953e83255f4baa5c1668f25aac18fc1179197f330"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.1/mecha-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/760317788"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.25.2/mecha-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/763571107"
 
 [[tools."github:bonisoft3/omnishell"]]
-version = "0.25.0"
+version = "0.25.1"
 backend = "github:bonisoft3/omnishell"
-specifiers = ["0.25.0"]
+specifiers = ["0.25.1"]
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300696"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618955"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64-musl"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300696"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618955"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300702"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618952"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64-musl"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300702"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618952"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-arm64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300704"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618949"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-x64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300692"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618946"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-arm64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300691"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618953"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-x64"]
-checksum = "sha256:e6199d010dfdb26d1d6205a099423c5dccc0f56c1b9b1c349b1903c626931010"
+checksum = "sha256:da25a139920c31444ddf6c88ea1ee842372ef9b16c8aa6683fd485ce4dba9243"
 checksum_source = "mise-versions"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.0/omnishell-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/757300701"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.25.1/omnishell-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/763618947"
 
 [[tools."github:bonisoft3/pronto"]]
 version = "1.4.2"

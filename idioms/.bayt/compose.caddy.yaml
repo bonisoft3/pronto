@@ -141,7 +141,34 @@ services:
     healthcheck:
       test:
       - CMD
-      - httpcheck
+      - /usr/local/lib/bayt/http200/busybox
+      - sh
+      - -ec
+      - >-
+        export CURL_CA_BUNDLE="$${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}";
+        status=$$("$$@"); [ "$$status" = 200 ] || { printf 'HTTP status %s, expected
+        200\n' "$$status" >&2; exit 1; }
+      - http200
+      - /usr/local/lib/bayt/http200/curl
+      - --disable
+      - --silent
+      - --show-error
+      - --head
+      - --request
+      - GET
+      - --location
+      - --max-redirs
+      - "9"
+      - --max-time
+      - "5"
+      - --proto
+      - =http,https
+      - --proto-redir
+      - =http,https
+      - --output
+      - /dev/null
+      - --write-out
+      - "%{http_code}"
       - http://127.0.0.1:8080/health
       interval: 5s
       timeout: 5s

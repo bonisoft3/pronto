@@ -207,8 +207,8 @@ say:
     # The bootstrap reference states the tool releases distribution pins, each
     # where it names one.
     shared:
-      - pattern: '(?:#Version: +"|Pronto \*\*|"version": ")(?<v>\d+\.\d+\.\d+)'
-        files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md, .claude-plugin/plugin.json, .codex-plugin/plugin.json]
+      - pattern: '(?:#Version: +"|Pronto \*\*|"name": "pronto",\s+(?:"description": "[^"]+",\s+)?"version": ")(?<v>\d+\.\d+\.\d+)'
+        files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md, plugin.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json]
       - pattern: '(?:#SaytVersion: +"|Sayt \*\*|bonisoft3/sayt/v)(?<v>\d+\.\d+\.\d+)'
         files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md]
     rulemap:

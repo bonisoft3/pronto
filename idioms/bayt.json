@@ -1552,7 +1552,7 @@
         "manual": true,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.25.0@sha256:64ec248518bbee6e9cb2b172fe865d9a09cf3f4acbb118d0e4cbfee2c2bb91bc}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.25.1@sha256:a807d1ac0bc336c8a6ecfaf2700cb5cad55404468716a4a5791ede8c3d1c1329}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
@@ -3638,15 +3638,42 @@
           }
         ],
         "defaultCopy": {
-          "httpcheck": {
+          "http200-curl": {
             "from": {
-              "name": "tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa"
+              "name": "bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df"
             },
-            "name": "httpcheck",
+            "name": "http200-curl",
             "srcs": [
-              "/bin/httpcheck"
+              "/lazybox/libexec/static-curl"
             ],
-            "dst": "/usr/local/bin/httpcheck",
+            "dst": "/usr/local/lib/bayt/http200/curl",
+            "chmod": "755",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "http200-ca": {
+            "from": {
+              "name": "bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df"
+            },
+            "name": "http200-ca",
+            "srcs": [
+              "/lazybox/share/ca-certificates/ca-certificates.crt"
+            ],
+            "dst": "/usr/local/lib/bayt/http200/ca.pem",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "http200-shell": {
+            "from": {
+              "name": "busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223"
+            },
+            "name": "http200-shell",
+            "srcs": [
+              "/bin/busybox"
+            ],
+            "dst": "/usr/local/lib/bayt/http200/busybox",
             "chmod": "755",
             "link": true,
             "parents": false,
@@ -3656,7 +3683,31 @@
         "healthcheck": {
           "test": [
             "CMD",
-            "httpcheck",
+            "/usr/local/lib/bayt/http200/busybox",
+            "sh",
+            "-ec",
+            "export CURL_CA_BUNDLE=\"${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}\"; status=$(\"$@\"); [ \"$status\" = 200 ] || { printf 'HTTP status %s, expected 200\\n' \"$status\" >&2; exit 1; }",
+            "http200",
+            "/usr/local/lib/bayt/http200/curl",
+            "--disable",
+            "--silent",
+            "--show-error",
+            "--head",
+            "--request",
+            "GET",
+            "--location",
+            "--max-redirs",
+            "9",
+            "--max-time",
+            "5",
+            "--proto",
+            "=http,https",
+            "--proto-redir",
+            "=http,https",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
             "http://127.0.0.1:8080/health"
           ],
           "interval": "5s",
@@ -3696,7 +3747,31 @@
         "healthcheck": {
           "test": [
             "CMD",
-            "httpcheck",
+            "/usr/local/lib/bayt/http200/busybox",
+            "sh",
+            "-ec",
+            "export CURL_CA_BUNDLE=\"$${SSL_CERT_FILE:-/usr/local/lib/bayt/http200/ca.pem}\"; status=$$(\"$$@\"); [ \"$$status\" = 200 ] || { printf 'HTTP status %s, expected 200\\n' \"$$status\" >&2; exit 1; }",
+            "http200",
+            "/usr/local/lib/bayt/http200/curl",
+            "--disable",
+            "--silent",
+            "--show-error",
+            "--head",
+            "--request",
+            "GET",
+            "--location",
+            "--max-redirs",
+            "9",
+            "--max-time",
+            "5",
+            "--proto",
+            "=http,https",
+            "--proto-redir",
+            "=http,https",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
             "http://127.0.0.1:8080/health"
           ],
           "interval": "5s",
@@ -3909,14 +3984,13 @@
         "activate": "mise x --"
       },
       "healthcheck": {
-        "template": "http",
+        "template": "http200",
         "scheme": "http",
         "host": "127.0.0.1",
         "port": 8080,
         "path": "/health",
         "url": "http://127.0.0.1:8080/health",
-        "authorization": null,
-        "headers": [],
+        "headers": {},
         "interval": "5s",
         "start_interval": "500ms",
         "timeout": "5s",
@@ -4081,7 +4155,7 @@
         "manual": false,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.25.0@sha256:64ec248518bbee6e9cb2b172fe865d9a09cf3f4acbb118d0e4cbfee2c2bb91bc}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.25.1@sha256:a807d1ac0bc336c8a6ecfaf2700cb5cad55404468716a4a5791ede8c3d1c1329}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
