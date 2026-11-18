@@ -432,6 +432,47 @@ Deno.test("the appliance does not start without a seal key of its own", async ()
   assert(!(await start("a-key-of-its-own", dev)).success, "started with the development key as the previous one");
   const own = await start("a-key-of-its-own");
   assert(own.success, new TextDecoder().decode(own.stderr));
+  // Nor on the local stack's word that this is the local stack.
+  const claimed = await new Deno.Command("sh", { args: [script, "true"], env: { AIRLOCK_SEAL_KEY: "a-key-of-its-own", AIRLOCK_SEAL_DEV: "local" } }).output();
+  assert(!claimed.success, "started as the local stack");
+  assertStringIncludes(new TextDecoder().decode(claimed.stderr), "AIRLOCK_SEAL_DEV says this is the local stack");
+});
+
+// The appliance runs the base file launch@host runs, whose airlock says it is
+// the local stack (AIRLOCK_SEAL_DEV=local) so it takes the development key;
+// process-compose appends the overlay's environment to the base's. The
+// airlock the appliance starts is a release's whichever way that merge went:
+// the image drops the base's word, the overlay overrides it, and the release
+// it names refuses it outright (seal.ts sealLocal).
+Deno.test("the appliance's airlock is a release's, whatever the base file it shares with the local stack says", async () => {
+  const pinned = paymentProgram({ effect: 'secrets: [{field: "pin"}]' })
+    .replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          {name: "pin", type: "string", secret: true},`)
+    .replace("targets: []", 'targets: ["docker"]');
+  const rd = await releaseDocker(pinned);
+  const env = await exportJson("_cluster.surface.targets.airlock.entrypoint.env", pinned);
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(env.value.AIRLOCK_SEAL_DEV, "local", "the local stack no longer says so: this test checks nothing");
+  // The base as bayt writes the airlock's process: its environment one K=V a line.
+  const base = Object.entries(env.value as Record<string, unknown>).flatMap(([k, v]) => typeof v === "string" ? [`${k}=${v}`] : []);
+  const dir = await Deno.makeTempDir();
+  const file = `${dir}/process-compose.yaml`;
+  await Deno.writeTextFile(file, `version: "0.5"\nprocesses:\n  airlock:\n    command: deno\n    environment:\n${base.map((e) => `    - ${e}\n`).join("")}`);
+  const strip = rd.dockerfile.epilogue.find((l) => l.startsWith("RUN grep -v AIRLOCK_SEAL_DEV"));
+  assert(strip, "the image keeps the base's AIRLOCK_SEAL_DEV");
+  const ran = await new Deno.Command("sh", { args: ["-c", strip.replace(/^RUN /, "").replaceAll("/.bayt/process-compose.yaml", file).replaceAll("/tmp/process-compose.yaml", `${dir}/pc.tmp`)] }).output();
+  assert(ran.success, new TextDecoder().decode(ran.stderr));
+  const stripped = (parse(await Deno.readTextFile(file)) as { processes: { airlock: { environment: string[] } } }).processes.airlock.environment;
+  const overlay = overlayOf(rd).processes.airlock.environment!;
+  // process-compose's merge: the overlay's entries after the base's, the last of a name winning.
+  const effective = (lists: string[][]) => new Map(lists.flat().map((e) => [e.slice(0, e.indexOf("=")), e.slice(e.indexOf("=") + 1)]));
+  for (const merged of [effective([stripped, overlay]), effective([base, overlay]), effective([stripped]), effective([overlay])]) {
+    assertEquals(merged.get("AIRLOCK_SEAL_DEV") ?? "", "", JSON.stringify([...merged]));
+  }
+  // Had both survived, base after overlay, the airlock sees its release
+  // beside the local stack's word, which mecha's seal.ts sealLocal refuses.
+  const worst = effective([overlay, base]);
+  assertEquals([worst.get("AIRLOCK_SEAL_DEV"), worst.get("AIRLOCK_RELEASE")], ["local", "docker"]);
+  assertEquals(effective([base, overlay]).get("AIRLOCK_RELEASE"), "docker");
 });
 
 // An effect's answered bytes go to the blob plane, which the appliance does not

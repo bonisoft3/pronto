@@ -51,6 +51,9 @@ package schema
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
+		// Those the program declares for another issuer's tokens, which crud
+		// tells the floor at every request; empty where none.
+		declaredRoles: *[] | [...string]
 	}
 
 	// Set where the release trusts an issuer's keys (TRUSTED_JWKS): their

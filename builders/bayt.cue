@@ -1122,8 +1122,11 @@ import (
 							airlock: {
 								command:     (_command & {args: ["airlock-deno", "run", "--frozen", "--unstable-worker-options", "--allow-net=database:\(mecha.#AppliancePort.database),airlock-mesh:\(mecha.#AppliancePort.meshHttp),0.0.0.0:\(mecha.#AppliancePort.airlock)", "--allow-read", "--allow-env", "--allow-sys", "main.ts"]}).out
 								working_dir: "/app/airlock"
+								// A release's airlock, which takes no development seal key
+								// whatever the base's environment says (seal.ts sealLocal):
+								// process-compose appends this list to the base's.
 								environment: list.Concat([
-									["DATABASE_URL=\(_db)", "MESH_URL=http://airlock-mesh:\(mecha.#AppliancePort.meshHttp)", "AIRLOCK_DIR=/airlock", "DENO_DIR=/airlock-deno-dir", "PORT=\(mecha.#AppliancePort.airlock)"],
+									["DATABASE_URL=\(_db)", "MESH_URL=http://airlock-mesh:\(mecha.#AppliancePort.meshHttp)", "AIRLOCK_DIR=/airlock", "DENO_DIR=/airlock-deno-dir", "PORT=\(mecha.#AppliancePort.airlock)", "AIRLOCK_RELEASE=docker", "AIRLOCK_SEAL_DEV="],
 									[if len(B.cluster.state.bridges) > 0 {"AIRLOCK_TARGET=docker"}],
 								])
 								depends_on: {
@@ -1174,7 +1177,8 @@ import (
 				// one is the local stack's alone. The airlock refuses it by its id at
 				// start (seal.ts refuseDevKey); this refuses its usual spellings, the
 				// bytes it decodes to in either base64 alphabet, before anything runs.
-				let _devSealCheck = [if list.Contains(_secrets, "AIRLOCK_SEAL_KEY") {"'for k in AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; do' '  eval \"v=\\${$k:-}\"' '  s=$(printf %s \"$v\" | tr -d \" \\t\\r\\n=\" | tr -- -_ +/)' '  while [ $(( ${#s} % 4 )) -ne 0 ]; do s=\"$s=\"; done' '  [ -z \"$s\" ] || [ \"$(printf %s \"$s\" | base64 -d 2>/dev/null | sha256sum | cut -d\" \" -f1)\" != \(hex.Encode(sha256.Sum256(base64.Decode(null, mecha.#DevSealKey)))) ] || { echo \"appliance: $k is the development key in the repository: give the appliance a key of its own\" >&2; exit 1; }' 'done' "}, ""][0]
+				// Nor does it take the local stack's word that it is the local stack.
+				let _devSealCheck = [if list.Contains(_secrets, "AIRLOCK_SEAL_KEY") {"'[ -z \"${AIRLOCK_SEAL_DEV:-}\" ] || { echo \"appliance: AIRLOCK_SEAL_DEV says this is the local stack, which seals to the development key: unset it\" >&2; exit 1; }' 'for k in AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; do' '  eval \"v=\\${$k:-}\"' '  s=$(printf %s \"$v\" | tr -d \" \\t\\r\\n=\" | tr -- -_ +/)' '  while [ $(( ${#s} % 4 )) -ne 0 ]; do s=\"$s=\"; done' '  [ -z \"$s\" ] || [ \"$(printf %s \"$s\" | base64 -d 2>/dev/null | sha256sum | cut -d\" \" -f1)\" != \(hex.Encode(sha256.Sum256(base64.Decode(null, mecha.#DevSealKey)))) ] || { echo \"appliance: $k is the development key in the repository: give the appliance a key of its own\" >&2; exit 1; }' 'done' "}, ""][0]
 
 				// The door's port, which the one starting the appliance may move, is
 				// no port a bridge's process of it listens on.
@@ -1410,6 +1414,9 @@ import (
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
 							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_devSealCheck)\#(_engine)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
+							// The local stack's word that it is the local stack, which the
+							// base's airlock carries for launch@host, goes from the image.
+							if _effects {#"RUN grep -v AIRLOCK_SEAL_DEV /.bayt/process-compose.yaml > /tmp/process-compose.yaml && mv /tmp/process-compose.yaml /.bayt/process-compose.yaml"#},
 							// The appliance runs no renderer: its handler goes, braces counted,
 							// since a handler holds nested blocks a line match would cut short.
 							#"RUN awk 'skip { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) skip = 0; next } /handle @rendered \{/ { skip = 1; d = 1; next } { print }' /etc/caddy/Caddyfile > /tmp/Caddyfile && mv /tmp/Caddyfile /etc/caddy/Caddyfile"#,

@@ -90,6 +90,22 @@ or a migration, `GRANT EXECUTE` on a function or a policy naming it
 [rewrite](rewrites.md#a-path-another-system-calls) can keep the path the caller
 already calls. A role declared after a database was built reaches it on the
 next release, ahead of that release's migrations, which may then grant it.
+A role removed is refused from the release that removes it: crud is told
+the roles the program declares (`PGRST_APP_SETTINGS_TOKEN_ROLES`, which
+PostgREST sets in every request and no client can), and the floor admits a
+registered role only while crud is told it, so a crud told nothing admits none.
+The database is cleaned up behind it: the release leaves the role out of
+`mecha.token_role` and revokes it from PostgREST's login, on a migrate step.
+An app with no migrations of its own runs one only where it says `state:
+tokenRoles: {}`, and generating one that deletes `tokenRoles` outright warns.
+A token naming no issuer stays `anon`'s once the app has trusted one, since a
+crud not yet restarted, or an operator's key set, may still hold the issuer's
+keys. Where an administrator owns the roles (`mecha.roles=external`), they
+revoke the role from PostgREST's login and the release only checks that they
+did before it forgets the role. A database whose `app_pre_request` predates
+this check keeps the older function until a migrate step restates the floor;
+token roles shipped only with this floor's previous revision, so no deployed
+database holds one.
 
 **The release trusts an issuer.** PostgREST fetches no JWKS, so a release
 gives crud the key set it verifies by, `PGRST_JWKS`: the stack's own secret as
@@ -131,9 +147,9 @@ Tokens the stack signed before it named its issuer carry none. Such a token is
 believed while the app trusts no other issuer, where only the stack's secret
 verifies anything, so no deployed app's sessions or service token change:
 an app trusts an issuer only through a declared token role, which no deployed
-app has. Once an app declares one, a token naming no issuer reaches no role
-but `anon`, and its people sign in again; every release restates its service
-token, which then names the stack's issuer.
+app has. Once an app declares one, a token naming no issuer acts as `anon`,
+signed out, whatever role it wrote, and its people sign in again; every
+release restates its service token, which then names the stack's issuer.
 
 The residual is the issuer's key: PostgREST does not say which key verified a
 token, so an outside issuer whose key signed a token naming the stack's issuer

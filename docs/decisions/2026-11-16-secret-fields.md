@@ -92,9 +92,13 @@ The key follows pronto's tiers ([release targets](../release-targets.md#keys)):
 - **Dev.** The local stack falls back to a development key committed in mecha,
   as it does for its JWT secret, and says so (`AIRLOCK_SEAL_DEV=local`).
   Everywhere else the airlock refuses that key by its id at start, however its
-  PKCS#8 is spelled, current or previous; cloudflare's publish refuses it by
-  its id, and gcp's release and the appliance refuse its usual spellings
-  before anything runs.
+  PKCS#8 is spelled, current or previous; cloudflare's publish and its
+  dispatcher refuse it by its id, and gcp's release and the appliance refuse
+  its usual spellings before anything runs. A release's airlock names its
+  release (`AIRLOCK_RELEASE`) and refuses to start where the local stack's
+  word reaches it too: the appliance runs the process file the local stack
+  does, whose airlock carries it, and drops it from that file and from its
+  own environment besides.
 - **Staging and sandbox.** A SOPS-encrypted file of the deployment's own,
   decrypted into the release's environment, as snapcards' staging does
   (`apps/snapcards/.say.cue`: `sops decrypt ... | load-env` before each

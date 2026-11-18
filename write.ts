@@ -13,6 +13,7 @@
 // cannot reach it.
 
 import type { LiveStatic } from "./live-tree.ts";
+import { tokenRolesRemoval } from "./role-removal.ts";
 import { dirname, resolve } from "node:path";
 import { packageHatch, type Declaration } from "./activepieces-package.ts";
 import { pathToFileURL } from "node:url";
@@ -406,6 +407,11 @@ async function cueInputs(root: string): Promise<(rel: string) => boolean> {
 
 /** Reconciles the emission, including stale files and rendered documents. */
 async function writeEmission(emission: Emission): Promise<{ written: string[]; changed: boolean; cueWrote: boolean }> {
+  const removal = tokenRolesRemoval(
+    JSON.parse(await ifMissing(Deno.readTextFile(`${appDir}/.pronto/cluster.json`), "null")),
+    emission.files[".pronto/cluster.json"]?.data as Parameters<typeof tokenRolesRemoval>[1],
+  );
+  if (removal) console.error(`pronto write: warning: ${removal}`);
   const cueReads = await cueInputs(appDir);
   const contents = await rendered(emission);
   const documents = Object.keys(emission.files).filter((rel) => emission.files[rel].format === "document");

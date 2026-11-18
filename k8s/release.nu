@@ -302,7 +302,7 @@ export def runtime-services [compose: record]: nothing -> record {
 const airlock_wiring = [AIRLOCK_DIR BLOB_URL MESH_URL PORT]
 # What the release states itself: the database's credential, the door's
 # origin and the target the airlock calls bridges on.
-const airlock_stated = [DATABASE_URL PGPASSWORD ORIGIN AIRLOCK_TARGET]
+const airlock_stated = [DATABASE_URL PGPASSWORD ORIGIN AIRLOCK_TARGET AIRLOCK_RELEASE]
 # The keys a secret field is sealed to, where an effect reads one: the
 # release's own from its environment, never compose's development default,
 # and AIRLOCK_SEAL_DEV, by which the local stack alone takes that default
@@ -429,7 +429,7 @@ export def render-manifests [
 	} else { {services: {}} }
 	let runtime = (runtime-services $compose)
 	let airlock = (airlock-services $compose $facts)
-	{App: ({database: {tokenRoles: $facts.tokenRoles}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge (if ($airlock | is-empty) { {} } else { {airlock: $airlock} }))} | to json | save -f $roles_file
+	{App: ({database: {tokenRoles: $facts.tokenRoles, declaredRoles: ($facts.declaredRoles? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge (if ($airlock | is-empty) { {} } else { {airlock: $airlock} }))} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

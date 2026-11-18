@@ -6,7 +6,7 @@
 // rationale: the role a token names is the operator's, never the caller's;
 // a token is crud's only if the issuer signed it for crud's audience; and a
 // function granted to the role alone refuses everyone else.
-import { assertEquals } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { keySet } from "./trusted-keys.ts";
 import { front } from "./identity/hydra/front.ts";
@@ -154,6 +154,14 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
     await w.close();
     const restated = new TextDecoder().decode((await reconcile.output()).stdout);
     if (!restated.includes("residual_bot")) throw new Error("no reconcile for the declared roles");
+    const removed = await new Deno.Command("cue", { args: ["export", "-", "-e", "_cluster.state.reconcile.roles", "--out", "text"], stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
+    const wr = removed.stdin.getWriter();
+    // The program's last role removed, as docs/identity.md says to: `tokenRoles: {}`
+    // keeps the release that takes it back running the prune.
+    await wr.write(text.encode(program.replace(/    tokenRoles: residual_bot: note: .*\n/, "    tokenRoles: {}\n")));
+    await wr.close();
+    const pruned = new TextDecoder().decode((await removed.output()).stdout);
+    if (pruned.includes("residual_bot") || !pruned.includes("mecha.token_role")) throw new Error("no reconcile prunes the roles once none is declared");
     await must(psql(restated));
     await must(psql(restated));
     // The app's own SQL: the residual is the role's to create, and the
@@ -170,9 +178,24 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
       REVOKE EXECUTE ON FUNCTION advance_residual() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION advance_residual() TO residual_bot;
       CREATE ROLE other_bot NOLOGIN;`));
-    await must(run("docker", ["run", "-d", "--rm", "--name", rest, "--network", network, "--network-alias", "crud",
-      "-e", "PGRST_DB_URI=postgres://authenticator:auth-pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", "-e", "PGRST_DB_PRE_REQUEST=public.app_pre_request",
-      "-e", `PGRST_JWT_SECRET=${keySet(SECRET, trusted)}`, "-e", `PGRST_JWT_AUD=${AUDIENCE}`, pinned("postgrest/postgrest")]));
+    // crud as the release runs it, told the roles the program declares
+    // (the cluster's PGRST_APP_SETTINGS_TOKEN_ROLES); `declared` undefined is
+    // a crud told nothing.
+    const told = new Deno.Command("cue", { args: ["export", "-", "-e", "_cluster.surface.targets.crud.entrypoint.env.PGRST_APP_SETTINGS_TOKEN_ROLES", "--out", "text"], stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
+    const tw = told.stdin.getWriter();
+    await tw.write(text.encode(program));
+    await tw.close();
+    const crudEnv = await told.output();
+    const declaredSetting = new TextDecoder().decode(crudEnv.stdout).trim();
+    if (declaredSetting !== "residual_bot") throw new Error(`crud is told ${JSON.stringify(declaredSetting)}`);
+    const startCrud = async (declared: string | undefined) => {
+      await run("docker", ["rm", "-f", rest]);
+      await must(run("docker", ["run", "-d", "--rm", "--name", rest, "--network", network, "--network-alias", "crud",
+        "-e", "PGRST_DB_URI=postgres://authenticator:auth-pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", "-e", "PGRST_DB_PRE_REQUEST=public.app_pre_request",
+        ...(declared === undefined ? [] : ["-e", `PGRST_APP_SETTINGS_TOKEN_ROLES=${declared}`]),
+        "-e", `PGRST_JWT_SECRET=${keySet(SECRET, trusted)}`, "-e", `PGRST_JWT_AUD=${AUDIENCE}`, pinned("postgrest/postgrest")]));
+    };
+    await startCrud(declaredSetting);
     await must(run("docker", ["run", "-d", "--rm", "--name", gate, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
       pinned("caddy"), "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]));
     const port = (await run("docker", ["port", gate, "8080"])).out.split(":").pop();
@@ -260,8 +283,52 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
       assertEquals((await list(await hs256({ iss: STACK_ISSUER, role: "service", sub: "00000000-0000-0000-0000-000000000000", exp }))).status, 200);
       assertEquals((await list(await hs256({ iss: STACK_ISSUER, role: "app_user", sub: crypto.randomUUID(), guest: true, exp }))).status, 200);
       // The stack's own token from before it named its issuer acts as anon
-      // alone, now that the app trusts another issuer.
-      assertEquals((await list(await hs256({ role: "service", sub: "00000000-0000-0000-0000-000000000000", exp }))).status, 403);
+      // alone, now that the app trusts another issuer: signed out, not refused.
+      const unnamed = await list(await hs256({ role: "service", sub: "00000000-0000-0000-0000-000000000000", exp }));
+      // anon holds nothing on the table, which service reads.
+      assertEquals([unnamed.status, unnamed.body.message], [403, "permission denied for table advance_payment"]);
+    });
+    await t.step("a release that no longer declares the role refuses it at once, before anything prunes the database", async () => {
+      const exp = Math.floor(Date.now() / 1000) + 600;
+      const stackList = async () => (await fetch(`http://127.0.0.1:${port}/expense/advance-payments?select=id&limit=1`, { headers: { authorization: `Bearer ${await hs256({ iss: STACK_ISSUER, role: "service", sub: "00000000-0000-0000-0000-000000000000", exp })}` } })).status;
+      const ready = async () => {
+        for (let i = 0; (await residual().catch(() => ({ status: 0 }))).status !== 401; i++) {
+          if (i > 120) throw new Error("crud did not come back");
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      };
+      // The field deleted outright, twice generated, no migrate step run: the
+      // registry still holds the role, and crud, told none, refuses it.
+      for (const declared of ["", undefined]) {
+        await startCrud(declared);
+        await ready();
+        assertEquals((await psql("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'")).out, "1");
+        const refused = await residual(await tokenOf("residual_bot", AUDIENCE));
+        assertEquals([refused.status, refused.body.message], [403, "a token acts as residual_bot, a token role this release does not declare"], String(declared));
+        assertEquals(await stackList(), 200, "the stack's own token");
+      }
+      await startCrud(declaredSetting);
+      await ready();
+      assertEquals((await residual(await tokenOf("residual_bot", AUDIENCE))).status, 200);
+    });
+    await t.step("a release that declares the role no more takes it back", async () => {
+      await must(psql(pruned));
+      await must(psql(pruned));
+      assertEquals((await psql("SELECT string_agg(quote_literal(role_name), ',') FROM mecha.token_role")).out, "''");
+      assertEquals((await psql("SELECT pg_has_role('authenticator', 'residual_bot', 'MEMBER')")).out, "f");
+      assertEquals((await residual(await tokenOf("residual_bot", AUDIENCE))).status >= 400, true, "the issuer's token still acts as the role");
+      // This crud still holds the issuer's keys, as one not yet restarted
+      // does: a token naming no issuer, which the issuer could sign, stays
+      // anon's, and the stack's own, naming its issuer, act as before.
+      const exp = Math.floor(Date.now() / 1000) + 600;
+      const list = async (claims: Record<string, unknown>) => {
+        const res = await fetch(`http://127.0.0.1:${port}/expense/advance-payments?select=id&limit=1`, { headers: { authorization: `Bearer ${await hs256({ sub: "00000000-0000-0000-0000-000000000000", exp, ...claims })}` } });
+        return [res.status, await res.json()];
+      };
+      assertEquals((await list({ role: "service" }))[0], 403);
+      assertEquals((await fetch(`http://127.0.0.1:${port}/expense/advance-payments?select=id&limit=1`, { headers: { authorization: `Bearer ${await fromOutside({ iss: undefined, role: "service", sub: "bot" })}` } })).status, 403);
+      const stack = await list({ iss: STACK_ISSUER, role: "service" });
+      assertEquals([stack[0], (stack[1] as unknown[]).length], [200, 1]);
     });
   } finally {
     for (const name of [gate, rest, db]) await run("docker", ["rm", "-f", name]);
@@ -270,5 +337,95 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
     hydra.kill();
     await hydra.status;
     await broker.shutdown();
+  }
+} });
+
+// Taking a role back, against a real PostgreSQL: whoever granted it, in the
+// framework's mode; in an administrator's mode only once they revoked it; and
+// over a database whose floor predates the marker the prune leaves.
+Deno.test({ name: "a removed token role is taken back whoever granted it, by its administrator where mecha.roles is external, over an older floor", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+  const db = `roles-prune-${crypto.randomUUID().slice(0, 8)}`;
+  const psql = (sql: string) => run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-h", "127.0.0.1"], sql);
+  const must = async (sql: string) => {
+    const r = await psql(sql);
+    if (!r.ok) throw new Error(r.err);
+    return r.out;
+  };
+  const exported = async (code: string) => {
+    const child = new Deno.Command("cue", { args: ["export", "-", "-e", "_cluster.state.reconcile.roles", "--out", "text"], stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
+    const w = child.stdin.getWriter();
+    await w.write(text.encode(code));
+    await w.close();
+    const out = await child.output();
+    if (!out.success) throw new Error(new TextDecoder().decode(out.stderr));
+    return new TextDecoder().decode(out.stdout);
+  };
+  const declared = await exported(program);
+  const pruned = await exported(program.replace(/    tokenRoles: residual_bot: note: .*\n/, "    tokenRoles: {}\n"));
+  const held = async () => await must("SELECT pg_has_role('authenticator', 'residual_bot', 'MEMBER')");
+  try {
+    await (async () => {
+      const r = await run("docker", ["run", "-d", "--rm", "--name", db, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);
+      if (!r.ok) throw new Error(r.err);
+    })();
+    for (let i = 0; !(await run("docker", ["exec", db, "pg_isready", "-qh", "127.0.0.1", "-U", "postgres"])).ok; i++) {
+      if (i > 60) throw new Error("postgres did not start");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    await must((await emitFiles(program))["services/database/migrations/001_roles.sql"].text);
+
+    await t.step("the framework revokes a grant another role made", async () => {
+      await must(declared);
+      await must(`CREATE ROLE other_grantor NOLOGIN; GRANT residual_bot TO other_grantor WITH ADMIN OPTION;
+        REVOKE residual_bot FROM authenticator; GRANT residual_bot TO authenticator GRANTED BY other_grantor;`);
+      assertEquals(await must("SELECT pg_get_userbyid(grantor) FROM pg_auth_members WHERE roleid = 'residual_bot'::regrole AND member = 'authenticator'::regrole"), "other_grantor");
+      await must(pruned);
+      assertEquals(await held(), "f");
+      assertEquals(await must("SELECT string_agg(quote_literal(role_name), ',') FROM mecha.token_role"), "''");
+    });
+
+    await t.step("a role authenticator reaches through another stays registered until that membership goes", async () => {
+      await must(declared);
+      await must("CREATE ROLE bridge_role NOLOGIN; GRANT residual_bot TO bridge_role; GRANT bridge_role TO authenticator;");
+      for (const mode of ["framework", "external"]) {
+        const refused = await psql(`SET mecha.roles = '${mode}';\n${pruned}`);
+        assertEquals(refused.ok, false, mode);
+        assertStringIncludes(refused.err, "residual_bot", mode);
+        assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "1", mode);
+      }
+      await must("REVOKE bridge_role FROM authenticator;");
+    });
+
+    await t.step("on a database older than the registry, the prune does nothing", async () => {
+      const bare = `prune-bare-${crypto.randomUUID().slice(0, 8)}`;
+      await must(`CREATE DATABASE "${bare}"`);
+      const r = await run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-h", "127.0.0.1", "-d", bare], pruned);
+      assertEquals(r.ok, true, r.err);
+    });
+
+    await t.step("where an administrator owns the roles, the release only checks they revoked it", async () => {
+      await must(declared);
+      assertEquals(await held(), "t");
+      const refused = await psql(`SET mecha.roles = 'external';\n${pruned}`);
+      assertEquals(refused.ok, false);
+      assertStringIncludes(refused.err, "its administrator must revoke it");
+      assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "1");
+      await must("REVOKE residual_bot FROM authenticator GRANTED BY postgres;");
+      await must(`SET mecha.roles = 'external';\n${pruned}`);
+      assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "0");
+    });
+
+    await t.step("the release that takes the last role back restates a floor older than its marker", async () => {
+      await must(declared);
+      // The floor before tokens naming no issuer fell to anon: it refused them.
+      const older = floor.replace(/  IF NOT named AND claims <> '\{\}'::jsonb AND EXISTS \(SELECT 1 FROM mecha\.token_role\) THEN[\s\S]*?    sub := NULL;\n  ELSIF/, "  IF NOT named AND claims <> '{}'::jsonb AND EXISTS (SELECT 1 FROM mecha.token_role) THEN\n    RAISE EXCEPTION 'older floor' USING ERRCODE = '42501';\n  ELSIF");
+      if (older === floor) throw new Error("the floor no longer reads as this test expects");
+      await must(older);
+      await must(pruned);
+      assertEquals(await must(`BEGIN; SET LOCAL ROLE app_user; SELECT set_config('request.jwt.claims', '{"sub":"ana","role":"app_user"}', true); SELECT public.app_pre_request(); SELECT current_user; COMMIT;`).then((o) => o.split("\n").at(-1)), "anon");
+    });
+  } finally {
+    await run("docker", ["rm", "-f", db]);
   }
 } });

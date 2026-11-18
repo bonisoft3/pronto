@@ -355,6 +355,10 @@ Deno.test("an app with SSR render and airlock+tsbifrost AI gateway wires localho
   // Airlock connects to Cloud SQL proxy on 127.0.0.1:5432 and tsbifrost on 127.0.0.1:8090
   assertEquals(envOf(byName.airlock).MESH_URL, "http://127.0.0.1:8090");
   assertEquals(envOf(byName.airlock).DATABASE_URL, "snapcards-auth-database-url");
+  // crud tells the floor the roles the program declares, none here.
+  assertEquals(envOf(byName.crud).PGRST_APP_SETTINGS_TOKEN_ROLES, "");
+  // A release's airlock, which takes no development seal key (seal.ts sealLocal).
+  assertEquals([envOf(byName.airlock).AIRLOCK_RELEASE, envOf(byName.airlock).AIRLOCK_SEAL_DEV], ["gcp", undefined]);
 
   const deps = JSON.parse(svcRes.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
   assertEquals(deps.caddy, ["crud", "auth", "electric", "render"]);

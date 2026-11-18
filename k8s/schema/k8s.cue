@@ -518,6 +518,7 @@ import (
 							{name: "PGRST_DB_SCHEMA", value: "public"},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 							{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+							{name: "PGRST_APP_SETTINGS_TOKEN_ROLES", value: strings.Join(release.database.declaredRoles, ",")},
 							// With a trusted issuer, the key set the release composed from
 							// this secret and the issuer's public keys, and crud's audience.
 							if release.trustedKeysDigest == "" {

@@ -360,8 +360,9 @@ another digest is the same request made with other input, a history that diverge
 the recorded one, and so is a key it does not hold. Replay stops there rather than hand
 back an answer to another request, and settles no dead job. A row deleted and made again
 under the same primary key is another incarnation, so the keys of the two histories
-never meet. The housekeeping sweep drops the entries of incarnations that are gone: they
-have no history left to re-run.
+never meet. The entries of incarnations that are gone leave the journal, at the next
+delivery to the row or, a batch at a time, at the housekeeping sweep: they have no history
+left to re-run. No entry outlives 30 days, which is as far back as a replay reaches.
 
 ### Refused
 

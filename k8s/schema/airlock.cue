@@ -187,6 +187,10 @@ import (
 								// Bridges named for k8s are called; the rest settle
 								// as not deployed.
 								[{name: "AIRLOCK_TARGET", value: "k8s"}],
+								// A release's airlock: it refuses the development seal key by
+								// its id, however it is spelled, and refuses to start where the
+								// local stack's AIRLOCK_SEAL_DEV reaches it too (seal.ts sealLocal).
+								[{name: "AIRLOCK_RELEASE", value: "k8s"}],
 								[for k, v in A.env {name: k, value: v}],
 								[for k in A.secrets {name: k, valueFrom: secretKeyRef: {name: "\(app.name)-airlock", key: k}}],
 								// Never AIRLOCK_SEAL_DEV: the airlock refuses the development key

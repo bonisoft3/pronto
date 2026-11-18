@@ -3,6 +3,7 @@
 // verifying an issuer's token by the release's keys for its own audience alone.
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { tokenRolesRemoval } from "./role-removal.ts";
 
 const served = (roles: string, targets = "[]") =>
   paymentProgram().replace("    effects: charge:", `    tokenRoles: ${roles}\n    effects: charge:`).replace("targets: []", `targets: ${targets}`);
@@ -43,7 +44,8 @@ Deno.test("a declared token role is a role a token names, which holds nothing bu
   // An outside issuer's token acts as a declared role alone: the floor that
   // says so is restated first, and the list follows the declaration.
   assertEquals(reconciled.stdout.indexOf("CREATE OR REPLACE FUNCTION public.app_pre_request()") < reconciled.stdout.indexOf("CREATE ROLE"), true);
-  assertStringIncludes(reconciled.stdout, "INSERT INTO mecha.token_role VALUES ('residual_bot') ON CONFLICT DO NOTHING;\nDELETE FROM mecha.token_role WHERE role_name NOT IN ('residual_bot');\n");
+  assertStringIncludes(reconciled.stdout, "INSERT INTO mecha.token_role VALUES ('residual_bot') ON CONFLICT DO NOTHING;\n");
+  assertStringIncludes(reconciled.stdout, "DELETE FROM mecha.token_role WHERE role_name <> ALL (ARRAY['residual_bot', '']::text[]);");
   // A release reads the roles, the program's own among them, from the cluster's facts.
   const facts = files[".pronto/cluster.json"].data;
   assertEquals(facts.tokenRoles, ["anon", "service", "residual_bot"]);
@@ -52,6 +54,44 @@ Deno.test("a declared token role is a role a token names, which holds nothing bu
   const keyword = (await emitFiles(served(`{select: {note: "x"}}`)))["services/database/migrations/001_roles.sql"].text;
   assertStringIncludes(keyword, `CREATE ROLE "select" NOLOGIN;`);
   assertStringIncludes(keyword, `ALTER ROLE "select" SET lock_timeout`);
+});
+
+// The release that removes the last role is the one that must take it back,
+// so the prune runs for a program that declares none, behind the floor it
+// restates where a role was ever registered.
+Deno.test("a program declaring no token role still prunes the ones a release before it declared", async () => {
+  const none = await cue(["export", "-", "-e", "_cluster.state.reconcile.roles", "--out", "text"], served("{}"));
+  if (!none.success) throw new Error(none.stderr);
+  assertStringIncludes(none.stdout, "IF EXISTS (SELECT FROM mecha.token_role) THEN\n    EXECUTE $mecha_tenancy$");
+  assertStringIncludes(none.stdout, "EXECUTE format('REVOKE %I FROM authenticator GRANTED BY %I', r, pg_get_userbyid(m.grantor))");
+  assertStringIncludes(none.stdout, "its administrator must revoke it");
+  assertStringIncludes(none.stdout, "DELETE FROM mecha.token_role WHERE role_name <> ALL (ARRAY['']::text[]);");
+  for (const absent of ["CREATE ROLE", "INSERT INTO mecha.token_role VALUES ('residual"]) assertEquals(none.stdout.includes(absent), false, absent);
+  // A program that names no roles prunes on the migrate step it runs anyway,
+  // and starts none of its own for it.
+  const forward = paymentProgram() + '\napp: state: migrations: "050_forward": operations: [{sql: {up: "SELECT 1;", onComplete: true}}]\n';
+  const undeclared = await cue(["export", "-", "-e", "_cluster.state.reconcile.roles", "--out", "text"], forward);
+  assertEquals(undeclared.stdout, none.stdout, undeclared.stderr);
+  const bare = await cue(["export", "-", "-e", "_cluster.state.reconcile", "--out", "json"], paymentProgram());
+  assertEquals(JSON.parse(bare.stdout), {}, bare.stderr);
+  // An app that extends its cluster's targets reads it as written.
+  const extended = await cue(["export", "-", "-e", "_cluster.surface.targets.migrate.dockerfile.epilogue", "--out", "json"], forward + '\n_cluster: surface: targets: transport: {activate: "", dockerfile: {from: name: "alpine:3.22"}, compose: {}}\n');
+  assertEquals(extended.success, true, extended.stderr);
+  assertStringIncludes(JSON.parse(extended.stdout).join("\n"), "COPY <<'RECONCILE' /pgroll/roles.sql");
+  // Its facts say a release takes roles back, which generating relies on.
+  assertEquals((await emitFiles(forward))[".pronto/cluster.json"].data.prunesTokenRoles, true);
+  assertEquals((await emitFiles(paymentProgram()))[".pronto/cluster.json"].data.prunesTokenRoles, undefined);
+});
+
+// Deleting `tokenRoles` outright, where no migrate step would run the prune,
+// warns at generation: crud refuses the role, and the database still holds it.
+Deno.test("generating warns where dropping the last token role leaves it in the database", () => {
+  const was = { declaredRoles: ["residual_bot"] };
+  assertStringIncludes(tokenRolesRemoval(was, {})!, "write `state: tokenRoles: {}`");
+  assertEquals(tokenRolesRemoval(was, { prunesTokenRoles: true }), undefined);
+  assertEquals(tokenRolesRemoval(was, { declaredRoles: ["other_bot"], prunesTokenRoles: true }), undefined);
+  assertEquals(tokenRolesRemoval(undefined, {}), undefined);
+  assertEquals(tokenRolesRemoval({}, {}), undefined);
 });
 
 Deno.test("crud verifies an issuer's token by the release's key set and for its own audience alone", async () => {
@@ -66,6 +106,9 @@ Deno.test("crud verifies an issuer's token by the release's key set and for its 
   const before = JSON.parse(plain.stdout);
   assertEquals(before.PGRST_JWT_AUD, undefined);
   assertEquals(before.PGRST_JWT_SECRET, "${PGRST_JWT_SECRET:-mecha-dev-secret-please-override-32ch}");
+  // crud tells the floor the roles the program declares, none where it
+  // declares none, so a role a release removed acts for no token.
+  assertEquals([env.PGRST_APP_SETTINGS_TOKEN_ROLES, before.PGRST_APP_SETTINGS_TOKEN_ROLES], ["residual_bot", ""]);
 });
 
 Deno.test("a token role named as one the cluster or Postgres holds, or on a target without roles, is refused", async () => {

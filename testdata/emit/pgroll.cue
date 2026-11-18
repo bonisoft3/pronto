@@ -5,6 +5,7 @@ package emit
 
 import (
 	"encoding/json"
+	"strings"
 
 	pronto "github.com/bonisoft3/pronto"
 )
@@ -28,4 +29,7 @@ migrationFileFormat: _migratingFiles[_migrationFile].format & "json"
 migrationFileValue: json.Marshal(_migratingFiles[_migrationFile].data) & json.Marshal(_migration)
 migrationCopy: _migratingCluster.surface.targets.migrate.dockerfile.copy & [{srcs: [_migrationFile], dst: "/pgroll/01_profile_nick.json"}]
 migrationInputs: _migratingBuild.project.targets.migrate.srcs.globs & [_migrationFile]
-migrationNoHeredoc: _migratingCluster.surface.targets.migrate.dockerfile.epilogue & []
+// The epilogue holds the reconciles alone: the token roles' prune, which a
+// migrate step the program runs anyway carries.
+migrationNoHeredoc: [for l in _migratingCluster.surface.targets.migrate.dockerfile.epilogue if !strings.HasPrefix(l, "COPY <<'RECONCILE'") {l}] & []
+rolesPruned:        strings.Contains(_migratingCluster.state.reconcile.roles, "DELETE FROM mecha.token_role") & true

@@ -25,10 +25,11 @@ async function run(cmd: string, args: string[], stdin?: string) {
 const DRIVER = `
   import pg from "pg";
   import { deliverRead, performRead, pruneJournal } from "${new URL("airlock.ts", AIRLOCK).href}";
-  import { parseReads, READ_JOURNAL_SQL } from "${new URL("read.ts", AIRLOCK).href}";
+  import { journalIndexes, parseReads, READ_JOURNAL_SQL } from "${new URL("read.ts", AIRLOCK).href}";
   const [connectionString, mesh, manifest, replay, steps] = Deno.args;
   const db = new pg.Pool({ connectionString, max: 2 });
   await db.query(READ_JOURNAL_SQL);
+  await journalIndexes(db);
   const a = { db, reads: parseReads(manifest), headers: {}, mesh, replay: replay === "replay" };
   const out = [];
   for (const s of JSON.parse(steps)) {
@@ -202,10 +203,54 @@ Deno.test({ name: "a read enqueues with no claim, and the airlock's answer to th
       // The first incarnation's answer, delivered again as after a crash, at the same n.
       assertEquals(await airlock([{ op: "deliver", job: stale, settled: { target: "settled", kind: "done", data: { usd: 1 } } }]), [{ ok: false }]);
       assertEquals(await status(two), "pricing EUR");
+      // An entry of the first incarnation no sweep reached yet goes with the
+      // fresh one's delivery, found by the row.
+      const left = await psql(`INSERT INTO airlock.read_journal (key, effect, row, incarnation, n, digest, outcome) VALUES ('${stale.key}', 'rate', '${JSON.stringify(stale.row)}', '${stale.incarnation}', 1, 'd', '{"target": "settled"}');`);
+      if (!left.ok) throw new Error(left.err);
       usd = 11;
       assertEquals(await airlock([{ op: "perform", job: fresh }]), [{ ok: null }]);
       assertEquals(await status(two), "settled 11");
       assertEquals(await journal(), [`rate:${one}:${at[one]}:1 1 settled 5.3`, `rate:${two}:${fresh.incarnation}:1 1 settled 11`].sort().join("\n"));
+    });
+
+    await t.step("the journal's indexes, built concurrently, are valid", async () => {
+      assertEquals((await psql(`SELECT string_agg(c.relname || ':' || i.indisvalid, ' ' ORDER BY c.relname) FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = 'airlock.read_journal'::regclass AND c.relname IN ('read_journal_row', 'read_journal_recorded')`)).out, "read_journal_recorded:true read_journal_row:true");
+    });
+
+    await t.step("an airlock leaves an index another is still building alone, and rebuilds one a dead build left", async () => {
+      // A build under way elsewhere: its lock held, its index not yet valid.
+      const holder = new Deno.Command("docker", { args: ["exec", container, "psql", "-qtAX", "-U", "postgres", "-d", "postgres", "-c", "SELECT pg_advisory_lock(hashtext('airlock.read_journal indexes')); SELECT pg_sleep(8);"], stdout: "null", stderr: "null" }).spawn();
+      for (let i = 0; (await psql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted")).out === "0"; i++) {
+        if (i > 50) throw new Error("the holder never took the lock");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const marked = await psql("UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'airlock.read_journal_row'::regclass;");
+      if (!marked.ok) throw new Error(marked.err);
+      const valid = async () => (await psql("SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass('airlock.read_journal_row')")).out;
+      assertEquals(await airlock([]), []);
+      assertEquals(await valid(), "f", "an index another session builds was dropped or rebuilt");
+      await holder.status;
+      assertEquals(await airlock([]), []);
+      assertEquals(await valid(), "t");
+    });
+
+    await t.step("no entry outlives the journal's retention, its row standing or not", async () => {
+      const aged = await psql(`UPDATE airlock.read_journal SET recorded_at = now() - interval '31 days' WHERE key LIKE 'rate:${one}:%';`);
+      if (!aged.ok) throw new Error(aged.err);
+      assertEquals(await airlock([{ op: "prune" }]), [{ ok: null }]);
+      assertEquals(await journal(), `rate:${two}:${(await jobOf(two)).incarnation}:1 1 settled 11`);
+    });
+
+    await t.step("a sweep drops a bounded batch past the retention; a backlog drains over successive sweeps", async () => {
+      // Old answers of a row that stands, which only the retention drops.
+      const backlog = await psql(`INSERT INTO airlock.read_journal (key, effect, row, incarnation, n, digest, outcome, recorded_at)
+        SELECT 'rate:old:' || i, 'rate', jsonb_build_object('id', '${two}'), '${(await jobOf(two)).incarnation}', 1, 'd', '{}', now() - interval '40 days' FROM generate_series(1, 600) i;`);
+      if (!backlog.ok) throw new Error(backlog.err);
+      const left = async () => (await psql("SELECT count(*) FROM airlock.read_journal WHERE key LIKE 'rate:old:%'")).out;
+      assertEquals(await airlock([{ op: "prune" }]), [{ ok: null }]);
+      assertEquals(await left(), "100");
+      assertEquals(await airlock([{ op: "prune" }]), [{ ok: null }]);
+      assertEquals(await left(), "0");
     });
   } finally {
     await sink.shutdown();

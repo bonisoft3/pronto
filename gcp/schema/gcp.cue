@@ -116,6 +116,9 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	// Those the program declares for another issuer's tokens, which crud tells
+	// the floor at every request; filled by the release, empty where none.
+	database: declaredRoles: *[] | [...string]
 	database: roles:      *"framework" | "external"
 
 	// Present where the app's compose project runs mecha's ticker: the
@@ -404,6 +407,7 @@ import (
 						{name: "PGRST_DB_SCHEMA", value: "public"},
 						{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 						{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+						{name: "PGRST_APP_SETTINGS_TOKEN_ROLES", value: strings.Join(R.database.declaredRoles, ",")},
 						// Cloud Run probes the instance's address, not loopback.
 						{name: "PGRST_SERVER_HOST", value: "*"},
 						{name: "PGRST_DB_POOL", value: "\(#Pools.crud)"},
@@ -485,6 +489,8 @@ import (
 							// bridge names: an effect whose sink here is the gateway
 							// is called, one whose sink is a bridge is not deployed.
 							{name: "AIRLOCK_TARGET", value: "gcp"},
+							// A release, which takes no development seal key (seal.ts sealLocal).
+							{name: "AIRLOCK_RELEASE", value: "gcp"},
 							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
 							if R.airlock.seal {(secretOf & {env: "AIRLOCK_SEAL_KEY", secret: sq.AIRLOCK_SEAL_KEY}).out},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
