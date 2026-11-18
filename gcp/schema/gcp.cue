@@ -754,9 +754,16 @@ import (
 			END $role$;
 			"""
 	}], "\n")
-	let declaredRolesStep = [if len(declaredRoles) > 0 {
+	// The built-in roles (anon, app_user, service, electric, authenticator) are no declared roles, and
+	// a database built without auth, schedules, timed machines or effects lacks some of them: its first
+	// effect's GRANT, or a membership, would then fail. The image's 001_roles.sql, as initdb ran it on a
+	// fresh volume, is run again before the replays. It is written to be re-run: a role is made only where
+	// missing, an attribute set only where short, and each of electric's grants only where absent. A
+	// missing file fails the job.
+	let builtinRolesStep = "  # The built-in roles initdb makes, restated (001_roles.sql is written to be re-run): a database built without\n  # auth, schedules or effects lacks the ones its first effect's grant names.\n  echo \"initdb: restating 001_roles.sql\"\n  psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql"
+	let declaredRolesStep = strings.Join([builtinRolesStep, if len(declaredRoles) > 0 {
 		"  # A token role the program declared after this database was built is made now, before the\n  # grant below and the replays, which may grant it something.\n  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'\n\(declaredRolesSql)\nSQL"
-	}, ""][0]
+	}], "\n")
 
 	let initdbEnv = [
 		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
@@ -818,9 +825,13 @@ import (
 							  # install of them and runs only after this job, so they are made here, ahead of the
 							  # replays that may enqueue effect jobs: only where there is no airlock schema, the
 							  # graphile step only where its tables are missing, each once.
-							  if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")" = t ]; then
+							  # The answer is read into a variable first: inside `[ "$(psql ...)" = t ]` a failed psql
+							  # reads as "no" and set -e never sees it.
+							  no_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")
+							  if [ "$no_airlock" = t ]; then
 							    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_graphile_worker.sql 2>/dev/null || true); do
-							      if [ "$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")" = t ]; then echo "initdb: applying $f, once"
+							      no_graphile=$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")
+							      if [ "$no_graphile" = t ]; then echo "initdb: applying $f, once"
 							        psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "/docker-entrypoint-initdb.d/$f"
 							      fi
 							    done
@@ -835,8 +846,9 @@ import (
 							  # enqueue effect jobs through airlock.job_key, and the next effect-state write
 							  # would fail without it. Idempotent; a database with no airlock schema has no
 							  # effect state to enqueue from.
+							  has_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")
 							  for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock_job_key.sql 2>/dev/null || true); do
-							    if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")" = t ]; then echo "initdb: applying $f"
+							    if [ "$has_airlock" = t ]; then echo "initdb: applying $f"
 							      psql -v ON_ERROR_STOP=1 -Xq -f "/docker-entrypoint-initdb.d/$f"
 							    fi
 							  done

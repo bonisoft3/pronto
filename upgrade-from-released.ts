@@ -208,7 +208,9 @@ psql -X -v ON_ERROR_STOP=1 -qAc "COMMENT ON DATABASE \\"$PGDATABASE\\" IS 'pront
 # 3. This tree, as the release applies it. Its replays are no migrations: pgroll's ledger gains
 # no inferred one from them, or every release lengthens the chain pgroll walks (2026-11-04).
 inferred() {
-  if [ "$(psql -XtAc "SELECT to_regclass('pgroll.migrations') IS NOT NULL")" = t ]; then
+  local has
+  has=$(psql -XtAc "SELECT to_regclass('pgroll.migrations') IS NOT NULL")
+  if [ "$has" = t ]; then
     psql -XtAc "SELECT count(*) FROM pgroll.migrations WHERE migration_type = 'inferred'"
   else echo 0; fi
 }

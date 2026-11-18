@@ -5376,9 +5376,23 @@ _pgrollDir: "services/database/pgroll"
 						    ALTER ROLE electric LOGIN;
 						  END IF;
 						END $$;
-						GRANT USAGE ON SCHEMA public TO electric;
-						GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;
-						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
+						-- Each grant only where it is absent: a release that restates this file asks for nothing a table
+						-- already gives, and nothing on a table whose owner the running role is not (Cloud SQL's postgres
+						-- cannot grant on another role's table).
+						DO $$ DECLARE t oid; sch oid := (SELECT oid FROM pg_namespace WHERE nspname = 'public'); BEGIN
+						  IF NOT has_schema_privilege('electric'::regrole, sch, 'USAGE') THEN
+						    GRANT USAGE ON SCHEMA public TO electric;
+						  END IF;
+						  FOR t IN SELECT c.oid FROM pg_class c WHERE c.relnamespace = sch AND c.relkind IN ('r', 'p')
+						           AND pg_has_role(current_user, c.relowner, 'USAGE') AND NOT has_table_privilege('electric', c.oid, 'SELECT') LOOP
+						    EXECUTE format('GRANT SELECT ON %s TO electric', t::regclass);
+						  END LOOP;
+						  IF NOT EXISTS (SELECT 1 FROM pg_default_acl d, aclexplode(d.defaclacl) a
+						                 WHERE d.defaclnamespace = sch AND d.defaclobjtype = 'r' AND d.defaclrole = current_user::regrole
+						                   AND a.grantee = 'electric'::regrole AND a.privilege_type = 'SELECT') THEN
+						    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
+						  END IF;
+						END $$;
 
 						"""},
 				]

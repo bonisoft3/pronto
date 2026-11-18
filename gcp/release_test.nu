@@ -101,6 +101,7 @@ def main [] {
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
+	test_preflight_seal_key_of_a_sidecar_airlock
 	print "\nAll release-gcp tests passed."
 }
 
@@ -306,12 +307,12 @@ def test_golive_leaves_the_inputs_key_on_the_copied_images [] {
 
 # An app in a temp directory under the repository, so cue finds pronto's own schema; docker is a
 # script that prints a compose project (no container runs), gcloud the fake above.
-def preflight-app [sidecar_env: string]: nothing -> string {
+def preflight-app [sidecar_env: string, --name: string = "side", --extra: string = ""]: nothing -> string {
 	let app = ($gcp_dir | path dirname | path join $".preflight-(random uuid)")
 	mkdir ($app | path join .pronto)
-	$"package preflight\nimport \"github.com/bonisoft3/pronto/gcp/schema\"\nGCP: schema.#Release & {name: \"app\", service: \"svc\", project: \"pronto-test\", sidecars: \"side\": {port: 8687, apart: {}}}\ngcpRelease: schema.#Build & {release: GCP}\n" | save -f ($app | path join release.cue)
+	$"package preflight\nimport \"github.com/bonisoft3/pronto/gcp/schema\"\nGCP: schema.#Release & {name: \"app\", service: \"svc\", project: \"pronto-test\", sidecars: \"($name)\": {port: 8687, apart: {}($extra)}}\ngcpRelease: schema.#Build & {release: GCP}\n" | save -f ($app | path join release.cue)
 	{server: true, tokenRoles: ["anon"], replays: []} | to json | save -f ($app | path join .pronto cluster.json)
-	let compose = {services: {database: {}, crud: {}, electric: {}, caddy: {}, auth: {environment: {OIDC_PROVIDERS: "google"}}, side: {environment: ($sidecar_env | from json)}}}
+	let compose = {services: {database: {}, crud: {}, electric: {}, caddy: {}, auth: {environment: {OIDC_PROVIDERS: "google"}}, ($name): {environment: ($sidecar_env | from json)}}}
 	$"#!/bin/sh\necho '($compose | to json --raw)'\n" | save -f ($app | path join docker)
 	chmod +x ($app | path join docker)
 	$app
@@ -346,6 +347,37 @@ def test_preflight_names_the_file_and_clouds_run_message [] {
 	assert ($res.stderr | str contains "Cloud Run refuses what this release would apply")
 	assert ($res.stderr | str contains "release-sidecar-side.yaml")
 	assert ($res.stderr | str contains "BAD_RESERVED")
+	rm -r $d
+}
+
+# A sidecar airlock is refused only where compose's airlock declares AIRLOCK_SEAL_KEY (the app has secret
+# fields), and only the sidecar's secrets mapping counts as setting it: an env-only key renders as a
+# reference to <id>-airlock-seal-key, which this path never creates.
+def test_preflight_seal_key_of_a_sidecar_airlock [] {
+	print "test preflight refuses a sidecar airlock's missing seal key only where compose declares one, and counts only its secrets mapping..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 x")
+	# No secret fields: compose's airlock holds no seal key.
+	let a = (preflight-app '{"X": "1"}' --name airlock)
+	let none = (preflight-run $d $a)
+	rm -r $a
+	assert equal $none.exit_code 0 $none.stderr
+	# Secret fields, the key mapped through the sidecar's secrets.
+	let b = (preflight-app '{"AIRLOCK_SEAL_KEY": "dev"}' --name airlock --extra ", secrets: {AIRLOCK_SEAL_KEY: \"app-seal\"}")
+	let mapped = (preflight-run $d $b)
+	rm -r $b
+	assert equal $mapped.exit_code 0 $mapped.stderr
+	# Secret fields, the key in the sidecar's env alone.
+	let c = (preflight-app '{"AIRLOCK_SEAL_KEY": "dev"}' --name airlock --extra ", env: {AIRLOCK_SEAL_KEY: \"x\"}")
+	let envonly = (preflight-run $d $c)
+	rm -r $c
+	assert ($envonly.exit_code != 0)
+	assert ($envonly.stderr | str contains "does not seal secret fields")
+	# The key in the sidecar's env alone is refused even where compose declares none.
+	let e = (preflight-app '{"X": "1"}' --name airlock --extra ", env: {AIRLOCK_SEAL_KEY: \"x\"}")
+	let envnone = (preflight-run $d $e)
+	rm -r $e
+	assert ($envnone.exit_code != 0)
+	assert ($envnone.stderr | str contains "does not seal secret fields")
 	rm -r $d
 }
 

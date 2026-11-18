@@ -475,9 +475,16 @@ import (
 			END $role$;
 			"""
 	}], "\n")
-	let declaredRolesStep = [if len(declaredRoles) > 0 {
+	// The built-in roles (anon, app_user, service, electric, authenticator) are no declared roles, and
+	// a database built without auth, schedules, timed machines or effects lacks some of them: its first
+	// effect's GRANT, or a membership, would then fail. The image's 001_roles.sql, as initdb ran it on a
+	// fresh volume, is run again before the replays. It is written to be re-run: a role is made only where
+	// missing, an attribute set only where short, and each of electric's grants only where absent. A
+	// missing file fails the job.
+	let builtinRolesStep = "  # The built-in roles initdb makes, restated (001_roles.sql is written to be re-run): a database built without\n  # auth, schedules or effects lacks the ones its first effect's grant names.\n  echo \"initdb: restating 001_roles.sql\"\n  psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql"
+	let declaredRolesStep = strings.Join([builtinRolesStep, if len(declaredRoles) > 0 {
 		"  # A token role the program declared after this database was built is made now, before the\n  # replays below, which may grant it something.\n  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'\n\(declaredRolesSql)\nSQL"
-	}, ""][0]
+	}], "\n")
 
 	let schemaJobObj = [
 		if release.type == "pronto" {
@@ -563,7 +570,8 @@ import (
 					      psql -v ON_ERROR_STOP=1 -Xq -f "/docker-entrypoint-initdb.d/$f"
 					    done
 					  }
-					  if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")" = t ]; then jobkey; fi
+					  has_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")
+					  if [ "$has_airlock" = t ]; then jobkey; fi
 					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null) $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
 					    f=/docker-entrypoint-initdb.d/$step
 					    if [ -f "$f" ]; then echo "initdb: replaying $step"

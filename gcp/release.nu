@@ -618,10 +618,12 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value | where {|e| $e.key not-in $set }
 			| reduce -f {} {|e, all| $all | insert $e.key ($peers | get $n | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
 		# A sidecar airlock would take compose's development seal key as its own: only the service's airlock
-		# has the key made and checked (has_seal), so one that reads secret fields maps AIRLOCK_SEAL_KEY
-		# through GCP.sidecars.<name>.secrets (a key in its env alone is the release's, set above, and counts too).
-		let keyed = ($set | append ($mapped | get -o $n | default []))
-		if $n == "airlock" and not ("AIRLOCK_SEAL_KEY" in $keyed) {
+		# has the key made and checked (has_seal). Where compose's airlock declares AIRLOCK_SEAL_KEY (the app
+		# has secret fields), the sidecar maps it through GCP.sidecars.<name>.secrets, which alone counts: a
+		# key in its env renders as a reference to <id>-airlock-seal-key, which this path never creates.
+		let wants_seal = ("AIRLOCK_SEAL_KEY" in ($compose.services | get $n | get -o environment | default {} | columns))
+		let env_only = ("AIRLOCK_SEAL_KEY" in $set) and not ("AIRLOCK_SEAL_KEY" in ($mapped | get -o $n | default []))
+		if $n == "airlock" and ($env_only or ($wants_seal and not ("AIRLOCK_SEAL_KEY" in ($mapped | get -o $n | default [])))) {
 			error make {msg: "release@gcp does not seal secret fields for an airlock run as a GCP.sidecars entry: its seal key would be compose's development key. Run the airlock as the service's own, or map AIRLOCK_SEAL_KEY through the sidecar's secrets (GCP.sidecars.airlock.secrets)"}
 		}
 		# Compose's development seal and an empty previous key are not the sidecar's to carry.

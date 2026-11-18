@@ -150,9 +150,9 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     assert(JSON.stringify(Object.keys(mechaPublished).sort()) === JSON.stringify([...mechaImages].sort()), `clusters/mecha.cue published keys (${Object.keys(mechaPublished).sort().join(",")}) do not cover #Images (${[...mechaImages].sort().join(",")})`);
     for (const [svc, ref] of Object.entries(mechaPublished)) {
       // The upstream image (bonitao/) or the fork's (ghcr.io/bsoneca/), at a release or a fork's prerelease of one, by digest.
-      // Tagged with the tool's version, or its upstream base (a fork's -host.N prerelease keeps upstream's image).
+      // Tagged with the tool's version, or its upstream base (a fork's prerelease, any suffix, keeps upstream's image).
       const mechaVersion = tools["github:bonisoft3/mecha"] as string;
-      const mechaTags = [mechaVersion, mechaVersion.replace(/-host\.\d+$/, "")].map((v) => v.replaceAll(".", "\\."));
+      const mechaTags = [mechaVersion, mechaVersion.replace(/-[0-9A-Za-z.-]+$/, "")].map((v) => v.replaceAll(".", "\\."));
       assert(new RegExp(`^(bonitao|ghcr\\.io/bsoneca)/mecha-${svc}:(${mechaTags.join("|")})@sha256:[0-9a-f]{64}$`).test(ref), `clusters/mecha.cue published.${svc} (${ref}) is not a mecha ${mechaVersion} image by digest`);
     }
     const omnishellRuntime = (await cue(repo, ["export", "./plugins/pronto/terminals:omnishell", "-e", "published.runtime", "--out", "text"])).trim();
