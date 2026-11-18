@@ -207,6 +207,11 @@ export function snapshotCompose(model: Compose): Compose {
   return snapshot
 }
 
+/** Serializes an already-resolved `docker compose config --format json` model, which already escapes literal `$` as `$$`. */
+export function serializeResolvedCompose(model: Compose): string {
+  return JSON.stringify(model)
+}
+
 async function main() {
   const args = Deno.args.slice()
   const app = await Deno.realPath(args.shift() ?? fail('usage: derived.ts <appDir> --tables <t,...> --streams <s,...> --out <file> [--timeout <seconds>]'))
@@ -337,8 +342,7 @@ async function main() {
   }
 
   composeFile = await Deno.makeTempFile({ dir: path.join(app, '.bayt'), prefix: 'compose.derived-', suffix: '.json' })
-  // Compose interpolates again when it reads this already resolved model.
-  await Deno.writeTextFile(composeFile, JSON.stringify(model).replaceAll('$', () => '$$'))
+  await Deno.writeTextFile(composeFile, serializeResolvedCompose(model))
   let failure: unknown
   try {
     await compose('down', '-v', '--remove-orphans')

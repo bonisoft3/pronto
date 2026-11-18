@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotCompose, snapshotSql } from './derived.ts'
+import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, serializeResolvedCompose, Settlement, singleMessageInput, snapshotCompose, snapshotSql } from './derived.ts'
 import { writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -623,6 +623,13 @@ Deno.test('Pages precomputation forces snapshots and excludes the Feldera servic
   assert.deepEqual(result.networks, model.networks)
   assert.equal(model.services['plausible-compute'].environment.DUCKSTREAM_ENGINE, 'feldera')
   assert.deepEqual(snapshotCompose({ services: {} }), { services: {} })
+  // Regression: compose config --format json already escapes literal $ as $$;
+  // doubling $ again broke bayt's http200 healthcheck (`status=$$("$$@")` -> `$$$$`).
+  const health = 'status=$$("$$@"); [ "$$status" = 200 ]'
+  const serialized = JSON.parse(serializeResolvedCompose(snapshotCompose({
+    services: { 'realworld-caddy': { healthcheck: { test: ['CMD', 'sh', '-ec', health] } } as Record<string, unknown> },
+  })))
+  assert.equal(serialized.services['realworld-caddy'].healthcheck.test[3], health)
 })
 
 // A realm unit is a document of its own, so a single-file page serves it from

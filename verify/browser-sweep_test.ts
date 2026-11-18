@@ -5,6 +5,7 @@ import {
   type JourneyItem,
   verifyBrowser,
 } from "./browser-sweep.ts";
+import { admitsReaderImages } from "./http-sweep.ts";
 import { airlock } from "./airlock.ts";
 
 function electricTrap() {
@@ -1413,4 +1414,54 @@ Deno.test("verifyBrowser clears electric_up_to_date_tracker across pages in shar
   assertEquals(result.passed, true);
   assertEquals(contextInitScripts.length, 1);
   assertEquals(contextInitScripts[0].toString().includes("electric_up_to_date_tracker"), true);
+});
+
+Deno.test("admitsReaderImages detects img-src https: scheme capability without matching fixed origins", () => {
+  const entry = (imgSrc: string) =>
+    `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; img-src ${imgSrc}; connect-src &#39;self&#39;"></head></html>`;
+  assertEquals(admitsReaderImages(entry("'self' data: blob: https:")), true);
+  assertEquals(admitsReaderImages(entry("'self' data: blob:")), false);
+  assertEquals(admitsReaderImages(entry("'self' data: blob: https://d24oxbyqb2c11t.cloudfront.net")), false);
+  assertEquals(admitsReaderImages("<!doctype html><html><head></head></html>"), false);
+});
+
+// Regression: live readers on apps declaring capabilities.resources img-src https:
+// may paste non-image HTTPS URLs (e.g. LinkedIn profile HTML triggering ERR_BLOCKED_BY_ORB);
+// third-party https: image failures are reader data, while same-origin images, non-images,
+// http: images, and apps without readerImages still fail zero-tolerance verification.
+Deno.test("attachNetworkTrap exempts cross-origin https: image failures only when readerImages is admitted", () => {
+  const harness = (readerImages: boolean) => {
+    const listeners: Record<string, ((...args: any[]) => void)[]> = {};
+    const page = {
+      on: (evt: string, fn: (...args: any[]) => void) => { (listeners[evt] ??= []).push(fn); },
+      off: (evt: string, fn: (...args: any[]) => void) => { listeners[evt] = (listeners[evt] || []).filter((f) => f !== fn); },
+    };
+    const trap = attachNetworkTrap(page, { targetOrigin: "https://yogurt.bonisoft3.com", readerImages });
+    const failReq = (url: string, resourceType: string, errorText = "net::ERR_BLOCKED_BY_ORB") => {
+      listeners["requestfailed"]?.forEach((fn) => fn({ url: () => url, resourceType: () => resourceType, failure: () => ({ errorText }) }));
+    };
+    const failRes = (url: string, resourceType: string, status = 999) => {
+      const req = { url: () => url, resourceType: () => resourceType, method: () => "GET" };
+      listeners["response"]?.forEach((fn) => fn({ status: () => status, statusText: () => "Blocked", url: () => url, request: () => req, headers: () => ({}) }));
+    };
+    return { trap, failReq, failRes };
+  };
+
+  const admitted = harness(true);
+  admitted.failReq("https://www.linkedin.com/in/luizoliveiracc?originalSubdomain=br", "image");
+  admitted.failRes("https://www.linkedin.com/in/luizoliveiracc?originalSubdomain=br", "image", 999);
+  admitted.trap.assertNoErrors();
+
+  admitted.failRes("https://yogurt.bonisoft3.com/pictures/missing.jpg", "image", 404);
+  assertEquals(admitted.trap.errors.length, 1);
+  admitted.failReq("https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/babylon.js", "script");
+  assertEquals(admitted.trap.errors.length, 2);
+  admitted.failReq("http://insecure.example/avatar.jpg", "image");
+  assertEquals(admitted.trap.errors.length, 3);
+  admitted.trap.detach();
+
+  const strict = harness(false);
+  strict.failReq("https://www.linkedin.com/in/luizoliveiracc?originalSubdomain=br", "image");
+  assertEquals(strict.trap.errors.length, 1);
+  strict.trap.detach();
 });

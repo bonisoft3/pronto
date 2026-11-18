@@ -29,11 +29,27 @@ export interface EdgeHints {
   catalogues?: Record<string, string>;
   routes?: EdgeHintsRoute[];
   prefix?: string;
+  readerImages?: boolean;
   i18n?: {
     default?: string;
     locales?: Record<string, unknown>;
   };
   [key: string]: unknown;
+}
+
+/**
+ * True when the entry document's Content-Security-Policy admits `img-src ... https:`
+ * (SPEC's sole capability permitting reader-chosen third-party image hosts).
+ */
+export function admitsReaderImages(entryHtml: string): boolean {
+  const meta = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i.exec(entryHtml);
+  if (!meta) return false;
+  const csp = meta[1].replaceAll("&quot;", "\"").replaceAll("&amp;", "&");
+  for (const directive of csp.split(";")) {
+    const tokens = directive.trim().split(/\s+/);
+    if (tokens[0] === "img-src") return tokens.slice(1).includes("https:");
+  }
+  return false;
 }
 
 export interface ExtractedAssets {

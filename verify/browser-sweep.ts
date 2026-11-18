@@ -45,13 +45,26 @@ export interface NetworkTrap {
  */
 export function attachNetworkTrap(
   page: any,
-  trapOptions?: { allowPagesDeepLink?: boolean; targetOrigin?: string }
+  trapOptions?: { allowPagesDeepLink?: boolean; targetOrigin?: string; readerImages?: boolean }
 ): NetworkTrap {
   const errors: string[] = [];
   const pendingRequests = new Set<any>();
   const recoveries = new Map<string, { oldHandle: string; handle: string; url: string }>();
   let responseChecks = Promise.resolve();
   let pendingChecks = 0;
+
+  const isReaderImage = (req: any, fallbackUrl?: string) => {
+    if (!trapOptions?.readerImages || !trapOptions.targetOrigin) return false;
+    const type = typeof req?.resourceType === "function" ? req.resourceType() : req?.resourceType;
+    if (type !== "image") return false;
+    const raw = typeof req?.url === "function" ? req.url() : (req?.url ?? fallbackUrl ?? "");
+    try {
+      const parsed = new URL(raw);
+      return parsed.protocol === "https:" && parsed.origin !== new URL(trapOptions.targetOrigin).origin;
+    } catch {
+      return false;
+    }
+  };
 
   const electricShape = (res: any): { url: URL; key: string } | null => {
     if (!trapOptions?.targetOrigin || res.request?.()?.method?.() !== "GET") return null;
@@ -176,7 +189,7 @@ export function attachNetworkTrap(
         responseChecks = responseChecks.then(() => checkElectric(res, shape, httpError))
           .catch((error) => { errors.push(`${httpError}: Electric response validation failed: ${error}`); })
           .finally(() => { pendingChecks--; });
-      } else if (status >= 400 && !isNav404) {
+      } else if (status >= 400 && !isNav404 && !isReaderImage(res.request?.(), res.url())) {
         errors.push(httpError);
       }
     } catch (error) {
@@ -190,7 +203,7 @@ export function attachNetworkTrap(
       const failure = req.failure();
       const errText = failure?.errorText ?? "unknown failure";
       // net::ERR_ABORTED is client-side cancellation (e.g. idle link prefetch or page teardown)
-      if (errText !== "net::ERR_ABORTED") {
+      if (errText !== "net::ERR_ABORTED" && !isReaderImage(req)) {
         errors.push(`Edge network aborted: ${errText} on ${req.url()}`);
       }
     } catch {
@@ -473,6 +486,7 @@ export async function verifyBrowser(
         const trap = attachNetworkTrap(page, {
           allowPagesDeepLink: options.platform === "pages",
           targetOrigin: baseUrl,
+          readerImages: options.hints?.readerImages === true,
         });
 
         const screenName = "spec" in item ? item.spec.screen : item.screen;

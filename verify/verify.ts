@@ -9,7 +9,7 @@
 
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { verifyHttp, type EdgeHints, type EdgeRoute } from "./http-sweep.ts";
+import { admitsReaderImages, verifyHttp, type EdgeHints, type EdgeRoute } from "./http-sweep.ts";
 import { verifyBrowser } from "./browser-sweep.ts";
 import { dispatcherSecrets, requireSecrets, wranglerSecretNames } from "./secrets.ts";
 
@@ -42,11 +42,17 @@ function parseArgs(args: string[]) {
 }
 
 async function loadHints(appDir: string, platform: string): Promise<EdgeHints> {
+  const entryHtml = await Deno.readTextFile(path.join(appDir, "shell/index.html")).catch((e) => {
+    if (e instanceof Deno.errors.NotFound) return "";
+    throw e;
+  });
+  const readerImages = admitsReaderImages(entryHtml);
+
   if (platform === "cloudflare") {
     const hintsPath = path.join(appDir, "dist/cloudflare/src/hints.json");
     try {
       const text = await Deno.readTextFile(hintsPath);
-      return JSON.parse(text) as EdgeHints;
+      return { ...(JSON.parse(text) as EdgeHints), readerImages };
     } catch (e) {
       if (!(e instanceof Deno.errors.NotFound)) throw e;
       // Not present locally (e.g. verifying a remote live deployment); fall back to shell.json
@@ -83,6 +89,7 @@ async function loadHints(appDir: string, platform: string): Promise<EdgeHints> {
       routes,
       catalogues,
       prefix: shell.prefix,
+      readerImages,
       i18n: shell.i18n,
     };
   } catch (e) {
