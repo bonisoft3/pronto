@@ -199,7 +199,8 @@ Deno.test("a database built before the airlock's job key gets it, ahead of the r
 Deno.test("a built database with no airlock schema gets the ledger, the airlock's step and the job key, ahead of the replays", async () => {
   const sql = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
   // The airlock's own start-up upgrade runs only after this job, so the install is the job's.
-  const guard = sql.indexOf(`if [ "$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")" = t ]; then`);
+  const guard = sql.indexOf(`no_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")`);
+  assert(sql.indexOf(`if [ "$no_airlock" = t ]; then`) > guard, "the guard's answer is read after psql has run, under set -e");
   const graphile = sql.indexOf("ls [0-7][0-9][0-9]_graphile_worker.sql");
   const airlock = sql.indexOf("ls [0-7][0-9][0-9]_airlock.sql");
   const key = sql.indexOf("ls [0-7][0-9][0-9]_airlock_job_key.sql");
