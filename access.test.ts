@@ -15,8 +15,16 @@ Deno.test("narrowing public writes preserves the ledger digest and emits an addi
 
 Deno.test("public access emits an anon select policy only when access.anon is set", async () => {
   assert.match(await policy(false, false, true), /filter_anon_select[\s\S]*FOR SELECT TO anon USING \(true\)/);
-  assert.doesNotMatch(await policy(false), /anon/);
   assert.equal(await policy(true, false, false), await policy(true));
+});
+
+Deno.test("public access without access.anon drops its anon policy so a withdrawal revokes on a live database", async () => {
+  for (const sql of [await policy(false), await policy(false, false, false)]) {
+    assert.equal(sql.match(/DROP POLICY IF EXISTS filter_anon_select ON filter;/g)?.length, 1);
+    assert.doesNotMatch(sql, /CREATE POLICY[^;]*TO anon/);
+  }
+  const on = await policy(false, false, true);
+  assert.match(on, /DROP POLICY IF EXISTS filter_anon_select ON filter;\nCREATE POLICY filter_anon_select ON filter FOR SELECT TO anon USING \(true\);/);
 });
 
 Deno.test("public access rejects unsupported write operations", async () => {

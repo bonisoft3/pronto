@@ -1961,11 +1961,16 @@ _sqlType: {
 	if P.e.access.scope == "public" {
 		_pre:   []
 		_write: ({write: *false | bool | "update", ...} & P.e.access).write
+		_anonOn: [if P.e.access["anon"] != _|_ if P.e.access.anon == true {true}, false][0]
 		_appUser: list.Concat([
 			[(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out],
-			[if P.e.access["anon"] != _|_ if P.e.access.anon == true {
+			// #policy drops only the names it still emits, so a withdrawn
+			// access.anon would leave <t>_anon_select alive on a live database
+			// through every replay: absent or not true drops it explicitly.
+			[if P._anonOn {
 				(#policy & {name: "\(P._t)_anon_select", table: P._t, rest: "FOR SELECT TO anon USING (true)"}).out
 			}],
+			[if !P._anonOn {"DROP POLICY IF EXISTS \(P._t)_anon_select ON \(P._t);"}],
 			[if P._write == true || P._write == "update" {
 				(#policy & {name: "\(P._t)_app_user_write", table: P._t, rest: "FOR ALL TO app_user USING (true) WITH CHECK (true)"}).out
 			}],
