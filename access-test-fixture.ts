@@ -22,6 +22,14 @@ export function policy(write: boolean | string, restriction = false, anon?: bool
     : `(#policySql & {e: ${entity(write, anon)}, entities: {}}).out`);
 }
 
+export function privatePolicy(): Promise<string> {
+  const e = JSON.stringify({
+    name: "Note", table: "note", durability: "offline",
+    access: { scope: "private", owner: "owner_id" },
+    fields: [{ name: "id", type: "string", pk: true }, { name: "owner_id", type: "string" }],
+  });
+  return sql(`(#policySql & {e: ${e}, entities: {}}).out`);
+}
 
 export async function schema(): Promise<string> {
   const floor = await Deno.readTextFile(new URL("../../libraries/mecha/services/database/rls/rls.sql", here));

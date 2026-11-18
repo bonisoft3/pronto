@@ -574,7 +574,9 @@ import (
 			scope:  "public"
 			write?: bool | "update"
 			// true lets a request with no token (PostgREST's anon role) read the
-			// entity's rows; opt-in per entity, read-only.
+			// entity's rows; opt-in per entity, read-only. Every column is read:
+			// an owner id or anything else a crawler should not see belongs on
+			// another entity.
 			anon?: bool
 		})
 	}

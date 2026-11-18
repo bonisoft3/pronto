@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { policy } from "./access-test-fixture.ts";
+import { policy, privatePolicy } from "./access-test-fixture.ts";
 
 Deno.test("narrowing public writes preserves the ledger digest and emits an additive restriction", async () => {
   assert.equal(await policy("update"), await policy(true));
@@ -25,6 +25,12 @@ Deno.test("public access without access.anon drops its anon policy so a withdraw
   }
   const on = await policy(false, false, true);
   assert.match(on, /DROP POLICY IF EXISTS filter_anon_select ON filter;\nCREATE POLICY filter_anon_select ON filter FOR SELECT TO anon USING \(true\);/);
+});
+
+Deno.test("an entity of any other scope drops the anon policy, so leaving public scope revokes it", async () => {
+  const sql = await privatePolicy();
+  assert.equal(sql.match(/DROP POLICY IF EXISTS note_anon_select ON note;/g)?.length, 1);
+  assert.doesNotMatch(sql, /CREATE POLICY[^;]*TO anon/);
 });
 
 Deno.test("public access rejects unsupported write operations", async () => {
