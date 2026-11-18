@@ -8,6 +8,14 @@ const assertMatch = (s: string, re: RegExp, why?: string) => assert.match(s, re,
 const wrapper = new URL("../cue", import.meta.url).pathname;
 const runtime = wrapper.replace(/\/cue$/, "");
 const deno = Deno.execPath().replace(/\/deno$/, "");
+// The real HOME, read before run() points the wrapper's HOME at a case's folder.
+const realHome = Deno.env.get("HOME");
+
+// Random lowercase letters only: the wrapper keeps such a name as it is. mix() is a 10-character
+// name holding a digit and a letter, which the wrapper takes for a temporary folder's random name.
+const word = (n = 6) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => "abcdefghijklmnopqrstuvwxyz"[b % 26]).join("");
+const digit = () => String(crypto.getRandomValues(new Uint8Array(1))[0] % 10);
+const mix = () => `${word(4)}${digit()}${word(3)}${digit()}${word(1)}`;
 
 // A fake cue that says what it was asked, echoes its stdin for `export -`, holds `mb` MB (as RSS: it
 // becomes a deno that fills a buffer, one process as cue is) or sleeps `sleep` s, noting a TERM.
@@ -24,10 +32,10 @@ exit 0
   await Deno.chmod(`${dir}/bin/cue`, 0o755);
 };
 
-const run = async (dir: string, args: string[], env: Record<string, string> = {}, stdin?: string) => {
+const run = async (dir: string, args: string[], env: Record<string, string> = {}, stdin?: string, cwd = dir) => {
   const child = new Deno.Command(wrapper, {
     args,
-    cwd: dir,
+    cwd,
     env: { PATH: `${runtime}:${dir}/bin:${deno}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: dir, STACK_POOL: `${dir}/pool`, ...env },
     clearEnv: true,
     stdin: stdin === undefined ? "null" : "piped",
@@ -261,4 +269,179 @@ Deno.test("an export run at once, outside the pool, is printed from a passing on
   assertEquals((await exp({}, ["-o", "out.json"])).stdout, "run 4\n", "-o evaluates");
   await Deno.writeTextFile(`${dir}/b.cue`, `package a\ny: 2\n`);
   assertEquals((await exp()).stdout, "run 5\n", "a changed input evaluates");
+});
+
+const sh = async (cwd: string, ...args: string[]) => {
+  const o = await new Deno.Command("git", { args, cwd, stdout: "piped", stderr: "piped" }).output();
+  assert.equal(o.code, 0, new TextDecoder().decode(o.stderr));
+  return new TextDecoder().decode(o.stdout).trim();
+};
+
+Deno.test("an evaluation in a temporary copy keeps its id across copies", async () => {
+  const dir = await Deno.makeTempDir();
+  await fake(dir, 64);
+  const [a, b] = [await Deno.makeTempDir({ dir: "/tmp", prefix: "copy-" }), await Deno.makeTempDir({ dir: "/tmp", prefix: "copy-" })];
+  for (const c of [a, b]) await Deno.mkdir(`${c}/apps/x/spec`, { recursive: true });
+  const first = await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "3" }, undefined, `${a}/apps/x`);
+  assertMatch(first.stderr, /slot: cue /);
+  const second = await run(dir, ["export", "./spec"], {}, undefined, `${b}/apps/x`);
+  assertEquals(second.code, 0);
+  assertEquals(second.stderr.includes("slot:"), false, "same evaluation: learned, no claim");
+  assertEquals((await learned(dir)).length, 1);
+  for (const c of [a, b]) await Deno.remove(c, { recursive: true });
+});
+
+Deno.test("an absolute path argument in two worktrees of one repository keys as one", async () => {
+  const dir = await Deno.makeTempDir();
+  await fake(dir, 64);
+  const repo = await Deno.makeTempDir({ prefix: "repo-" });
+  await sh(repo, "init", "-q");
+  await Deno.writeTextFile(`${repo}/x.cue`, "a: 1\n");
+  await sh(repo, "add", "x.cue");
+  await sh(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x");
+  const wt = await Deno.makeTempDir({ prefix: "wt-" });
+  await sh(repo, "worktree", "add", "-q", "-b", "other", `${wt}/b`);
+  const first = await run(dir, ["export", `${repo}/x.cue`], { CUE_UNKNOWN_GB: "3" });
+  assertMatch(first.stderr, /slot: cue /);
+  const second = await run(dir, ["export", `${wt}/b/x.cue`]);
+  assertEquals(second.code, 0);
+  assertEquals(second.stderr.includes("slot:"), false, "same repository and place: no claim");
+  assertEquals((await learned(dir)).length, 1);
+  await Deno.remove(wt, { recursive: true });
+  await Deno.remove(repo, { recursive: true });
+});
+
+// Without HOME there is no folder that is neither temporary nor a runner's clone to make the repository in.
+Deno.test({ name: "a plain evaluation's id is what it was", ignore: !realHome }, async () => {
+  const dir = await Deno.makeTempDir();
+  await fake(dir);
+  // Neither a temporary folder nor a CI runner's clone, whose names the wrapper rewrites.
+  const home = `${realHome}/.cache/pronto/cuetest`;
+  await Deno.mkdir(home, { recursive: true });
+  const repo = await Deno.makeTempDir({ dir: home, prefix: "plain-" });
+  try {
+    await sh(repo, "init", "-q");
+    await Deno.mkdir(`${repo}/sub/spec`, { recursive: true });
+    await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "1" }, undefined, `${repo}/sub`);
+    const common = await sh(`${repo}/sub`, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const key = `${common}\nsub/ export ./spec`;
+    const { createHash } = await import("node:crypto");
+    const id = createHash("md5").update(key).digest("hex");
+    const names = [];
+    for await (const e of Deno.readDir(`${dir}/.cache/pronto/cue-mem`)) names.push(e.name);
+    assert.ok(names.includes(id), `${names} should include ${id}`);
+  } finally {
+    await Deno.remove(repo, { recursive: true });
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+// Two evaluations of ./spec from the given cwds, sharing one HOME: how many ids they learned, and whether the second claimed.
+const twice = async (cwdA: string, cwdB: string, argsA = ["export", "./spec"], argsB = argsA) => {
+  const dir = await Deno.makeTempDir();
+  await fake(dir, 64);
+  await run(dir, argsA, { CUE_UNKNOWN_GB: "3" }, undefined, cwdA);
+  const second = await run(dir, argsB, {}, undefined, cwdB);
+  return { claimed: second.stderr.includes("slot:"), ids: (await learned(dir)).length };
+};
+
+Deno.test("distinct temporary names stay distinct", async () => {
+  const w = word();
+  const [a, b] = [`/tmp/cuetest${w}-plugins`, `/tmp/cuetest${w}-runtime`];
+  for (const c of [a, b]) await Deno.mkdir(`${c}/spec`, { recursive: true });
+  try {
+    const r = await twice(a, b);
+    assertEquals(r.ids, 2, "plugins and runtime are two evaluations");
+    assertEquals(r.claimed, true);
+  } finally {
+    for (const c of [a, b]) await Deno.remove(c, { recursive: true });
+  }
+});
+
+Deno.test("a separator-less random temporary folder keeps one id", async () => {
+  const a = `/tmp/${mix()}`;
+  let b = `/tmp/${mix()}`;
+  while (b === a) b = `/tmp/${mix()}`;
+  for (const c of [a, b]) await Deno.mkdir(`${c}/spec`, { recursive: true });
+  try {
+    const r = await twice(a, b);
+    assertEquals(r.claimed, false);
+    assertEquals(r.ids, 1);
+  } finally {
+    for (const c of [a, b]) await Deno.remove(c, { recursive: true });
+  }
+});
+
+// release.nu passes `mktemp -t roles.XXXXXX.json` to cue export: Studio's Publish ran ~15 such evaluations, each a new id
+// claiming CUE_UNKNOWN_GB in the cue lock, and waited minutes behind large ones for 40 MB evaluations (PRONTO-736).
+Deno.test("a mktemp file with its random part in the middle keeps one id; a fixed name stays itself", async () => {
+  const d = await Deno.makeTempDir({ dir: "/tmp", prefix: "cuetest-" });
+  await Deno.mkdir(`${d}/spec`, { recursive: true });
+  const w = word();
+  const [a, b, c, e] = [`/tmp/roles${w}.c4qN0s.json`, `/tmp/roles${w}.awAixC.json`, `/tmp/one${w}.tar.json`, `/tmp/two${w}.tar.json`];
+  for (const f of [a, b, c, e]) await Deno.writeTextFile(f, "{}");
+  try {
+    const r = await twice(`${d}`, `${d}`, ["export", "./spec", a], ["export", "./spec", b]);
+    assertEquals(r.claimed, false, "roles.<random>.json is one file to the key, a random part without a digit (mixed case) too");
+    assertEquals(r.ids, 1);
+    const fixed = await twice(`${d}`, `${d}`, ["export", "./spec", c], ["export", "./spec", e]);
+    assertEquals(fixed.ids, 2, "a middle of one case without a digit is a name, not a random part");
+  } finally {
+    for (const f of [a, b, c, e]) await Deno.remove(f);
+    await Deno.remove(d, { recursive: true });
+  }
+});
+
+const repoWith = async (path: string, file: string) => {
+  await Deno.mkdir(path, { recursive: true });
+  await sh(path, "init", "-q");
+  await Deno.writeTextFile(`${path}/${file}`, "a: 1\n");
+  await sh(path, "add", file);
+  await sh(path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x");
+};
+
+Deno.test("a CI runner's clones are one evaluation", async () => {
+  const root = await Deno.makeTempDir({ prefix: "runners-" });
+  try {
+    const [a, b] = [`${root}/actions-runners/r1/_work/p/p`, `${root}/actions-runners/r2/_work/p/p`];
+    for (const c of [a, b]) await repoWith(c, "x.cue");
+    const r = await twice(root, root, ["export", `${a}/x.cue`], ["export", `${b}/x.cue`]);
+    assertEquals(r.claimed, false);
+    assertEquals(r.ids, 1);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("an output file not yet written keys by its place in the repository", async () => {
+  const repo = await Deno.makeTempDir({ prefix: "repo-" });
+  const wt = await Deno.makeTempDir({ prefix: "wt-" });
+  try {
+    await repoWith(repo, "x.cue");
+    await sh(repo, "worktree", "add", "-q", "-b", "other", `${wt}/b`);
+    const r = await twice(repo, repo, ["export", "-o", `${repo}/out.json`], ["export", "-o", `${wt}/b/out.json`]);
+    assertEquals(r.claimed, false);
+    assertEquals(r.ids, 1);
+  } finally {
+    await Deno.remove(wt, { recursive: true });
+    await Deno.remove(repo, { recursive: true });
+  }
+});
+
+Deno.test("an equals-form flag with an absolute path keys by its place in the repository", async () => {
+  const repo = await Deno.makeTempDir({ prefix: "repo-" });
+  const wt = await Deno.makeTempDir({ prefix: "wt-" });
+  try {
+    await repoWith(repo, "x.cue");
+    await sh(repo, "worktree", "add", "-q", "-b", "other", `${wt}/b`);
+    const r = await twice(repo, repo, ["export", `--outfile=${repo}/out.json`], ["export", `--outfile=${wt}/b/out.json`]);
+    assertEquals(r.claimed, false);
+    assertEquals(r.ids, 1);
+    // A value that is not itself a path is CUE's, kept as given: two runners' --inject differ.
+    const inj = await twice(repo, repo, ["export", "--inject=t=/x/actions-runners/r1/_work/p"], ["export", "--inject=t=/x/actions-runners/r2/_work/p"]);
+    assertEquals(inj.ids, 2);
+  } finally {
+    await Deno.remove(wt, { recursive: true });
+    await Deno.remove(repo, { recursive: true });
+  }
 });

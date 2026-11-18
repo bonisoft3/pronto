@@ -1736,6 +1736,8 @@ _sqlType: {
 	// The groups a composition's parent names by a column of its own: the
 	// child carries each as the same column, so a shape over it is keyed alike.
 	_above: [if P._underShared if P._p.access.groups != _|_ for g in P._p.access.groups if g.of != _|_ {g.group}]
+	// Only a public entity may be read without a token (access.anon, schema.cue).
+	_anonOn: [if P.e.access.scope == "public" if P.e.access["anon"] != _|_ if P.e.access.anon == true {true}, false][0]
 	if P.e.access.scope == "private" {
 		_using:  (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
 		_pkType: [for f in P.e.fields if f.pk {f.type}][0]
@@ -1963,6 +1965,9 @@ _sqlType: {
 		_write: ({write: *false | bool | "update", ...} & P.e.access).write
 		_appUser: list.Concat([
 			[(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out],
+			[if P._anonOn {
+				(#policy & {name: "\(P._t)_anon_select", table: P._t, rest: "FOR SELECT TO anon USING (true)"}).out
+			}],
 			[if P._write == true || P._write == "update" {
 				(#policy & {name: "\(P._t)_app_user_write", table: P._t, rest: "FOR ALL TO app_user USING (true) WITH CHECK (true)"}).out
 			}],
@@ -2027,6 +2032,11 @@ _sqlType: {
 		[if json.Marshal(P.e.access) == "" {""}],
 		[if !P._ok {""}],
 		P._pre,
+		// #policy drops only the names it still emits, so an entity that loses
+		// access.anon, or leaves public scope, would keep <t>_anon_select alive on
+		// a live database through every replay, and anon holds SELECT on every
+		// table: every scope but an anon public one drops it explicitly.
+		[if !P._anonOn {"DROP POLICY IF EXISTS \(P._t)_anon_select ON \(P._t);"}],
 		P._scopeTrigger,
 		// The floor's text lives in mecha's rls.sql and is called, never
 		// restated, so a generator cannot emit a subtly wrong one.
@@ -5440,9 +5450,10 @@ _pgrollDir: "services/database/pgroll"
 						"""
 				}
 
-				// Auth'd grants: anon can connect (USAGE) but touches no table —
-				// every row read or written goes through app_user or service,
-				// where 006's policies decide.
+				// Auth'd grants: anon can connect (USAGE) and is granted every table
+				// below, but RLS decides: only an entity with access.anon gets an
+				// anon policy (a SELECT); every other row read or written goes
+				// through app_user or service, where 006's policies decide.
 				if E._authOn {
 					text: """
 						GRANT USAGE ON SCHEMA public TO anon, app_user, service;

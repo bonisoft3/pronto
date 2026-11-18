@@ -64,13 +64,88 @@ deno=$(command -v deno || ls "$HOME"/.local/share/mise/installs/github-denoland-
 [ -x "$deno" ] && [ -f "$slot" ] || { echo "cue: no deno for the memory budget; running unbudgeted" >&2; exec "$real" "$@"; }
 
 # The evaluation's name: its repository (every worktree of it alike), its folder there and its
-# arguments, a temporary file's path left out; pronto's derive runs in a scratch folder named for
-# its run (.pronto-derive-<hash>), one name for all of them.
+# arguments. One evaluation keeps one id in any worktree, runner checkout or temporary copy: an id
+# never seen claims CUE_UNKNOWN_GB and waits in the cue lock, so a name that changes with the
+# checkout's path or a random temporary folder made thousands of small evaluations queue as large
+# ones (PRONTO-683). So an argument that is a path in a git checkout (or where a file will be
+# written in one) is named by its repository and its place in it; a CI runner's clone, a
+# repository of its own whose path holds /actions-runners/<name>/_work/, is named by what follows
+# _work/; a temporary folder's random name (a . or - and 6 or more letters and digits holding a
+# digit or both cases, or 8 or more of them holding a digit and a letter, alone) is left out, so
+# /tmp/tmp.gzTXAbh1M8/x is <tmp>/tmp/x and /tmp/pronto-plugins/x stays itself, as is the random middle
+# of a file directly in it (mktemp's roles.XXXXXX.json); and pronto's derive, which runs in a
+# scratch folder named for its run (.pronto-derive-<hash>), has one name for all of them.
+# tmpnorm <path>: the path with its runner clone or temporary folder's name rewritten.
+tmpnorm() {
+  case $1 in
+    */actions-runners/*/_work/*) printf '%s' "<runner>/${1#*/_work/}"; return ;;
+  esac
+  rest=
+  case $1 in
+    /private/var/folders/*/*/T/*|/var/folders/*/*/T/*) rest=${1#*/folders/*/*/T/} ;;
+    /private/tmp/*) rest=${1#/private/tmp/} ;;
+    /tmp/*) rest=${1#/tmp/} ;;
+    *) t=${TMPDIR%/}; [ -n "$t" ] && case $1 in "$t"/*) rest=${1#"$t"/} ;; esac ;;
+  esac
+  [ -n "$rest" ] || { printf '%s' "$1"; return; }
+  first=${rest%%/*}; tail=${rest#"$first"}; name=$first
+  suffix=${first##*[.-]}
+  if [ "$suffix" != "$first" ]; then
+    case $suffix in
+      *[!A-Za-z0-9]*|?|??|???|????|?????) ;;
+      *[0-9]*) name=${first%?"$suffix"} ;;
+      *[A-Z]*) case $suffix in *[a-z]*) name=${first%?"$suffix"} ;; esac ;;
+    esac
+  else
+    case $first in
+      *[!A-Za-z0-9]*|?|??|???|????|?????|??????|???????) ;;
+      *[0-9]*) case $first in *[A-Za-z]*) name='<rand>' ;; esac ;;
+    esac
+  fi
+  # A file of `mktemp -t <name>.XXXXXX.<ext>` (release.nu's roles and pushed lists) has its random
+  # part in the middle: roles.c4qN0s.json is <tmp>/roles.json (PRONTO-736).
+  if [ -z "$tail" ] && [ "$name" = "$first" ]; then
+    case $first in
+      *.*.*)
+        mid=${first#*.}; mid=${mid%.*}
+        case $mid in
+          *[!A-Za-z0-9]*|?|??|???|????|?????) ;;
+          *[0-9]*) name="${first%%.*}.${first##*.}" ;;
+          *[A-Z]*) case $mid in *[a-z]*) name="${first%%.*}.${first##*.}" ;; esac ;;
+        esac ;;
+    esac
+  fi
+  printf '%s' "<tmp>/$name$tail"
+}
 where=$(git rev-parse --path-format=absolute --git-common-dir --show-prefix 2>/dev/null) || where=$(pwd)
 where=$(printf '%s\n' "$where" | sed 's|\.pronto-derive-[0-9a-f]*|.pronto-derive|g')
-key=$where
+first=${where%%
+*}
+key=$(tmpnorm "$first")${where#"$first"}
+# pathnorm <absolute path>: prints it normalised; run in $(...) so its variables stay its own.
+# A bare absolute argument is named so, and so is the value of an equals-form flag (--outfile=/abs/out.json).
+pathnorm() {
+  a=$1
+  d=$a; [ -d "$a" ] || d=${a%/*}
+  # git names the real path (/private/var/..), the argument may name a link to it.
+  if [ -d "${d:-/}" ] && dp=$(cd "${d:-/}" 2>/dev/null && pwd -P); then
+    a=${dp%/}${a#"$d"}; [ -n "$a" ] || a=/
+    g=$(git -C "$dp" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null) || g=
+    if [ -n "$g" ]; then
+      top=${g#*
+}
+      case "$a" in "$top"|"$top"/*) rel=${a#"$top"}; a="${g%%
+*}:${rel#/}" ;; esac
+    fi
+  fi
+  tmpnorm "$a"
+}
 for a in "$@"; do
-  case "$a" in /tmp/*|/private/*|/var/folders/*) a='<tmp>' ;; esac
+  case "$a" in
+    /*) a=$(pathnorm "$a") ;;
+    # Only a flag whose whole value is a path: --inject=k=/x is CUE's value, not a file.
+    -*=/*) flag=${a%%=*}; val=${a#*=}; case $val in /*) a="$flag=$(pathnorm "$val")" ;; esac ;;
+  esac
   key="$key $a"
 done
 id=$(printf '%s' "$key" | md5 -q 2>/dev/null || printf '%s' "$key" | md5sum | cut -d' ' -f1)
