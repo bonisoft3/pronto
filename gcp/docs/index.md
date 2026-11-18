@@ -1,6 +1,6 @@
 # GCP releases
 
-A release with a `GKE` field uses the [[../../k8s/docs/index|native Kubernetes runtime]]. A release without that field retains the Cloud Run and Cloud SQL path. Feldera pipelines require GKE because their embedded catalog, compiled binaries and running pipeline state need a durable filesystem and a continuously running single writer. GKE uses CloudNativePG for application PostgreSQL; it does not provision Cloud SQL.
+A release with a `GKE` field uses the [[../../k8s/docs/index|native Kubernetes runtime]]. A release without that field retains the Cloud Run and Cloud SQL path. RisingWave pipelines require GKE because their embedded state and running pipeline state need a durable filesystem and a continuously running single writer. GKE uses CloudNativePG for application PostgreSQL; it does not provision Cloud SQL.
 
 Declare the target in the application's `release.cue` alongside `App`:
 

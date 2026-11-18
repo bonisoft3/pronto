@@ -4,13 +4,11 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:dev-password@database/native
       SERVICE_JWT: dev-token
-      DUCKSTREAM_ENGINE: feldera
-      FELDERA_URL: http://feldera:8080
-      COMPUTATIONS: '[{"name":"metrics","feldera":"/app/metrics.json"}]'
-  feldera:
-    image: native-feldera:test
-    environment:
-      FELDERA_DATABASE_URL: postgres://postgres:dev-password@database/native
+      DUCKSTREAM_ENGINE: risingwave
+      RISINGWAVE_URL: http://risingwave:4566
+      COMPUTATIONS: '[{"name":"metrics","risingwave":"/app/metrics.json"}]'
+  risingwave:
+    image: native-risingwave:test
   conduit:
     image: native-conduit:test
     environment:

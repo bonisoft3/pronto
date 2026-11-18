@@ -17,7 +17,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/yaml"
 	"list"
 	"regexp"
@@ -531,7 +530,6 @@ import (
 				"ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
 				"ARG BAYT_RUNTIME",
 				"ENV BAYT_RUNTIME=$BAYT_RUNTIME",
-				"ENV FELDERA_COMPILATION_PROFILE=unoptimized",
 			]
 			copy: [{srcs: ["monorepo/*.yaml"], dst: "./", parents: true}]
 		}
@@ -1037,11 +1035,10 @@ import (
 				// processes (.bayt/process-compose.yaml), given the images' binaries.
 				let _capture = B.cluster.capabilities.capture
 				let _compute = len(B.cluster.state.computations) > 0
-				let _feldera = _compute && B.cluster.state.duckstreamEngine == "feldera"
+				let _risingwave = _compute && B.cluster.state.duckstreamEngine == "risingwave"
 
-				// The transform runs the pipelines and the drains' streams, and
-				// carries compute's invalidations to it.
-				let _streams = len(B.cluster.state.pipelines) > 0 || _compute
+				// The transform runs the pipelines and the drains' streams.
+				let _streams = len(B.cluster.state.pipelines) > 0
 
 				// The ticker sweeps schedules and timers; the airlock runs for as
 				// long as the appliance does, so nothing wakes it.
@@ -1061,7 +1058,7 @@ import (
 
 				// A computation's files, by the paths the processes' environment
 				// names them, relative to the app.
-				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}], [if c.steps != _|_ {"\(c.steps).bundle.js"}]]) {(f): true}} {f}]
+				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.risingwave != _|_ {c.risingwave}], [if c.steps != _|_ {"\(c.steps).bundle.js"}]]) {(f): true}} {f}]
 
 				// The forward migrations, which compose's migrate service applies: the
 				// appliance runs that same process (process-compose.yaml), which what
@@ -1165,13 +1162,30 @@ import (
 								availability: restart: "on_failure"
 							}
 						}
+						if _risingwave {
+							risingwave: {
+								// A script, since process-compose expands variables in commands.
+								command: (_command & {args: ["/usr/local/bin/appliance-risingwave.sh"]}).out
+								environment: [
+									"CONNECTOR_LIBS_PATH=/risingwave/bin/connector-node/libs",
+									"ADBC_DRIVER_PATH=/risingwave/lib/adbc",
+									"LD_LIBRARY_PATH=/risingwave/lib:/risingwave/lib/adbc:/risingwave/jre/lib/server",
+									"JAVA_HOME=/risingwave/jre",
+									"JAVA_TOOL_OPTIONS=-Xmx256m",
+									"PATH=/risingwave/jre/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+									"ENABLE_TELEMETRY=false",
+								]
+								depends_on: database: condition: "process_healthy"
+								readiness_probe: _ready & {exec: command: "portcheck --port 4566"}
+								availability: restart: "on_failure"
+							}
+						}
 					}
 				}
 
 				// The secrets an effect declares, which the airlock inherits from the
 				// container: the appliance does not start without one, as compose's
 				// airlock does not (process-compose substitutes no `:?` refusal).
-				let _engine = [if _feldera {"'export DUCKSTREAM_ENGINE=feldera' "}, ""][0]
 				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
 				// The seal key is the deployment's own: the repository's development
 				// one is the local stack's alone. The airlock refuses it by its id at
@@ -1183,36 +1197,7 @@ import (
 				// The door's port, which the one starting the appliance may move, is
 				// no port a bridge's process of it listens on.
 				let _portCheck = strings.Join([for c, a in _containers {"'if [ \"$PORT\" = \(a.port) ]; then echo \"appliance: PORT \(a.port) is where the bridge process \(c) listens; set another\" >&2; exit 1; fi' "}], "")
-				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, [for c, _ in _containers {c}]]), " ")
-				if _feldera {
-					"feldera-artifacts": core.#target & {
-						activate: ""
-						deps:     [":compute:outs"]
-						compose: manual: true
-						cmd: builtin: {
-							shell: "sh"
-							do:    "deno run --no-check --config /app/deno.json --frozen -A /app/native-artifacts-build.ts /app/feldera-build-specs.json /opt/feldera"
-						}
-						dockerfile: {
-							from: name: B.cluster.surface.targets.feldera.dockerfile.from.name
-							preamble: [
-								"USER root",
-								"COPY <<'SPECS' /app/feldera-build-specs.json\n\(json.Marshal([for c in B.cluster.state.computations {name: c.name, feldera: "/app/computations/\(c.name).feldera.json"}]))\nSPECS",
-								"RUN mkdir -p /opt/feldera && chown ubuntu:ubuntu /opt/feldera",
-								"USER ubuntu",
-							]
-							copy: [
-								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
-								for f in ["native-artifacts-build.ts", "native-artifacts.ts", "native-sources.ts", "native-supervisor.c", "deno.json", "deno.lock"] {
-									{from: {ref: ":compute"}, srcs: ["/app/\(f)"], dst: "/app/\(f)"}
-								},
-								for c in B.cluster.state.computations {
-									{from: {ref: ":compute"}, srcs: ["/app/computations/\(c.name).feldera.json"], dst: "/app/computations/\(c.name).feldera.json"}
-								},
-							]
-						}
-					}
-				}
+				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, if _risingwave {["risingwave"]}, [for c, _ in _containers {c}]]), " ")
 				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
@@ -1228,7 +1213,7 @@ import (
 						if _wakes {[":ticker:outs"]},
 						if _timers {[":timer-check:outs"]},
 						if _compute {[":compute:outs"]},
-						if _feldera {[":feldera-artifacts:outs"]},
+						if _risingwave {[":risingwave:outs"]},
 						[for c, _ in _containers {":\(c)-appliance:outs"}],
 					])
 					srcs: globs: list.Concat([[".bayt/process-compose.yaml"], if _capture {["docker/*.yaml"]}, _computed])
@@ -1326,9 +1311,6 @@ import (
 							// Compute's app, its cache and DuckDB's extensions, its sibling
 							// sources where its imports reach them, and the program's
 							// computations where the environment names them.
-							if _feldera {[
-								{from: {ref: ":feldera-artifacts"}, srcs: ["/opt/feldera/"], dst: "/opt/feldera/"},
-							]},
 							if _compute {list.Concat([
 								[
 									{from: {ref: ":compute"}, srcs: ["/app/"], dst: "/compute-app/"},
@@ -1339,6 +1321,17 @@ import (
 									{from: {ref: ":compute"}, srcs: ["/packages"], dst: "/packages"},
 								],
 								[if !B.cluster.capabilities.auth {{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"}}],
+								if _risingwave {[
+									{from: {ref: ":risingwave"}, srcs: ["/risingwave/bin/risingwave"], dst: "/risingwave/bin/risingwave"},
+									{from: {ref: ":risingwave"}, srcs: ["/risingwave/bin/connector-node"], dst: "/risingwave/bin/connector-node"},
+									{from: {ref: ":risingwave"}, srcs: ["/risingwave/lib"], dst: "/risingwave/lib"},
+									{from: {ref: ":risingwave"}, srcs: ["/lib/*-linux-gnu/libpython3.12.so.1*", "/lib/*-linux-gnu/libexpat.so.1*"], dst: "/risingwave/lib/"},
+									{from: {ref: ":risingwave"}, srcs: ["/usr/lib/jvm/java-21-openjdk-*/bin"], dst: "/risingwave/jre/bin"},
+									{from: {ref: ":risingwave"}, srcs: ["/usr/lib/jvm/java-21-openjdk-*/conf"], dst: "/risingwave/jre/conf"},
+									{from: {ref: ":risingwave"}, srcs: ["/usr/lib/jvm/java-21-openjdk-*/lib"], dst: "/risingwave/jre/lib"},
+									{from: {ref: ":risingwave"}, srcs: ["/etc/java-21-openjdk"], dst: "/etc/java-21-openjdk"},
+									{from: {ref: ":risingwave"}, srcs: ["/etc/ssl/certs/java"], dst: "/etc/ssl/certs/java"},
+								]},
 								[for f in _computed {srcs: [f], dst: f}],
 							])},
 							// The ticker, with its own Deno and cache.
@@ -1360,19 +1353,22 @@ import (
 							if _effects && _blobs {[
 								#"RUN echo "release@docker does not yet run the blob plane an effect's answer is stored in; refusing to omit a runtime service" >&2 && exit 1"#,
 							]},
-							// The computations on DuckDB snapshots, as launch@host runs them:
-							// compute and the transform reading its invalidations both find
-							// its app and extensions here, the container's environment.
+							// The computations on RisingWave: compute and RisingWave run as
+							// processes in the appliance container; DuckDB snapshots are only
+							// for pages and cloudflare.
+							if _compute && !_risingwave {[
+								#"RUN echo "release@docker runs computations on RisingWave; refusing DUCKSTREAM_ENGINE=duckdb-snapshot" >&2 && exit 1"#,
+							]},
 							if _compute {[
 								"ENV COMPUTE_APP_DIR=/compute-app",
 								"ENV COMPUTE_STATE_DIR=/var/lib/duckstream",
 								"ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions",
 								"ENV DENO_DIR=/deno-dir",
 							]},
-							if _feldera {[
-								"ENV DUCKSTREAM_ENGINE=feldera",
-								"ENV FELDERA_ARTIFACTS_DIR=/opt/feldera",
-								"ENV FELDERA_WORK_DIR=/var/lib/feldera",
+							if _risingwave {[
+								"ENV DUCKSTREAM_ENGINE=risingwave",
+								"ENV RISINGWAVE_URL=http://risingwave:4566",
+								#"RUN printf '%s\n' '#!/bin/sh' 'set -eu' 'dir="${COMPUTE_STATE_DIR:-/var/lib/duckstream}/risingwave"' 'mkdir -p "$dir/state_store"' 'printf "%s\n" "[meta]" "min_sst_retention_time_sec = 300" "full_gc_interval_sec = 60" "vacuum_interval_sec = 15" "gc_history_retention_time_sec = 0" "clean_all_foreground_jobs_on_recovery = true" "" "[meta.developer]" "actor_cnt_per_worker_parallelism_soft_limit = 1000" "actor_cnt_per_worker_parallelism_hard_limit = 4000" "" "[streaming]" "in_flight_barrier_nums = 256" "" "[streaming.developer]" "enable_snapshot_backfill = false" "" "[storage]" "shared_buffer_min_batch_flush_size_mb = 32" > "$dir/risingwave.toml"' 'compute_mem="${RISINGWAVE_MEMORY_BYTES:-1342177280}"' 'parallelism="${RISINGWAVE_PARALLELISM:-2}"' 'exec /risingwave/bin/risingwave standalone --config-path "$dir/risingwave.toml" \' '  --meta-opts="--listen-addr 127.0.0.1:5690 --advertise-addr 127.0.0.1:5690 --backend sqlite --sql-endpoint $dir/metadata.db --state-store hummock+fs://$dir/state_store --data-directory hummock_001" \' '  --compute-opts="--listen-addr 127.0.0.1:5688 --meta-address http://127.0.0.1:5690 --total-memory-bytes $compute_mem --role both --parallelism $parallelism" \' '  --frontend-opts="--listen-addr 0.0.0.0:4566 --meta-addr http://127.0.0.1:5690 --frontend-total-memory-bytes 268435456" \' '  --compactor-opts="--listen-addr 127.0.0.1:6660 --meta-address http://127.0.0.1:5690 --compactor-total-memory-bytes 1073741824 --compactor-meta-cache-memory-bytes 67108864"' > /usr/local/bin/appliance-risingwave.sh && chmod 755 /usr/local/bin/appliance-risingwave.sh"#,
 							]},
 							if _capture {[
 								"ENV MECHA_MESH_DIR=/mesh-events",
@@ -1412,7 +1408,7 @@ import (
 							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do if [ "$1" = "--" ]; then shift; break; fi; shift; done' 'exec "$@"' > /usr/local/bin/mise && chmod 755 /usr/local/bin/mise"#,
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_devSealCheck)\#(_engine)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_devSealCheck)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
 							// The local stack's word that it is the local stack, which the
 							// base's airlock carries for launch@host, goes from the image.
@@ -1428,6 +1424,9 @@ import (
 							},
 							// The extensions came with compute's image: it installs none at start.
 							if _compute {"RUN --network=none deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts /compute-app/step-worker.ts && touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
+							if _risingwave {
+								#"RUN nu -c 'let f = "/.bayt/process-compose.yaml"; open $f | upsert processes.compute.depends_on.risingwave {condition: "process_healthy"} | if ("transform" in $in.processes) { update processes.transform.entrypoint {|p| $p.processes.transform.entrypoint | each {|a| $a | str replace " ($$cdir | path join '\''events.yaml'\'')" "" } } } else { $in } | to yaml | save -f $f'"#
+							},
 							// A bridge's port is no port an appliance process takes, the ones bayt
 							// assigns the app included, and no other bridge's.
 							if len(_bridges) > 0 {
@@ -1445,6 +1444,7 @@ import (
 							[if _effects {"airlock"}],
 							[if _capture {"conduit"}],
 							[if _streams {"transform"}],
+							[if _risingwave {"risingwave"}],
 							[if _compute {"compute"}],
 							if _wakes {["ticker", "clock"]},
 						])

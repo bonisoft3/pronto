@@ -219,22 +219,92 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
   assertStringIncludes(JSON.stringify(packages.value), "redis-server");
 });
 
-// The appliance refused computations, for want of the compute service and
-// Feldera. It runs them on DuckDB snapshots, as launch@host does: no Feldera,
-// whose Rust compile ran out of memory, and compute's files from its image.
-Deno.test("release-docker runs a program's computations on DuckDB snapshots, without Feldera", async () => {
+// The appliance runs computations on RisingWave; DuckDB snapshots are used
+// only on pages and cloudflare.
+Deno.test("release-docker runs a program's computations on RisingWave", async () => {
   const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +
-    '\napp: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\napp: state: computations: totals: to: ["Total"]\n';
+    '\napp: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\n' +
+    'app: state: computations: totals: {to: ["Total"], risingwave: "duckstream/totals.risingwave.json"}\n';
   const rd = await releaseDocker(code);
   assert(!rd.dockerfile.preamble.some((l) => l.includes("does not yet run computations")), "computations refused");
-  assert(rd.deps.includes(":compute:outs"), `compute is no dependency: ${rd.deps}`);
-  assert(!rd.deps.some((d) => d.includes("feldera")), `Feldera is a dependency: ${rd.deps}`);
+  for (const dep of [":compute:outs", ":risingwave:outs"]) assert(rd.deps.includes(dep), `${dep} is no dependency: ${rd.deps}`);
+  assert(!rd.deps.includes(":transform:outs"), `transform is a dependency without pipelines: ${rd.deps}`);
   const copied = rd.dockerfile.copy.map((c) => `${c.from?.ref ?? ""}${c.srcs.join(",")}>${c.dst}`);
-  for (const c of [":compute/app/>/compute-app/", ":compute/deno-dir>/deno-dir", ":compute/durex>/durex"]) assert(copied.includes(c), `${c} not copied: ${copied.join(" ")}`);
-  for (const e of ["ENV COMPUTE_APP_DIR=/compute-app", "ENV COMPUTE_STATE_DIR=/var/lib/duckstream", "ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions", "ENV DENO_DIR=/deno-dir"]) assert(rd.dockerfile.preamble.includes(e), e);
-  for (const p of ["transform", "compute"]) assert(rd.dockerfile.cmd.includes(p), `${p} not started: ${rd.dockerfile.cmd}`);
+  for (const c of [
+    ":compute/app/>/compute-app/",
+    ":compute/deno-dir>/deno-dir",
+    ":compute/durex>/durex",
+    ":risingwave/risingwave/bin/risingwave>/risingwave/bin/risingwave",
+    ":risingwave/risingwave/bin/connector-node>/risingwave/bin/connector-node",
+    ":risingwave/etc/java-21-openjdk>/etc/java-21-openjdk",
+    ":risingwave/etc/ssl/certs/java>/etc/ssl/certs/java",
+  ]) assert(copied.includes(c), `${c} not copied: ${copied.join(" ")}`);
+  for (const e of [
+    "ENV COMPUTE_APP_DIR=/compute-app",
+    "ENV COMPUTE_STATE_DIR=/var/lib/duckstream",
+    "ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions",
+    "ENV DENO_DIR=/deno-dir",
+    "ENV DUCKSTREAM_ENGINE=risingwave",
+    "ENV RISINGWAVE_URL=http://risingwave:4566",
+  ]) assert(rd.dockerfile.preamble.includes(e), e);
+  for (const p of ["risingwave", "compute"]) assert(rd.dockerfile.cmd.includes(p), `${p} not started: ${rd.dockerfile.cmd}`);
+  assert(!rd.dockerfile.cmd.includes("transform"), `transform started without pipelines: ${rd.dockerfile.cmd}`);
   assert(rd.dockerfile.epilogue.some((line) => line.includes("touch /compute-app/extensions/.installed-v1.5.6")), "compute would install extensions at start");
   assert(rd.dockerfile.epilogue.some((line) => line.includes("/compute-app/step-worker.ts")), "bounded worker must pass the offline dependency check");
+  const overlay = overlayOf(rd).processes;
+  assertStringIncludes(overlay.risingwave.command, "/usr/local/bin/appliance-risingwave.sh");
+  assert(!overlay.risingwave.command.includes("$"), "process-compose command must not rely on variable expansion");
+  assert(
+    rd.dockerfile.preamble.some((l) => l.includes("/usr/local/bin/appliance-risingwave.sh") && l.includes("/risingwave/bin/risingwave standalone")),
+    "missing /usr/local/bin/appliance-risingwave.sh standalone launcher",
+  );
+  assert(
+    ![...rd.dockerfile.preamble, ...rd.dockerfile.epilogue].some((l) => /^\s*VOLUME\b/i.test(l)),
+    "release-docker must not declare built-in VOLUME mounts",
+  );
+  const rewrite = rd.dockerfile.epilogue.find((l) => l.startsWith("RUN nu -c") && l.includes("/.bayt/process-compose.yaml"))!;
+  assert(rewrite, "missing process-compose.yaml RisingWave rewrite");
+  const dir = await Deno.makeTempDir();
+  try {
+    for (const withTransform of [false, true]) {
+      const pc = `${dir}/process-compose.yaml`;
+      await Deno.writeTextFile(
+        pc,
+        [
+          "processes:",
+          "  compute:",
+          "    depends_on:",
+          "      database:",
+          "        condition: process_healthy",
+          ...(withTransform
+            ? [
+              "  transform:",
+              "    entrypoint:",
+              "    - nu",
+              "    - -c",
+              "    - exec redpanda-connect streams --no-api -r ($tdir | path join 'cdc-trace.yaml') 'docker/p.yaml' ($$cdir | path join 'events.yaml')",
+            ]
+            : []),
+          "",
+        ].join("\n"),
+      );
+      const cmd = rewrite.slice(4).replaceAll("/.bayt/process-compose.yaml", pc);
+      const ran = await new Deno.Command("sh", { args: ["-c", cmd] }).output();
+      assert(ran.success, new TextDecoder().decode(ran.stderr));
+      const updated = await Deno.readTextFile(pc);
+      assertStringIncludes(updated, "risingwave:");
+      assertStringIncludes(updated, "process_healthy");
+      if (withTransform) {
+        assert(!updated.includes("events.yaml"), updated);
+        assertStringIncludes(updated, "'docker/p.yaml'");
+      }
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+
+  const snapshot = await releaseDocker(code + '_cluster: state: duckstreamEngine: "duckdb-snapshot"\n');
+  assert(snapshot.dockerfile.preamble.some((l) => l.includes("refusing DUCKSTREAM_ENGINE=duckdb-snapshot")), "duckdb-snapshot not refused on release-docker");
 });
 
 Deno.test("the released appliance overrides development PostgreSQL durability settings", async () => {
@@ -244,37 +314,6 @@ Deno.test("the released appliance overrides development PostgreSQL durability se
     assertStringIncludes(command, `${setting}=on`);
     assert(command.lastIndexOf(`${setting}=on`) > command.lastIndexOf(`${setting}=off`));
   }
-});
-
-Deno.test("a Feldera appliance builds native artifacts and runs them without a manager", async () => {
-  const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +
-    '\napp: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\napp: state: computations: totals: to: ["Total"]\n_cluster: state: duckstreamEngine: "feldera"\n';
-  const built = await exportJson('_build.project.targets["feldera-artifacts"]', code);
-  assertEquals(built.success, true, built.stderr);
-  const artifact = built.value;
-  assertStringIncludes(artifact.dockerfile.from.name, "pipeline-manager:0.367.0@sha256:");
-  assert(artifact.deps.includes(":compute:outs"));
-  const artifactFiles = artifact.dockerfile.copy.map((c: { from?: { ref?: string }; srcs: string[]; dst: string }) => `${c.from?.ref ?? ""}${c.srcs.join(",")}>${c.dst}`);
-  for (const file of ["native-artifacts-build.ts", "native-artifacts.ts", "native-sources.ts", "native-supervisor.c", "deno.json", "deno.lock", "computations/test-effects-totals.feldera.json"]) {
-    assert(artifactFiles.includes(`:compute/app/${file}>/app/${file}`), file);
-  }
-  assert(!artifactFiles.some((file: string) => file.includes(":compute/app/>") || file.includes(".wasm") || file.includes(".js>")), artifactFiles.join(" "));
-  // Structured commands precede Bayt metadata, so regeneration cannot recompile SQL.
-  assertEquals(artifact.dockerfile.epilogue ?? [], []);
-  const commands = artifact.dockerfile.preamble.join("\n") + "\n" + artifact.cmd.builtin.do;
-  for (const value of ["/app/computations/test-effects-totals.feldera.json", "USER ubuntu", "native-artifacts-build.ts /app/feldera-build-specs.json /opt/feldera"]) assertStringIncludes(commands, value);
-  const rd = await releaseDocker(code);
-  assert(rd.deps.includes(":feldera-artifacts:outs"));
-  for (const sibling of ["airlock", "durex", "packages"]) {
-    assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":compute" && c.srcs[0] === `/${sibling}` && c.dst === `/${sibling}`));
-  }
-  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts");
-  assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":feldera-artifacts" && c.srcs[0] === "/opt/feldera/" && c.dst === "/opt/feldera/"));
-  assert(rd.dockerfile.preamble.includes("ENV DUCKSTREAM_ENGINE=feldera"));
-  assert(rd.dockerfile.preamble.includes("ENV FELDERA_ARTIFACTS_DIR=/opt/feldera"));
-  assert(rd.dockerfile.preamble.includes("ENV FELDERA_WORK_DIR=/var/lib/feldera"));
-  assert(!rd.dockerfile.cmd.includes("feldera"));
-  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "export DUCKSTREAM_ENGINE=feldera");
 });
 
 Deno.test("a program without drains, pipelines or schedules starts no change feed, ticker or clock", async () => {
@@ -476,7 +515,7 @@ Deno.test("the appliance's airlock is a release's, whatever the base file it sha
 });
 
 // An effect's answered bytes go to the blob plane, which the appliance does not
-// run: refused, like the gateway and the computations.
+// run: refused, like the gateway.
 Deno.test("an appliance with effects and the blob plane is refused", async () => {
   const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') + "\napp: capabilities: blobs: true\n";
   const res = await exportJson('[for l in _build.project.targets["release-docker"].dockerfile.preamble if l =~ "blob plane" {l}]', code);

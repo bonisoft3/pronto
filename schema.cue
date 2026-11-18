@@ -764,10 +764,10 @@ import (
 // run by mecha's compute service, whose services/compute/main.ts states the
 // contract.
 #Computation: {
-	name:     string
-	src:      *"computations/\(name).js" | string
-	feldera?: string & !=""
-	steps?:   string & !=""
+	name:        string
+	src:         *"computations/\(name).js" | string
+	risingwave?: string & !=""
+	steps?:      string & !=""
 	// The live entities it alone writes.
 	to: [...string] & [_, ...]
 	sinkWrites?: [string]: "replace" | "upsert"
@@ -1438,12 +1438,12 @@ import (
 }
 
 #DuckStreamCompute: {
-	name:     string
-	ir:       *name | string
-	backend:  "compute"
-	src:      string & !=""
-	feldera?: string & !=""
-	steps?:   string & !=""
+	name:        string
+	ir:          *name | string
+	backend:     "compute"
+	src:         string & !=""
+	risingwave?: string & !=""
+	steps?:      string & !=""
 	sources: [string]: {
 		entities: [...string] & [_, ...]
 		read:     "snapshot"
@@ -2380,7 +2380,7 @@ import (
 						A.state.entities[entity].durability & ("offline" | "live" | "server")
 					}]
 					src: stream.src
-					if stream.feldera != _|_ {feldera: stream.feldera}
+					if stream.risingwave != _|_ {risingwave: stream.risingwave}
 					if stream.steps != _|_ {steps: stream.steps}
 					to:         [for _, sink in stream.sinks {sink.entity}]
 					sinkWrites: {for _, sink in stream.sinks {(sink.entity): sink.write}}

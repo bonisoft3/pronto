@@ -6,10 +6,10 @@ import (
 )
 
 _snapshotStream: {
-	name:    "metrics"
-	backend: "compute"
-	src:     "computations/metrics.js"
-	feldera: "computations/metrics.feldera.json"
+	name:       "metrics"
+	backend:    "compute"
+	src:        "computations/metrics.js"
+	risingwave: "computations/metrics.risingwave.json"
 	sources: {
 		traffic: {entities: ["Profile"], read: "snapshot"}
 		repeated: {entities: ["Profile"], read: "snapshot"}
@@ -51,10 +51,11 @@ streamRejectsOrdered: ((pronto.#DuckStreamPipeline & {
 }) == _|_) & true
 streamRejectsSplitTransaction: ((_streamed & {state: duckstreams: metrics: sinks: other: {entity: "Profile", write: "replace", version: "latest", transaction: "separate"}}) == _|_) & true
 
-streamCarriesFeldera:     _streamConfig[0].feldera & "/app/computations/emit-metrics.feldera.json"
-streamDefaultsToSnapshot: _streamCluster.surface.targets.compute.compose.environment.DUCKSTREAM_ENGINE & "${DUCKSTREAM_ENGINE:-duckdb-snapshot}"
-_felderaCluster: _streamCluster & {state: duckstreamEngine: "feldera"}
-streamSelectsFeldera: _felderaCluster.surface.targets.compute.compose.environment.DUCKSTREAM_ENGINE & "${DUCKSTREAM_ENGINE:-feldera}"
+streamCarriesRisingwave:    _streamConfig[0].risingwave & "/app/computations/emit-metrics.risingwave.json"
+streamDefaultsToRisingwave: _streamCluster.surface.targets.compute.compose.environment.DUCKSTREAM_ENGINE & "${DUCKSTREAM_ENGINE:-risingwave}"
+streamMountsNoVolumes:      (_streamCluster.surface.targets.compute.compose.volumes == _|_) & true
+_snapshotCluster:           _streamCluster & {state: duckstreamEngine: "duckdb-snapshot"}
+streamSelectsSnapshot:      _snapshotCluster.surface.targets.compute.compose.environment.DUCKSTREAM_ENGINE & "${DUCKSTREAM_ENGINE:-duckdb-snapshot}"
 
 _upserted: _code & {
 	state: entities: Metric: _streamed.state.entities.Metric

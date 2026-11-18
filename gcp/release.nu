@@ -11,7 +11,7 @@ alias release-gke = release
 # Cloud Run has no durable filesystem for the native pipeline services.
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
-const unbuilt = ["feldera" "redis" "mesh-events" "conduit" "transform" "compute" "rclone-s3" "imgproxy"]
+const unbuilt = ["risingwave" "redis" "mesh-events" "conduit" "transform" "compute" "rclone-s3" "imgproxy"]
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })

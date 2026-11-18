@@ -186,22 +186,37 @@ async function run(cmd: string, args: string[], cwd: string): Promise<Run> {
   return { ok: out.success, stdout: new TextDecoder().decode(out.stdout), stderr: new TextDecoder().decode(out.stderr) }
 }
 
-type Service = { depends_on?: Record<string, unknown>; environment?: Record<string, string>; build?: { context?: string; additional_contexts?: Record<string, string> }; develop?: { watch?: { path: string; target?: string }[] }; networks?: Record<string, { aliases?: string[] } | null> }
+type Service = { command?: string[] | string; depends_on?: Record<string, unknown>; environment?: Record<string, string>; build?: { context?: string; additional_contexts?: Record<string, string> }; develop?: { watch?: { path: string; target?: string }[] }; networks?: Record<string, { aliases?: string[] } | null> }
 
 type Compose = { services: Record<string, Service>; [key: string]: unknown }
 
 export function snapshotCompose(model: Compose): Compose {
   const snapshot = structuredClone(model)
-  const feldera = Object.keys(snapshot.services).filter((name) => name.endsWith('-feldera'))
-  for (const name of feldera) delete snapshot.services[name]
+  const risingwave = Object.keys(snapshot.services).filter((name) => name.endsWith('-risingwave'))
+  for (const name of risingwave) delete snapshot.services[name]
+  const hasComputations = Object.entries(snapshot.services).some(([name, service]) => name.endsWith('-compute') && Boolean(service.environment?.COMPUTATIONS))
   for (const [name, service] of Object.entries(snapshot.services)) {
-    for (const dependency of feldera) if (service.depends_on) delete service.depends_on[dependency]
+    for (const dependency of risingwave) if (service.depends_on) delete service.depends_on[dependency]
     for (const [context, source] of Object.entries(service.build?.additional_contexts ?? {})) {
-      if (feldera.some((name) => source === `service:${name}`)) delete service.build!.additional_contexts![context]
+      if (risingwave.some((name) => source === `service:${name}`)) delete service.build!.additional_contexts![context]
     }
     if (name.endsWith('-compute') && service.environment?.COMPUTATIONS) {
       service.environment.DUCKSTREAM_ENGINE = 'duckdb-snapshot'
-      delete service.environment.FELDERA_URL
+      delete service.environment.RISINGWAVE_URL
+    }
+    if (name.endsWith('-transform') && hasComputations) {
+      const prefix = name.slice(0, -'-transform'.length)
+      service.environment = { ...service.environment, COMPUTE_GROUP: service.environment?.COMPUTE_GROUP ?? `${prefix}-compute` }
+      if (!service.command) {
+        const pipelines = (service.develop?.watch ?? []).map((w) => w.target).filter((t): t is string => Boolean(t?.startsWith('/pipelines/')))
+        service.command = ['streams', '--no-api', '-r', '/cdc-trace.yaml', ...pipelines, '/compute-events.yaml']
+      } else if (Array.isArray(service.command)) {
+        if (!service.command.includes('/compute-events.yaml')) {
+          service.command = [...service.command, '/compute-events.yaml']
+        }
+      } else {
+        throw new Error(`${name} declares a string command; expected an argv array`)
+      }
     }
   }
   return snapshot
@@ -262,8 +277,9 @@ async function main() {
   const bus: Bus | undefined = redis && transform?.[1].environment?.REDIS_URL
     ? { url: transform[1].environment.REDIS_URL, aliases: new Set([redis[0], ...Object.values(redis[1].networks ?? {}).flatMap((n) => n?.aliases ?? [])]) }
     : undefined
-  const observedStreams = [...streams, ...(compute ? ['compute-events'] : [])]
-  const completions = new Map<string, Completion>(compute ? [['compute-events:root.input', 'bus']] : [])
+  const hasComputeEvents = Boolean(compute && transform?.[1].environment?.COMPUTE_GROUP)
+  const observedStreams = [...streams, ...(hasComputeEvents ? ['compute-events'] : [])]
+  const completions = new Map<string, Completion>(hasComputeEvents ? [['compute-events:root.input', 'bus']] : [])
   if (transform) {
     for (const stream of streams) {
       const source = transform[1].develop?.watch?.find((w) => w.target === `/pipelines/${stream}.yaml`)

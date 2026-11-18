@@ -4,8 +4,8 @@ package schema
 	app:         #ReleaseSpec
 	environment: #Environment
 	images: [string]: string
-	let servicePorts = {compute: 9997, feldera: 8080, redis: 6379, conduit: 8080, "mesh-events": 3500, transform: 4195, ticker: 9998, clock: 9996, "rclone-s3": 3900, imgproxy: 8081}
-	let mounts = {feldera: "/home/ubuntu/.feldera", compute: "/lake", redis: "/data", "rclone-s3": "/data"}
+	let servicePorts = {compute: 9997, risingwave: 4566, redis: 6379, conduit: 8080, "mesh-events": 3500, transform: 4195, ticker: 9998, clock: 9996, "rclone-s3": 3900, imgproxy: 8081}
+	let mounts = {redis: "/data", "rclone-s3": "/data"}
 	let appLabels = {"app.kubernetes.io/name": app.name}
 	objects: [for svc, runtime in app.runtime for object in [
 		if mounts[svc] != _|_ {
@@ -41,7 +41,6 @@ package schema
 					}
 					spec: {
 						terminationGracePeriodSeconds: 120
-						if svc == "feldera" {securityContext: fsGroup: 1000}
 						if mounts[svc] != _|_ {
 							volumes: [{name: "state", persistentVolumeClaim: claimName: "\(app.name)-\(svc)"}]
 						}
@@ -51,6 +50,7 @@ package schema
 							imagePullPolicy: environment.imagePullPolicy
 							resources:       app.runtimeResources
 							if mounts[svc] != _|_ {volumeMounts: [{name: "state", mountPath: mounts[svc]}]}
+							if svc == "risingwave" {args: ["single_node"]}
 							if svc == "redis" {args: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]}
 							env: [
 								if len(runtime.databaseEnvironment) > 0 {{name: "PGPASSWORD", valueFrom: secretKeyRef: {name: "\(app.name)-db-postgres", key: "password"}}},
@@ -87,7 +87,12 @@ package schema
 			spec: {
 				podSelector: matchLabels: appLabels & {"app.kubernetes.io/component": svc}
 				policyTypes: ["Ingress", "Egress"]
-				ingress: [{from: [{podSelector: {matchLabels: appLabels, matchExpressions: [#notBridge]}}]}]
+				if svc == "risingwave" {
+					ingress: [{from: [{podSelector: {matchLabels: appLabels & {"app.kubernetes.io/component": "compute"}, matchExpressions: [#notBridge]}}], ports: [{port: 4566, protocol: "TCP"}]}]
+				}
+				if svc != "risingwave" {
+					ingress: [{from: [{podSelector: {matchLabels: appLabels, matchExpressions: [#notBridge]}}]}]
+				}
 				egress: [
 					{to: [{podSelector: matchLabels: appLabels}]},
 					{to: [{podSelector: matchLabels: {"cnpg.io/cluster": "\(app.name)-db"}}], ports: [{port: 5432, protocol: "TCP"}]},

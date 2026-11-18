@@ -3516,7 +3516,7 @@ _pgrollDir: "services/database/pgroll"
 			computations: [for _, c in D.code.state.computations {
 				name: "\(D.code.meta.name)-\(c.name)"
 				file: c.src
-				if c.feldera != _|_ {feldera: c.feldera}
+				if c.risingwave != _|_ {risingwave: c.risingwave}
 				if c.steps != _|_ {steps: c.steps}
 				to: [for t in c.to {D.code.state.entities[t].table}]
 				if c.sinkWrites != _|_ {sinkWrites: {for entity, mode in c.sinkWrites {(D.code.state.entities[entity].table): mode}}}

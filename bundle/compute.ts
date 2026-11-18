@@ -3,7 +3,7 @@ import { encodeBase64 } from '@std/encoding/base64'
 import { renderMachines } from './edge-machines.ts'
 import { batchMachine } from '../compute/machine.ts'
 
-type Spec = { name: string; file: string; wasm: string[]; feldera?: string; steps?: string; to: string[]; sinkWrites?: Record<string, 'replace' | 'upsert'>; onComplete?: string; [key: string]: unknown }
+type Spec = { name: string; file: string; wasm: string[]; risingwave?: string; steps?: string; to: string[]; sinkWrites?: Record<string, 'replace' | 'upsert'>; onComplete?: string; [key: string]: unknown }
 export type PackagedComputation = { spec: Spec; compiled: object; reads: string[]; queries: Record<string, string>; queryStages?: Record<string, {sql: string; stages: {name: string; sql: string}[]}>; version: string }
 const workerTrust = `if (globalThis.trustedTypes) trustedTypes.createPolicy('default', { createScript(source, _type, sink) { if (sink !== 'eval' && sink !== 'Function') throw new TypeError('untrusted worker script sink: ' + sink); return source; } });\n`
 const inside = (root: string, file: string) => {
@@ -14,7 +14,7 @@ export async function computationPackages(app: string, mecha: string): Promise<P
   const cluster = JSON.parse(await Deno.readTextFile(path.join(app, '.pronto/cluster.json')))
   if (!Array.isArray(cluster.computations)) throw new Error('generate this app before packaging its computations')
   if (!cluster.computations.length) return []
-  const specs = cluster.computations.map((s: Spec) => ({ ...s, file: inside(app, s.file), wasm: s.wasm.map((f) => inside(app, f)), ...(s.feldera ? { feldera: inside(app, s.feldera) } : {}), ...(s.steps ? { steps: inside(app, s.steps) } : {}) }))
+  const specs = cluster.computations.map((s: Spec) => ({ ...s, file: inside(app, s.file), wasm: s.wasm.map((f) => inside(app, f)), ...(s.risingwave ? { risingwave: inside(app, s.risingwave) } : {}), ...(s.steps ? { steps: inside(app, s.steps) } : {}) }))
   const result = await new Deno.Command(Deno.execPath(), {
     args: ['run', '-A', '--unstable-worker-options', '--config', path.join(mecha, 'services/compute/deno.json'), path.join(mecha, 'services/compute/snapshot-service.ts'), '--package'],
     env: { COMPUTATIONS: JSON.stringify(specs) }, stdout: 'piped', stderr: 'inherit',

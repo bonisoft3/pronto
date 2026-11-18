@@ -31,7 +31,7 @@ the other case, and its answer is a per-reader pair
 Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#Schedule`, all in [`schema.cue`](../schema.cue):
 
 - **A DuckStream pipeline** (`#DuckStreamPipeline`): a declaration emitted as SQL
-  and checked at lint time. Feldera execution, CDC wiring and reactive browser
+  and checked at lint time. Streaming execution, CDC wiring and reactive browser
   evaluation are not implemented by this emitter; see the
   [[decisions/2026-10-19-duckstream-runtime|runtime design and spikes]].
   - `tempo: *"hot" | "cold"`: a static classification used by the checks below,
@@ -218,7 +218,7 @@ typedSinks: true
 ```
 
 The contract distinguishes carrying a value from computing over it. A native
-DuckDB stage can carry all portable types without promising that every Feldera
+DuckDB stage can carry all portable types without promising that every streaming
 operator supports those types. In particular, `duration` is a bounded elapsed
 time, while calendar-month arithmetic belongs to an explicitly selected SQL
 stage. Source defaults and generated columns execute in PostgreSQL; the captured
@@ -273,10 +273,10 @@ sink rows and updates only changed values.
 The internal publisher retains the service role, claims, pre-request hook,
 constraints and RLS behavior. It owns only the declared complete sinks. Outputs
 become ordinary PostgreSQL changes, so Electric updates already-open readers
-without reload. Multiple numerical workers, dirty-group partial replacement,
-a common CDC frontier across raw pipelines and checkpoint-based Feldera recovery
-are not yet implemented. Native Feldera captures rebuild a complete baseline
-after restart. The retained input rows can be large; this first implementation
+without reload. Multiple numerical workers, dirty-group partial replacement, and
+a common CDC frontier across raw pipelines
+are not yet implemented. Native RisingWave captures rebuild a complete baseline
+after uncheckpointed restart. The retained input rows can be large; this first implementation
 coalesces full computations rather than making an opaque solver incremental.
 Existing raw-pipeline outputs can still lag their sources and trigger another
 batch when they catch up. The broader migration is in the
@@ -336,7 +336,7 @@ service's own pins, the module in the same cage and the jobs on the same Wasm.
 `state.duckstreams` also admits a bounded `backend: "compute"` profile. It
 lowers to the computation runtime above, including its Cortex coordinator and
 Durex worker. Sources and sinks are contracts on that runtime. An optional
-`feldera` descriptor enables native query execution; deployment selects the
+`risingwave` descriptor enables native query execution; deployment selects the
 engine, while the coordinator and publication contract stay the same.
 
 ```cue
@@ -378,10 +378,10 @@ Snapshots, `replace`, and `latest` are the only admitted modes in this profile.
 Change streams, append, per-key replacement and ordered parallel publication
 remain outside it. No `exactlyOnce` flag is inferred for the whole CDC pipeline.
 
-[Plausible](https://github.com/bonisoft3/pronto/tree/main/apps/plausible/duckstream/docs/index.md) exercises this
-profile with authored Feldera SQL followed by a pure JavaScript finish stage.
-Its server runs native Feldera views, and Pages uses translated DuckDB snapshot
-queries from the same stock compiler export. See
+Plausible exercises this
+profile with authored streaming SQL followed by a pure JavaScript finish stage.
+Container deployments run native RisingWave views, while Pages and Cloudflare use
+translated DuckDB snapshot queries from the same stock compiler export. See
 [query engines](https://github.com/bonisoft3/mecha/blob/v0.25.2/docs/compute.md) for capture, restart and
 portable-value limits. The existing SQL-shaped Duckstream
 declaration remains a separate profile; broader shared semantics are described

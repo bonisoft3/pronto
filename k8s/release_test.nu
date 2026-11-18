@@ -603,16 +603,13 @@ def test_native_runtime [] {
 	let app = (resolve-app ($fixtures_dir | path join native))
 	let runtime = (runtime-services (open ($app.dir | path join compose.yaml)))
 	assert equal $runtime.compute.databaseEnvironment [DATABASE_URL]
-	assert equal $runtime.feldera.databaseEnvironment [FELDERA_DATABASE_URL]
+	assert equal $runtime.risingwave.databaseEnvironment []
 	assert not (($runtime | to json) | str contains "dev-password")
-	assert not ("FELDERA_DATABASE_URL" in $runtime.feldera.env)
-	# Feldera expands its connector credential in its own process. Both pods
-	# must read the operator's password rather than the Compose development URI.
 	for target in [kind gke] {
 		let rendered = (render-manifests $app.cue_path $target)
 		assert not ($rendered | str contains "dev-password")
 		let deployments = ($rendered | from yaml | where kind == Deployment)
-		for service in [{name: compute, database: DATABASE_URL}, {name: feldera, database: FELDERA_DATABASE_URL}] {
+		for service in [{name: compute, database: DATABASE_URL}] {
 			let variables = ($deployments | where metadata.name == $"native-($service.name)" | first | get spec.template.spec.containers.0.env)
 			let password = ($variables | where name == PGPASSWORD | first)
 			assert equal $password.valueFrom.secretKeyRef {name: native-db-postgres, key: password}
@@ -625,15 +622,22 @@ def test_native_runtime [] {
 	assert not ($rendered | str contains "dev-password")
 	assert not ($rendered | str contains "dev-token")
 	let deployments = ($docs | where kind == "Deployment")
-	for name in [compute feldera conduit redis transform] {
+	for name in [compute risingwave conduit redis transform] {
 		let spec = ($deployments | where metadata.name == $"native-($name)" | first | get spec)
 		assert equal $spec.replicas 1
 		assert equal $spec.strategy.type "Recreate"
 	}
-	assert equal ($docs | where kind == "PersistentVolumeClaim" | get metadata.name | sort) [native-compute native-feldera native-redis]
+	assert equal ($docs | where kind == "PersistentVolumeClaim" | get metadata.name | sort) [native-redis]
+	let rw_container = ($deployments | where metadata.name == native-risingwave | first | get spec.template.spec.containers.0)
+	assert ($rw_container.volumeMounts? == null)
+	assert equal $rw_container.args ["single_node"]
+	let compute_container = ($deployments | where metadata.name == native-compute | first | get spec.template.spec.containers.0)
+	assert ($compute_container.volumeMounts? == null)
+	let rw_netpol = ($docs | where kind == "NetworkPolicy" and metadata.name == "native-risingwave" | first | get spec.ingress.0)
+	assert equal $rw_netpol.from.0.podSelector.matchLabels."app.kubernetes.io/component" "compute"
 	let compute = ($deployments | where metadata.name == native-compute | first | get spec.template.spec.containers.0.env)
 	assert equal ($compute | where name == SERVICE_JWT | first | get valueFrom.secretKeyRef.name) native-service-token
-	assert equal ($compute | where name == FELDERA_URL | first | get value) "http://feldera:8080"
+	assert equal ($compute | where name == RISINGWAVE_URL | first | get value) "http://risingwave:4566"
 	let conduit = ($deployments | where metadata.name == native-conduit | first | get spec.template.spec.containers.0.env)
 	assert equal ($conduit | where name == CONDUIT_DB_TYPE | first | get value) postgres
 	assert equal ($conduit | where name == CONDUIT_DB_POSTGRES_CONNECTION_STRING | first | get value) '$(DATABASE_URL)'

@@ -48,5 +48,5 @@ committed publication. The private dispatcher also records transition receipts;
 retention/compaction remains an operational consideration for sustained volume.
 The initial coordinator runs one worker and captures complete query inputs.
 This is durable orchestration, not incremental numerical computation or a
-Feldera executor. See [[../../docs/pipelines-and-schedules#Computations|the live
+RisingWave executor. See [[../../docs/pipelines-and-schedules#Computations|the live
 computation contract]] and the [[../../docs/decisions/2026-10-19-duckstream-runtime|runtime design]].

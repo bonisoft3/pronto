@@ -35,8 +35,8 @@ admitLoadsModule: strings.HasSuffix(_admit.cmds[0], #"admit.ts) "computations/ch
 admitUnderPins:   strings.Contains(_admit.cmds[0], "services compute deno.json") & true
 // And they reach the service that cages it.
 _computedCluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
-_nativeComputedCluster: _computedCluster & {state: duckstreamEngine: "feldera"}
-nativeCompilationDefault: _nativeComputedCluster.surface.targets.compute.compose.environment.FELDERA_COMPILATION_PROFILE & "${FELDERA_COMPILATION_PROFILE:-optimized}"
+_nativeComputedCluster: _computedCluster & {state: duckstreamEngine: "risingwave"}
+nativeEngineUrl: _nativeComputedCluster.surface.targets.compute.compose.environment.RISINGWAVE_URL & "http://risingwave:4566"
 computeEndowed: strings.Contains(_computedCluster.surface.targets.compute.compose.environment.COMPUTATIONS, #""endowments":["Crypto","TextEncoder","Cheerio"]"#) & true
 
 _withHook: _computed & {state: computations: chances: onComplete: "capture_team_odds_history"}

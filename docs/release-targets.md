@@ -42,7 +42,7 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
 |---|---|---|---|
 | `pages` | browser | one HTML file | none: the page's fetch shim |
 | `cloudflare` | edge | the app Worker and PGlite Durable Object, its data directory, and private Query/Compute Workers for declared computations | the app Worker |
-| `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
+| `docker` | container | single-container appliance image running postgres, crud, caddy, auth, RisingWave + compute (when computations are declared), and process-compose | caddy on port 8080 |
 | `gcp` | cloud | images by digest in Artifact Registry, one Cloud Run service and the Job that builds its schema | caddy, the service's ingress container |
 | `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
 | `k8s` | k8s | skaffold's manifests | caddy in the named cluster |
@@ -593,7 +593,7 @@ largest; no memory or CPU kill.
 
 These archive measurements cover serving stored rows, not recomputing the full
 history. Edge compute now executes bounded DuckDB snapshots and the unchanged
-numerical algorithm. Native Feldera retains its incremental relations and
+numerical algorithm. Native RisingWave retains its incremental relations and
 partitioned capture contract; the edge release does not lower those relations
 to an incremental object engine. Large global work must be measured against the
 isolate budget before adoption; splitting execution into Workers does not make
@@ -632,7 +632,7 @@ appliance image running under process-compose: PostgreSQL 18, PostgREST (`crud`)
 Caddy as reverse proxy and static asset server, when `capabilities.auth` is
 configured, Deno running the app's `auth` service, and, when the program declares
 them, the program's forward migrations, the airlock with its daprd, the change
-feed, and the ticker with its clock.
+feed, RisingWave with `compute`, and the ticker with its clock.
 
 What fixes its shape:
 
@@ -676,12 +676,9 @@ What fixes its shape:
   stack's: at-least-once, a change made while a process is down held by the slot.
   The appliance refuses to start without a secret an effect declares, as compose
   does, and with effects and the blob plane together, which it does not run.
-- **Computations use the selected engine.** DuckDB snapshot computations run
-  with the compute service and the transform carrying its invalidations. When
-  the cluster selects Feldera, a separate build stage compiles the declared
-  programs using the pinned pipeline-manager image. The appliance carries the
-  resulting native pipelines and their isolated runtime under `/opt/feldera`;
-  it does not run the compiler or pipeline manager at startup.
+- **Computations run on RisingWave.** Computations run with the compute service
+  and RisingWave streaming PostgreSQL CDC; DuckDB snapshots are used only on
+  `pages` and `cloudflare`.
 - **Schedules and timers are swept by mecha's ticker.** A program that declares
   either runs the ticker and a clock poking it every `POKE_INTERVAL_SECONDS`
   (default 60), the cadence compose's clock keeps, with the same `SERVICE_JWT`
@@ -704,9 +701,9 @@ What fixes its shape:
 - **Loopback networking.** Internal services communicate over loopback.
   `appliance-entrypoint.sh` appends `127.0.0.1 crud database auth` to
   `/etc/hosts` before launching `process-compose`, with `airlock`, `airlock-mesh`
-  and each docker bridge's container name when the program has effects and
-  `ticker` when it has schedules or timers (the change feed's processes dial
-  `127.0.0.1`), so internal HTTP
+  and each docker bridge's container name when the program has effects,
+  `risingwave` when it has computations, and `ticker` when it has schedules or
+  timers (the change feed's processes dial `127.0.0.1`), so internal HTTP
   and database references resolve without external DNS service discovery.
 - **Idempotent schema upgrades on an existing volume.** `docker-entrypoint.sh`
   initializes a fresh `PGDATA` database or inspects the existing one. A dedicated
@@ -721,14 +718,20 @@ What fixes its shape:
 - **Electric sync.** The appliance runs the patched Electric release against
   PostgreSQL and Caddy forwards authorized `/electric/*` requests to it. Electric
   stores its shape state under `PGDATA/electric`, on the database volume.
-- **Persistence and updates.** The database lives on a docker-managed named
-  volume at `PGDATA` (`/var/lib/pgsql/data`), never a bind mount. An update stops
-  the running container and starts the new image on the same volume, with
-  downtime between the two; the new container's startup applies what is pending.
+- **Persistence and updates.** The image declares no built-in volumes; every
+  data directory defaults to the container's writable layer unless the operator
+  opts in with Docker-managed named volumes (`-v <name>:/var/lib/pgsql/data` and,
+  when the program declares computations, `-v <name>:/var/lib/duckstream`, never
+  bind mounts). In production, mount both `PGDATA` and `COMPUTE_STATE_DIR` on
+  named volumes: an update stops the running container and starts the new image
+  on the same volumes, applying pending migrations and reattaching RisingWave to
+  its persisted Hummock state and PostgreSQL replication slots without cold
+  re-snapshotting unchanged computations.
 - **Configuration knobs.**
-  - `COMPUTE_STATE_DIR`: bounded DuckDB captures and unpublished outputs (default `/var/lib/duckstream`). For computations declaring `steps`, mount a named volume here and reuse it with the PostgreSQL volume across container replacement. Losing it while PostgreSQL retains a claim prevents replay.
-  - `CADDY_DATA_HOME`: persistent Caddy data directory (default `/var/lib/caddy`). Mount a named volume there to retain certificates across container replacement.
-  - `PGDATA`: path to PostgreSQL database directory, where the named volume is mounted (default `/var/lib/pgsql/data`).
+  - `COMPUTE_STATE_DIR`: computation state directory (default `/var/lib/duckstream`), storing RisingWave single-node state under `${COMPUTE_STATE_DIR}/risingwave`. Mount a named volume there in production alongside `PGDATA` so unchanged computations reattach across restarts; when unmounted or when a computation's version or SQL changes, RisingWave reconstructs that computation from PostgreSQL on startup.
+  - `RISINGWAVE_MEMORY_BYTES` and `RISINGWAVE_PARALLELISM`: optional RisingWave memory budget and compute-node parallelism overrides when unset defaults do not match the host container.
+  - `CADDY_DATA_HOME`: Caddy data directory (default `/var/lib/caddy`). Optionally mount a named volume there to retain ACME certificates across container replacement.
+  - `PGDATA`: path to PostgreSQL database directory for an opt-in named volume (default `/var/lib/pgsql/data`).
   - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
   - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).
   - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN`: WebAuthn relying party identity and origin; automatically inferred from `ORIGIN` when unset.

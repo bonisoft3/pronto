@@ -274,7 +274,7 @@ export def run-job [manifest: string, name: string, namespace: string, --timeout
 	kubectl logs -n $namespace $"job/($name)" --tail=5
 }
 
-const runtime_supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
+const runtime_supported = ["compute" "risingwave" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
 
 # The AI gateway (tsbifrost) is not among them: only the airlock's daprd calls
 # it, so an effect reaching it on k8s is refused (`airlock-services`) and an
@@ -284,12 +284,12 @@ export def runtime-services [compose: record]: nothing -> record {
 	let names = ($compose.services | columns | where {|s| $s in $supported })
 	$names | reduce -f {} {|name, acc|
 		let vars = ($compose.services | get $name | get -o environment | default {})
-		if $name == "compute" and ($vars.DUCKSTREAM_ENGINE? | default "") != "feldera" {
-			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
+		if $name == "compute" and ($vars.DUCKSTREAM_ENGINE? | default "") != "risingwave" {
+			error make {msg: "native release requires DUCKSTREAM_ENGINE=risingwave for compute"}
 		}
 		$acc | insert $name {
-			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING)
-			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
+			env: ($vars | reject -o DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING)
+			databaseEnvironment: ([DATABASE_URL] | where {|key| $key in $vars })
 			serviceToken: ("SERVICE_JWT" in $vars)
 			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
 		}

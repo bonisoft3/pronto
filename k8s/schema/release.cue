@@ -85,7 +85,7 @@ package schema
 
 	runtime: [string]: {
 		env: [string]: string
-		databaseEnvironment: [..."DATABASE_URL" | "FELDERA_DATABASE_URL"]
+		databaseEnvironment: [..."DATABASE_URL"]
 		serviceToken: bool
 		jwtSecret:    *false | bool
 	}

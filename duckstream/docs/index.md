@@ -1,11 +1,11 @@
-# Feldera SQL compilation for DuckDB
+# Streaming SQL compilation for DuckDB
 
-[[../compiler.ts|compileProgram]] runs the unmodified Feldera 0.367.0 compiler
+[[../compiler.ts|compileProgram]] runs the pinned Calcite SQL compiler
 at build time, admits its exported computation, and writes one DuckDB query per
 selected output. The application executes generated SQL against a supplied
-snapshot. The same authored materialized views can run in the native Feldera
+snapshot. The same authored materialized views can run in the native RisingWave
 engine through [Mecha compute](https://github.com/bonisoft3/mecha/blob/v0.25.2/docs/compute.md);
-Pages keeps the snapshot adapter. Materialization of an output does not change
+Pages and Cloudflare keep the snapshot adapter. Materialization of an output does not change
 its generated snapshot query.
 
 ```ts
@@ -20,7 +20,7 @@ await compileProgram(options);
 await checkCompiledProgram(options);
 ```
 
-Compilation defaults to Java inside the digest-pinned Feldera container recorded
+Compilation defaults to Java inside the digest-pinned compiler container recorded
 in `compiler.image`; Docker acquires that image when absent. It mounts the
 source read-only and a writable output directory, runs with the host UID/GID and
 the pinned compiler's supplementary group 1000, disables the container network,

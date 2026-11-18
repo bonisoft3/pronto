@@ -1915,8 +1915,7 @@
           "ARG MONOREPO_COMPOSE_MODE",
           "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
           "ARG BAYT_RUNTIME",
-          "ENV BAYT_RUNTIME=$BAYT_RUNTIME",
-          "ENV FELDERA_COMPILATION_PROFILE=unoptimized"
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
         ],
         "defaultPreamble": {
           "bayt-runtime": {
@@ -2762,8 +2761,7 @@
           "ARG MONOREPO_COMPOSE_MODE",
           "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
           "ARG BAYT_RUNTIME",
-          "ENV BAYT_RUNTIME=$BAYT_RUNTIME",
-          "ENV FELDERA_COMPILATION_PROFILE=unoptimized"
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
         ],
         "defaultPreamble": {
           "bayt-runtime": {

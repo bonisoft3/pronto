@@ -599,30 +599,88 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
   }
 })
 
-Deno.test('Pages precomputation forces snapshots and excludes the Feldera service and startup dependency', () => {
+Deno.test('Pages precomputation forces snapshots, wires compute-events on transform, and excludes RisingWave', () => {
   const model = {
     networks: { default: { name: 'derived' } },
     services: {
-      'plausible-feldera': { environment: { RUST_LOG: 'info' } },
+      'plausible-risingwave': { environment: { RUST_LOG: 'info' } },
+      'plausible-transform': {
+        develop: { watch: [{ path: '../docker/pipeline.yaml', target: '/pipelines/pipeline.yaml' }] },
+        environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379' },
+      },
       'plausible-compute': {
-        build: { additional_contexts: { 'plausible-feldera': 'service:plausible-feldera', 'compute-image': 'docker-image://compute' } },
-        environment: { COMPUTATIONS: '[{"name":"analytics","feldera":"/app/analytics.json"}]', DUCKSTREAM_ENGINE: 'feldera', FELDERA_URL: 'http://feldera:8080' },
-        depends_on: { 'plausible-feldera': { condition: 'service_healthy' }, 'plausible-database': { condition: 'service_healthy' } },
+        build: { additional_contexts: { 'plausible-risingwave': 'service:plausible-risingwave', 'compute-image': 'docker-image://compute' } },
+        environment: { COMPUTATIONS: '[{"name":"analytics","risingwave":"/app/analytics.json"}]', DUCKSTREAM_ENGINE: 'risingwave', RISINGWAVE_URL: 'http://risingwave:4566' },
+        depends_on: { 'plausible-risingwave': { condition: 'service_healthy' }, 'plausible-database': { condition: 'service_healthy' } },
       },
       'plausible-database': { environment: { POSTGRES_DB: 'plausible' } },
     },
   }
   const result = snapshotCompose(model)
-  assert.equal(result.services['plausible-feldera'], undefined)
+  assert.equal(result.services['plausible-risingwave'], undefined)
   assert.deepEqual(result.services['plausible-compute'].environment, {
     COMPUTATIONS: model.services['plausible-compute'].environment.COMPUTATIONS,
     DUCKSTREAM_ENGINE: 'duckdb-snapshot',
   })
+  assert.deepEqual(result.services['plausible-transform'].environment, {
+    CRUD_URL: 'http://crud:3000',
+    REDIS_URL: 'redis://redis:6379',
+    COMPUTE_GROUP: 'plausible-compute',
+  })
+  assert.deepEqual(result.services['plausible-transform'].command, [
+    'streams',
+    '--no-api',
+    '-r',
+    '/cdc-trace.yaml',
+    '/pipelines/pipeline.yaml',
+    '/compute-events.yaml',
+  ])
   assert.deepEqual(result.services['plausible-compute'].depends_on, { 'plausible-database': { condition: 'service_healthy' } })
   assert.deepEqual(result.services['plausible-compute'].build?.additional_contexts, { 'compute-image': 'docker-image://compute' })
   assert.deepEqual(result.networks, model.networks)
-  assert.equal(model.services['plausible-compute'].environment.DUCKSTREAM_ENGINE, 'feldera')
+  assert.equal(model.services['plausible-compute'].environment.DUCKSTREAM_ENGINE, 'risingwave')
   assert.deepEqual(snapshotCompose({ services: {} }), { services: {} })
+
+  const noPipelines = snapshotCompose({
+    services: {
+      'plausible-transform': { environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379' } },
+      'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
+    },
+  })
+  assert.deepEqual(noPipelines.services['plausible-transform'].command, [
+    'streams',
+    '--no-api',
+    '-r',
+    '/cdc-trace.yaml',
+    '/compute-events.yaml',
+  ])
+
+  const existingArgv = snapshotCompose({
+    services: {
+      'plausible-transform': { command: ['streams', '--no-api', '-r', '/cdc-trace.yaml'], environment: {} },
+      'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
+    },
+  })
+  assert.deepEqual(existingArgv.services['plausible-transform'].command, [
+    'streams',
+    '--no-api',
+    '-r',
+    '/cdc-trace.yaml',
+    '/compute-events.yaml',
+  ])
+  assert.deepEqual(snapshotCompose(existingArgv).services['plausible-transform'].command, existingArgv.services['plausible-transform'].command)
+
+  assert.throws(
+    () =>
+      snapshotCompose({
+        services: {
+          'plausible-transform': { command: 'streams --no-api', environment: {} },
+          'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
+        },
+      }),
+    /plausible-transform declares a string command/,
+  )
+
   // Regression: compose config --format json already escapes literal $ as $$;
   // doubling $ again broke bayt's http200 healthcheck (`status=$$("$$@")` -> `$$$$`).
   const health = 'status=$$("$$@"); [ "$$status" = 200 ]'
