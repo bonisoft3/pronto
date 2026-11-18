@@ -172,7 +172,7 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 							TTL_ID_TOKEN:                            "5m"
 						}
 					}
-					identity: bayt.healthcheck.http & {
+					identity: bayt.healthcheck.http200 & {
 						cmd: builtin: null
 						activate:    ""
 						healthcheck: {port: 28443, path: "/health"}

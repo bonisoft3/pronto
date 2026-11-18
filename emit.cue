@@ -3629,7 +3629,7 @@ _pgrollDir: "services/database/pgroll"
 		// waits on it: a launch is up when its documents can be answered.
 		if D._rendersOnRequest {
 			surface: targets: {
-				render: bayt.healthcheck.http & {
+				render: bayt.healthcheck.http200 & {
 					cmd: "builtin": null
 					activate: ""
 					"process-compose": activate: "mise x --"
