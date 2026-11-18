@@ -8,6 +8,14 @@ const assertMatch = (s: string, re: RegExp, why?: string) => assert.match(s, re,
 const wrapper = new URL("../cue", import.meta.url).pathname;
 const runtime = wrapper.replace(/\/cue$/, "");
 const deno = Deno.execPath().replace(/\/deno$/, "");
+// The real HOME, read before run() points the wrapper's HOME at a case's folder.
+const realHome = Deno.env.get("HOME");
+
+// Random lowercase letters only: the wrapper keeps such a name as it is. mix() is a 10-character
+// name holding a digit and a letter, which the wrapper takes for a temporary folder's random name.
+const word = (n = 6) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => "abcdefghijklmnopqrstuvwxyz"[b % 26]).join("");
+const digit = () => String(crypto.getRandomValues(new Uint8Array(1))[0] % 10);
+const mix = () => `${word(4)}${digit()}${word(3)}${digit()}${word(1)}`;
 
 // A fake cue that says what it was asked, echoes its stdin for `export -`, holds `mb` MB (as RSS: it
 // becomes a deno that fills a buffer, one process as cue is) or sleeps `sleep` s, noting a TERM.
@@ -306,18 +314,28 @@ Deno.test("an absolute path argument in two worktrees of one repository keys as 
 Deno.test("a plain evaluation's id is what it was", async () => {
   const dir = await Deno.makeTempDir();
   await fake(dir);
-  const repo = await Deno.makeTempDir({ dir: new URL(".", import.meta.url).pathname, prefix: "plain-" });
-  await sh(repo, "init", "-q");
-  await Deno.mkdir(`${repo}/sub/spec`, { recursive: true });
-  await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "1" }, undefined, `${repo}/sub`);
-  const common = await sh(`${repo}/sub`, "rev-parse", "--path-format=absolute", "--git-common-dir");
-  const key = `${common}\nsub/ export ./spec`;
-  const { createHash } = await import("node:crypto");
-  const id = createHash("md5").update(key).digest("hex");
-  const names = [];
-  for await (const e of Deno.readDir(`${dir}/.cache/pronto/cue-mem`)) names.push(e.name);
-  assert.ok(names.includes(id), `${names} should include ${id}`);
-  await Deno.remove(repo, { recursive: true });
+  // Neither a temporary folder nor a CI runner's clone, whose names the wrapper rewrites.
+  let home = new URL(".", import.meta.url).pathname;
+  if (realHome) {
+    home = `${realHome}/.cache/pronto/cuetest`;
+    await Deno.mkdir(home, { recursive: true });
+  }
+  const repo = await Deno.makeTempDir({ dir: home, prefix: "plain-" });
+  try {
+    await sh(repo, "init", "-q");
+    await Deno.mkdir(`${repo}/sub/spec`, { recursive: true });
+    await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "1" }, undefined, `${repo}/sub`);
+    const common = await sh(`${repo}/sub`, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const key = `${common}\nsub/ export ./spec`;
+    const { createHash } = await import("node:crypto");
+    const id = createHash("md5").update(key).digest("hex");
+    const names = [];
+    for await (const e of Deno.readDir(`${dir}/.cache/pronto/cue-mem`)) names.push(e.name);
+    assert.ok(names.includes(id), `${names} should include ${id}`);
+  } finally {
+    await Deno.remove(repo, { recursive: true });
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 // Two evaluations of ./spec from the given cwds, sharing one HOME: how many ids they learned, and whether the second claimed.
@@ -330,7 +348,8 @@ const twice = async (cwdA: string, cwdB: string, argsA = ["export", "./spec"], a
 };
 
 Deno.test("distinct temporary names stay distinct", async () => {
-  const [a, b] = ["/tmp/cuetest-plugins", "/tmp/cuetest-runtime"];
+  const w = word();
+  const [a, b] = [`/tmp/cuetest${w}-plugins`, `/tmp/cuetest${w}-runtime`];
   for (const c of [a, b]) await Deno.mkdir(`${c}/spec`, { recursive: true });
   try {
     const r = await twice(a, b);
@@ -342,7 +361,7 @@ Deno.test("distinct temporary names stay distinct", async () => {
 });
 
 Deno.test("a separator-less random temporary folder keeps one id", async () => {
-  const [a, b] = ["/tmp/a1b2c3d4e5", "/tmp/f6e5d4c3b2"];
+  const [a, b] = [`/tmp/${mix()}`, `/tmp/${mix()}`];
   for (const c of [a, b]) await Deno.mkdir(`${c}/spec`, { recursive: true });
   try {
     const r = await twice(a, b);
@@ -358,7 +377,8 @@ Deno.test("a separator-less random temporary folder keeps one id", async () => {
 Deno.test("a mktemp file with its random part in the middle keeps one id; a fixed name stays itself", async () => {
   const d = await Deno.makeTempDir({ dir: "/tmp", prefix: "cuetest-" });
   await Deno.mkdir(`${d}/spec`, { recursive: true });
-  const [a, b, c, e] = ["/tmp/roles.c4qN0s.json", "/tmp/roles.awAixC.json", "/tmp/one.tar.json", "/tmp/two.tar.json"];
+  const w = word();
+  const [a, b, c, e] = [`/tmp/roles${w}.c4qN0s.json`, `/tmp/roles${w}.awAixC.json`, `/tmp/one${w}.tar.json`, `/tmp/two${w}.tar.json`];
   for (const f of [a, b, c, e]) await Deno.writeTextFile(f, "{}");
   try {
     const r = await twice(`${d}`, `${d}`, ["export", "./spec", a], ["export", "./spec", b]);
@@ -400,6 +420,21 @@ Deno.test("an output file not yet written keys by its place in the repository", 
     await repoWith(repo, "x.cue");
     await sh(repo, "worktree", "add", "-q", "-b", "other", `${wt}/b`);
     const r = await twice(repo, repo, ["export", "-o", `${repo}/out.json`], ["export", "-o", `${wt}/b/out.json`]);
+    assertEquals(r.claimed, false);
+    assertEquals(r.ids, 1);
+  } finally {
+    await Deno.remove(wt, { recursive: true });
+    await Deno.remove(repo, { recursive: true });
+  }
+});
+
+Deno.test("an equals-form flag with an absolute path keys by its place in the repository", async () => {
+  const repo = await Deno.makeTempDir({ prefix: "repo-" });
+  const wt = await Deno.makeTempDir({ prefix: "wt-" });
+  try {
+    await repoWith(repo, "x.cue");
+    await sh(repo, "worktree", "add", "-q", "-b", "other", `${wt}/b`);
+    const r = await twice(repo, repo, ["export", `--outfile=${repo}/out.json`], ["export", `--outfile=${wt}/b/out.json`]);
     assertEquals(r.claimed, false);
     assertEquals(r.ids, 1);
   } finally {

@@ -75,6 +75,7 @@ deno=$(command -v deno || ls "$HOME"/.local/share/mise/installs/github-denoland-
 # /tmp/tmp.gzTXAbh1M8/x is <tmp>/tmp/x and /tmp/pronto-plugins/x stays itself, as is the random middle
 # of a file directly in it (mktemp's roles.XXXXXX.json); and pronto's derive, which runs in a
 # scratch folder named for its run (.pronto-derive-<hash>), has one name for all of them.
+# An absolute path is named so, and so is the value of an equals-form flag (--outfile=/abs/out.json).
 # tmpnorm <path>: the path with its runner clone or temporary folder's name rewritten.
 tmpnorm() {
   case $1 in
@@ -122,22 +123,27 @@ where=$(printf '%s\n' "$where" | sed 's|\.pronto-derive-[0-9a-f]*|.pronto-derive
 first=${where%%
 *}
 key=$(tmpnorm "$first")${where#"$first"}
+# pathnorm <absolute path>: prints it normalised; run in $(...) so its variables stay its own.
+pathnorm() {
+  a=$1
+  d=$a; [ -d "$a" ] || d=${a%/*}
+  # git names the real path (/private/var/..), the argument may name a link to it.
+  if [ -d "${d:-/}" ] && dp=$(cd "${d:-/}" 2>/dev/null && pwd -P); then
+    a=${dp%/}${a#"$d"}; [ -n "$a" ] || a=/
+    g=$(git -C "$dp" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null) || g=
+    if [ -n "$g" ]; then
+      top=${g#*
+}
+      case "$a" in "$top"|"$top"/*) rel=${a#"$top"}; a="${g%%
+*}:${rel#/}" ;; esac
+    fi
+  fi
+  tmpnorm "$a"
+}
 for a in "$@"; do
   case "$a" in
-    /*)
-      d=$a; [ -d "$a" ] || d=${a%/*}
-      # git names the real path (/private/var/..), the argument may name a link to it.
-      if [ -d "${d:-/}" ] && dp=$(cd "${d:-/}" 2>/dev/null && pwd -P); then
-        a=${dp%/}${a#"$d"}; [ -n "$a" ] || a=/
-        g=$(git -C "$dp" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null) || g=
-        if [ -n "$g" ]; then
-          top=${g#*
-}
-          case "$a" in "$top"|"$top"/*) rel=${a#"$top"}; a="${g%%
-*}:${rel#/}" ;; esac
-        fi
-      fi
-      a=$(tmpnorm "$a") ;;
+    /*) a=$(pathnorm "$a") ;;
+    -*=/*) flag=${a%%=*}; val=${a#*=}; a="$flag=$(pathnorm "$val")" ;;
   esac
   key="$key $a"
 done
