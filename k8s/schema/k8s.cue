@@ -243,12 +243,16 @@ import (
 				if release.database.instances > 1 || !release.database.enablePDB {
 					enablePDB: release.database.enablePDB
 				}
-				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
-				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
-				// walsender holds a fast shutdown open, so every restart of the primary stalled a
-				// release for half an hour. Killed, the next start replays the WAL it wrote. The
-				// release waits for the primary (release.nu) longer than this stop.
-				smartShutdownTimeout: 15
+				// A stop is bounded: a smart shutdown waits for sessions (release.database.smartShutdown
+				// seconds), then a fast one, and at 120 s the pod is killed. CloudNativePG's default waits
+				// 1800 s, and Electric's walsender holds a fast shutdown open, so every restart of the
+				// primary stalled a release for half an hour. Killed, the next start replays the WAL it
+				// wrote. The release waits for the primary (release.nu) longer than this stop. With
+				// standbys the smart wait is none: the operator elects a new primary only once the old
+				// one's WAL receivers are down, so every second of it is a second with no primary
+				// (PRONTO-715: 17 of a 28.7 s failover). The instance manager reads it from the Cluster
+				// when the stop comes, so a change restarts no pod.
+				smartShutdownTimeout: release.database.smartShutdown
 				stopDelay:            120
 				// prontoMonitoringObj's queries; the operator adds its default ones beside them.
 				monitoring: customQueriesConfigMap: [{name: prontoMonitoringName, key: "queries"}]

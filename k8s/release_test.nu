@@ -597,7 +597,7 @@ def test_render_manifests_kind [] {
 	assert ($yaml | str contains "kind: Cluster")
 	let db = ($yaml | from yaml | where kind == "Cluster" | first)
 	assert equal $db.spec.stopDelay 120 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
-	assert equal $db.spec.smartShutdownTimeout 15
+	assert equal $db.spec.smartShutdownTimeout 15 "one instance waits 15 s for its sessions (test_database_ha has the rest)"
 	assert ("primaryUpdateMethod" not-in ($db.spec | columns)) "one instance has no standby to switch over to"
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
@@ -2207,6 +2207,9 @@ def test_database_ha [] {
 	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
 	assert equal $three.enablePDB true
 	assert equal [$three.primaryUpdateMethod $three.primaryUpdateStrategy] ["switchover" "unsupervised"] "a primary change promotes a standby first"
+	assert equal $one.smartShutdownTimeout 15 "alone, a stop waits 15 s for its sessions: there is no one to fail over to"
+	assert equal $three.smartShutdownTimeout 0 "with standbys a stop is fast at once: while the old primary waits, none is promoted (PRONTO-715)"
+	assert equal (do $cluster {database: {instances: 3, smartShutdown: 5}} | get smartShutdownTimeout) 5 "an app may name its own wait"
 	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
 	assert ("resources" not-in ($one | columns)) "no postgres resources unless the release names them"
 	let sized = (do $cluster {containerResources: {postgres: {requests: {cpu: "100m"}, limits: {cpu: "1"}}}})
