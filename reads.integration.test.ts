@@ -241,6 +241,26 @@ Deno.test({ name: "a read enqueues with no claim, and the airlock's answer to th
       assertEquals(await journal(), `rate:${two}:${(await jobOf(two)).incarnation}:1 1 settled 11`);
     });
 
+    await t.step("the retention reaches a read no longer declared, and no sweep runs while an index is not valid", async () => {
+      const old = await psql(`INSERT INTO airlock.read_journal (key, effect, row, incarnation, n, digest, outcome, recorded_at)
+        VALUES ('gone:1', 'gone', '{"id":"x"}', 'x', 1, 'd', '{}', now() - interval '40 days');`);
+      if (!old.ok) throw new Error(old.err);
+      const left = async () => (await psql("SELECT count(*) FROM airlock.read_journal WHERE effect = 'gone'")).out;
+      // An index another airlock still builds: its lock held, the index not valid.
+      const holder = new Deno.Command("docker", { args: ["exec", container, "psql", "-qtAX", "-U", "postgres", "-d", "postgres", "-c", "SELECT pg_advisory_lock(hashtext('airlock.read_journal indexes')); SELECT pg_sleep(8);"], stdout: "null", stderr: "null" }).spawn();
+      for (let i = 0; (await psql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted")).out === "0"; i++) {
+        if (i > 50) throw new Error("the holder never took the lock");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const marked = await psql("UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'airlock.read_journal_recorded'::regclass;");
+      if (!marked.ok) throw new Error(marked.err);
+      assertEquals(await airlock([{ op: "prune" }]), [{ ok: null }]);
+      assertEquals(await left(), "1", "a sweep ran without its index");
+      await holder.status;
+      assertEquals(await airlock([{ op: "prune" }]), [{ ok: null }]);
+      assertEquals(await left(), "0");
+    });
+
     await t.step("a sweep drops a bounded batch past the retention; a backlog drains over successive sweeps", async () => {
       // Old answers of a row that stands, which only the retention drops.
       const backlog = await psql(`INSERT INTO airlock.read_journal (key, effect, row, incarnation, n, digest, outcome, recorded_at)
