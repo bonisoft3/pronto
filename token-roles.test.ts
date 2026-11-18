@@ -64,7 +64,7 @@ Deno.test("a program declaring no token role still prunes the ones a release bef
   if (!none.success) throw new Error(none.stderr);
   assertStringIncludes(none.stdout, "IF EXISTS (SELECT FROM mecha.token_role) THEN\n    EXECUTE $mecha_tenancy$");
   assertStringIncludes(none.stdout, "EXECUTE format('REVOKE %I FROM authenticator GRANTED BY %I', r, pg_get_userbyid(m.grantor))");
-  assertStringIncludes(none.stdout, "its administrator must revoke it");
+  assertStringIncludes(none.stdout, "this release could not revoke it");
   assertStringIncludes(none.stdout, "DELETE FROM mecha.token_role WHERE role_name <> ALL (ARRAY['']::text[]);");
   for (const absent of ["CREATE ROLE", "INSERT INTO mecha.token_role VALUES ('residual"]) assertEquals(none.stdout.includes(absent), false, absent);
   // A program that names no roles prunes on the migrate step it runs anyway,

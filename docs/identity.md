@@ -100,9 +100,7 @@ An app with no migrations of its own runs one only where it says `state:
 tokenRoles: {}`, and generating one that deletes `tokenRoles` outright warns.
 A token naming no issuer stays `anon`'s once the app has trusted one, since a
 crud not yet restarted, or an operator's key set, may still hold the issuer's
-keys. Where an administrator owns the roles (`mecha.roles=external`), they
-revoke the role from PostgREST's login and the release only checks that they
-did before it forgets the role. A database whose `app_pre_request` predates
+keys. A database whose `app_pre_request` predates
 this check keeps the older function until a migrate step restates the floor;
 token roles shipped only with this floor's previous revision, so no deployed
 database holds one.

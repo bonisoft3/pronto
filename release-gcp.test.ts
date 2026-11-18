@@ -98,14 +98,16 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
-  assertStringIncludes(c.command[2], 'GRANT "anon", "app_user", "service" TO postgres WITH INHERIT FALSE, SET TRUE');
+  assertStringIncludes(c.command[2], String.raw`GRANT \"anon\", \"app_user\", \"service\" TO postgres WITH INHERIT FALSE, SET TRUE`);
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
 Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
   // An app without auth has no app_user; a literal grant would die on it.
   const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;
-  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], 'GRANT "anon", "service" TO postgres WITH INHERIT FALSE, SET TRUE');
+  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], String.raw`GRANT \"anon\", \"service\" TO postgres WITH INHERIT FALSE, SET TRUE`);
+  const keyword = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "select"]'), "job")).value;
+  assertStringIncludes(keyword.spec.template.spec.template.spec.containers[0].command[2], String.raw`GRANT \"anon\", \"select\" TO postgres WITH INHERIT FALSE, SET TRUE`);
   const auth = (await built(release(), "service")).value.spec.template.spec.containers[2];
   // The service refuses to start without it; the bound is resilience's client statement, in ms.
   assertEquals(auth.env.find((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").value, "5000");
@@ -608,50 +610,4 @@ Deno.test("a sidecar's memory is its container's, inside the instance or apart",
   assertEquals(apart.spec.template.spec.containers[0].resources.limits.memory, "2Gi");
   const bad = await built(withSidecar(`{port: 8687, memory: "lots"}`), "service");
   assertEquals(bad.success, false);
-});
-
-Deno.test("external role ownership reaches every schema connection and validates Cloud SQL's owner", async () => {
-  const r = await built(release(', database: roles: "external"'), "job");
-  assertEquals(r.success, true, r.stderr);
-  const c = r.value.spec.template.spec.template.spec.containers[0];
-  assertEquals(c.env.find((e: { name: string }) => e.name === "PGOPTIONS").value, "-c mecha.roles=external");
-  assertStringIncludes(c.command[2], 'if [ "external" = framework ]; then psql');
-  assertStringIncludes(c.command[2], 'if [ "external" = external ]; then psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql; fi');
-  assertStringIncludes(c.command[2], '"roles":{"postgres":{"attributes":{"rolbypassrls":true}');
-  assertStringIncludes(c.command[2], '"memberships":{"postgres":["anon","app_user","service"]}');
-  assertEquals((await built(release(', database: roles: "repair"'))).success, false);
-});
-
-Deno.test("external GCP infrastructure reads existing passwords without provisioning database users", async () => {
-  const result = await built(release(', database: roles: "external"'));
-  assert(result.success, result.stderr);
-  const plan = result.value;
-  assertEquals(plan.databaseRoles, "external");
-  const flags = plan.sqlFlags.split(",").map((s: string) => { const [name, value] = s.split("="); return { name, value }; });
-  const setupPlan = Object.fromEntries(["names", "project", "region", "service", "repository", "sqlFlags", "databaseRoles", "scrapeConfig"].map((k) => [k, plan[k]]));
-  const script = `source gcp/release.nu
-  def --wrapped exists [...args] { true }
-  def build-account [project] { "build@example.test" }
-  def --wrapped gc [...args] {
-    print --stderr ($args | to json --raw)
-    if ($args | first 3) == [sql instances describe] { '${JSON.stringify({ settings: { databaseFlags: flags } })}' } else { "existing-password" }
-  }
-  set-up-project ('${JSON.stringify(setupPlan)}' | from json)`;
-  const run = await new Deno.Command("nu", { args: ["-c", script], cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped" }).output();
-  const calls = new TextDecoder().decode(run.stderr);
-  assert(run.success, calls);
-  assert(!calls.includes('"set-password"'), calls);
-  assert(!calls.includes('"instances","create"'), calls);
-  for (const key of ["POSTGRES_PASSWORD", "ELECTRIC_PASSWORD", "AUTHENTICATOR_PASSWORD"]) {
-    const secret = plan.names.secrets[key];
-    const relevant = calls.split("\n").filter((line) => line.includes(secret));
-    assertEquals(relevant.length, 1, calls);
-    assertStringIncludes(relevant[0], '"secrets","versions","access","latest"');
-  }
-  const missing = await new Deno.Command("nu", {
-    args: ["-c", 'source gcp/release.nu; def --wrapped gc [...args] { error make {msg: "missing externally supplied secret"} }; role-password password project external'],
-    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
-  }).output();
-  assert(!missing.success);
-  assertStringIncludes(new TextDecoder().decode(missing.stderr), "missing externally supplied secret");
 });

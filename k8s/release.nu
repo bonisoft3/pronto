@@ -1138,18 +1138,15 @@ export def main [
 	# declared one among them: an attempt the operator made before they stood
 	# gave up, and it tries again only when the Cluster changes, so the release
 	# changes it.
-	let owns_roles = ($docs | each { from yaml } | where kind == "Cluster" | first | get -o spec.managed.roles | default [] | is-not-empty)
-	if $owns_roles {
-		let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
-		kubectl annotate $cluster -n $target_ns --overwrite $"pronto.dev/roles-restated=(date now | into int)"
-		print $"Waiting for ($cluster) to reconcile its managed roles..."
-		let deadline = (date now) + 300sec
-		loop {
-			let roles = (kubectl get $cluster -n $target_ns -o json | from json | get status.managedRolesStatus? | default {})
-			if (roles-reconciled $roles) { break }
-			if (date now) > $deadline { error make { msg: $"($cluster) has not reconciled its managed roles: ($roles | to nuon)" } }
-			sleep 3sec
-		}
+	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	kubectl annotate $cluster -n $target_ns --overwrite $"pronto.dev/roles-restated=(date now | into int)"
+	print $"Waiting for ($cluster) to reconcile its managed roles..."
+	let deadline = (date now) + 300sec
+	loop {
+		let roles = (kubectl get $cluster -n $target_ns -o json | from json | get status.managedRolesStatus? | default {})
+		if (roles-reconciled $roles) { break }
+		if (date now) > $deadline { error make { msg: $"($cluster) has not reconciled its managed roles: ($roles | to nuon)" } }
+		sleep 3sec
 	}
 
 	if ($runtime | values | any {|r| $r.serviceToken }) {

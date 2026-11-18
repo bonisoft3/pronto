@@ -341,9 +341,8 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
 } });
 
 // Taking a role back, against a real PostgreSQL: whoever granted it, in the
-// framework's mode; in an administrator's mode only once they revoked it; and
-// over a database whose floor predates the marker the prune leaves.
-Deno.test({ name: "a removed token role is taken back whoever granted it, by its administrator where mecha.roles is external, over an older floor", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+// framework's database, including a floor older than the prune's marker.
+Deno.test({ name: "a removed token role is taken back whoever granted it, over an older floor", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
   const db = `roles-prune-${crypto.randomUUID().slice(0, 8)}`;
   const psql = (sql: string) => run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-h", "127.0.0.1"], sql);
   const must = async (sql: string) => {
@@ -388,12 +387,10 @@ Deno.test({ name: "a removed token role is taken back whoever granted it, by its
     await t.step("a role authenticator reaches through another stays registered until that membership goes", async () => {
       await must(declared);
       await must("CREATE ROLE bridge_role NOLOGIN; GRANT residual_bot TO bridge_role; GRANT bridge_role TO authenticator;");
-      for (const mode of ["framework", "external"]) {
-        const refused = await psql(`SET mecha.roles = '${mode}';\n${pruned}`);
-        assertEquals(refused.ok, false, mode);
-        assertStringIncludes(refused.err, "residual_bot", mode);
-        assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "1", mode);
-      }
+      const refused = await psql(pruned);
+      assertEquals(refused.ok, false);
+      assertStringIncludes(refused.err, "residual_bot");
+      assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "1");
       await must("REVOKE bridge_role FROM authenticator;");
     });
 
@@ -402,18 +399,6 @@ Deno.test({ name: "a removed token role is taken back whoever granted it, by its
       await must(`CREATE DATABASE "${bare}"`);
       const r = await run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-h", "127.0.0.1", "-d", bare], pruned);
       assertEquals(r.ok, true, r.err);
-    });
-
-    await t.step("where an administrator owns the roles, the release only checks they revoked it", async () => {
-      await must(declared);
-      assertEquals(await held(), "t");
-      const refused = await psql(`SET mecha.roles = 'external';\n${pruned}`);
-      assertEquals(refused.ok, false);
-      assertStringIncludes(refused.err, "its administrator must revoke it");
-      assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "1");
-      await must("REVOKE residual_bot FROM authenticator GRANTED BY postgres;");
-      await must(`SET mecha.roles = 'external';\n${pruned}`);
-      assertEquals(await must("SELECT count(*) FROM mecha.token_role WHERE role_name = 'residual_bot'"), "0");
     });
 
     await t.step("the release that takes the last role back restates a floor older than its marker", async () => {
