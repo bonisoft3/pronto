@@ -204,6 +204,13 @@ The two paths must not claim the same column:
    migration is deleted. A live database takes the deletion in its stride: the
    migrate step applies only what its ledger lacks.
 
+An index on a live table is a pgroll `create_index` operation, never SQL text:
+pgroll builds it `CONCURRENTLY`, outside any transaction, so the table's
+writers are not held for the build. A raw `sql` step runs inside the
+migration's transaction, where `CONCURRENTLY` is refused, and so does every
+initdb file — psql's, and the edge's one multi-statement query — which is why
+the SQL lint does not ask the initdb files for it: they meet no writer.
+
 The replay runs the shipped migrator on the fresh schema and checks its
 completed ledger, so a migration that conflicts with a folded-in column fails.
 Retained fixtures exercise the same runner over earlier schemas and data.

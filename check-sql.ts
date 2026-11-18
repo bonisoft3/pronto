@@ -34,8 +34,17 @@ const SKIP = new Set(["node_modules", "dist", "build"]);
  * Integer width is the type table's decision, not the linter's: an app that
  * declares int32 gets `INTEGER` and the range check that bounds it, so a column
  * squawk reads as a future overflow is one the program already constrained.
+ *
+ * An index built without CONCURRENTLY blocks the table's writers for the
+ * build, which is squawk's concern on a live table. The SQL read here never
+ * meets one: these files are initdb's, applied to a fresh volume before any
+ * writer exists, and CONCURRENTLY cannot run inside a transaction block,
+ * which is where every runner of theirs puts them (psql's file, PGlite's one
+ * multi-statement query at the edge). An index on a live table is a pgroll
+ * `create_index` operation, which pgroll builds concurrently itself
+ * (docs/schema-change-admission.md#pgroll-migrations).
  */
-const EXCLUDED_RULES = ["prefer-bigint-over-int"];
+const EXCLUDED_RULES = ["prefer-bigint-over-int", "require-concurrent-index-creation"];
 
 /**
  * The one rule forgiven, and only in the file pronto derives from the type
