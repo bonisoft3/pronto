@@ -28,7 +28,7 @@ function extractPinScript(): string {
   const defIdx = lines.findIndex((l) => l.trim() === "def pin(p, v):");
   const lastIdx = lines.findIndex((l) => l.includes("pin('terminals/omnishell.cue'"));
   if (defIdx < 0 || lastIdx < 0) throw new Error("prerelease.sh's adapter pins moved; update this test's extraction");
-  return ["import re", "mecha_v, omnishell_v = '0.25.0-host.1', '0.25.0-fork.1'", ...lines.slice(defIdx, lastIdx + 1)].join("\n");
+  return ["import re", "mecha_v, omnishell_v = '0.25.1-host.1', '0.25.0-fork.2'", ...lines.slice(defIdx, lastIdx + 1)].join("\n");
 }
 
 async function sh(cwd: string, cmd: string, ...args: string[]) {
@@ -79,8 +79,8 @@ Deno.test("prerelease.sh pins each adapter's #Version to the prerelease's own me
     };
     const done = await run(extractPinScript());
     assertEquals(done.success, true, decoder.decode(done.stderr));
-    assertEquals(Deno.readTextFileSync(`${work}/clusters/mecha.cue`).match(/^#Version: .*$/m)?.[0], '#Version: "0.25.0-host.1"');
-    assertEquals(Deno.readTextFileSync(`${work}/terminals/omnishell.cue`).match(/^#Version: .*$/m)?.[0], '#Version: "0.25.0-fork.1"');
+    assertEquals(Deno.readTextFileSync(`${work}/clusters/mecha.cue`).match(/^#Version: .*$/m)?.[0], '#Version: "0.25.1-host.1"');
+    assertEquals(Deno.readTextFileSync(`${work}/terminals/omnishell.cue`).match(/^#Version: .*$/m)?.[0], '#Version: "0.25.0-fork.2"');
     // A pin that moved out of the file fails the publish rather than going unedited.
     await Deno.writeTextFile(`${work}/terminals/omnishell.cue`, "package omnishell\n");
     const missing = await run(extractPinScript());

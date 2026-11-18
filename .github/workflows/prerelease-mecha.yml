@@ -70,7 +70,7 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
       - name: auth image
         env:
-          AUTH_BASE: bonitao/mecha-auth:0.25.0@sha256:2ba512be305310334d10dbc08c9e2830a30c5e3095fcc0abdabedf8ce73ef7c7
+          AUTH_BASE: bonitao/mecha-auth:0.25.1@sha256:19d70ae54781d5bab0414b9231e7e8d841e58cff4c4f96cda8bcd6c24fa945e8
           AUTH: ghcr.io/bsoneca/mecha-auth
         run: |
           if ! crane digest "$AUTH:$MECHA_V" >/dev/null 2>&1; then
@@ -100,7 +100,7 @@ jobs:
       - name: base
         run: |
           base=$(git -C mecha describe --tags --abbrev=0 2>/dev/null || true)
-          for v in v0.17.1 v0.22.0 v0.25.0 $base; do
+          for v in v0.17.1 v0.22.0 v0.25.0 v0.25.1 $base; do
             crane digest "$REG:$v" >/dev/null 2>&1 || crane copy "registry.cue.works/github.com/bonisoft3/mecha:$v" "$REG:$v"
           done
       - name: runtime
