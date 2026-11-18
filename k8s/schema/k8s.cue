@@ -540,9 +540,12 @@ import (
 							{name: "PGRST_ADMIN_SERVER_PORT", value: "3001"},
 						]
 						resources: release.resources
+						// Keep CRUD discoverable during database recovery so requests receive its retryable 503.
+						// A new process must first load the schema before it can serve a release.
+						startupProbe: {httpGet: {path: "/ready", port: 3001}, periodSeconds: 2, failureThreshold: 150}
 						livenessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5
@@ -550,7 +553,7 @@ import (
 						}
 						readinessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5

@@ -65,6 +65,7 @@ def run-tests [] {
 	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
+	test_crud_database_recovery
 	test_render_manifests_eks
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -291,6 +292,15 @@ def test_read_environment [] {
 	assert equal (read-environment "aks" | get platform) "linux/amd64"
 }
 
+def test_crud_database_recovery [] {
+	print "test a database outage neither restarts CRUD nor removes its retryable response from discovery..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let crud = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers | where name == "crud" | first)
+	assert equal $crud.livenessProbe.httpGet {path: "/live", port: 3001}
+	assert equal $crud.readinessProbe.httpGet {path: "/live", port: 3001}
+	assert equal $crud.startupProbe {httpGet: {path: "/ready", port: 3001}, periodSeconds: 2, failureThreshold: 150}
+}
+
 def test_render_manifests_kind [] {
 	print "test render-manifests for Kind..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
@@ -405,7 +415,7 @@ def test_pods_hand_over [] {
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let docs = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment")
 	let crud = (fresh-schema-runtime ($docs | where metadata.name == sample-crud | first | to yaml) | from yaml)
-	assert equal ($crud.spec.template.spec.containers | where name == crud | first | get readinessProbe.httpGet.path) "/ready"
+	assert equal ($crud.spec.template.spec.containers | where name == crud | first | get startupProbe.httpGet.path) "/ready"
 	for c in ["crud" "electric" "auth" "caddy" "render"] {
 		let d = ($docs | where metadata.name == $"sample-($c)" | first)
 		assert equal ($d.spec.template.spec.containers | where name == $c | first | get lifecycle.preStop.sleep.seconds) 15 $"($c) pauses before it stops"
