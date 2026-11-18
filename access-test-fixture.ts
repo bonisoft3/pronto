@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 
 const here = new URL(".", import.meta.url);
-const entity = (write: boolean | string | undefined) => JSON.stringify({
+const entity = (write: boolean | string | undefined, anon?: boolean) => JSON.stringify({
   name: "Filter", table: "filter", durability: "offline",
-  access: { scope: "public", write },
+  access: { scope: "public", write, anon },
   fields: [{ name: "id", type: "string", pk: true }, { name: "range", type: "string" }],
 });
 
@@ -16,10 +16,10 @@ async function sql(expr: string): Promise<string> {
   return new TextDecoder().decode(out.stdout);
 }
 
-export function policy(write: boolean | string, restriction = false): Promise<string> {
+export function policy(write: boolean | string, restriction = false, anon?: boolean): Promise<string> {
   return sql(restriction
-    ? `(#publicUpdateSql & {e: ${entity(write)}}).out`
-    : `(#policySql & {e: ${entity(write)}, entities: {}}).out`);
+    ? `(#publicUpdateSql & {e: ${entity(write, anon)}}).out`
+    : `(#policySql & {e: ${entity(write, anon)}, entities: {}}).out`);
 }
 
 

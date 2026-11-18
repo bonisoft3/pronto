@@ -573,6 +573,9 @@ import (
 		close({
 			scope:  "public"
 			write?: bool | "update"
+			// true lets a request with no token (PostgREST's anon role) read the
+			// entity's rows; opt-in per entity, read-only.
+			anon?: bool
 		})
 	}
 	if scope == "internal" {

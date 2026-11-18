@@ -13,6 +13,12 @@ Deno.test("narrowing public writes preserves the ledger digest and emits an addi
   assert.doesNotMatch(await policy(false), /FOR ALL TO app_user/);
 });
 
+Deno.test("public access emits an anon select policy only when access.anon is set", async () => {
+  assert.match(await policy(false, false, true), /filter_anon_select[\s\S]*FOR SELECT TO anon USING \(true\)/);
+  assert.doesNotMatch(await policy(false), /anon/);
+  assert.equal(await policy(true, false, false), await policy(true));
+});
+
 Deno.test("public access rejects unsupported write operations", async () => {
   await assert.rejects(() => policy("delete"), /conflicting values/);
 });
