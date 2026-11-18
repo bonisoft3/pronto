@@ -75,7 +75,6 @@ deno=$(command -v deno || ls "$HOME"/.local/share/mise/installs/github-denoland-
 # /tmp/tmp.gzTXAbh1M8/x is <tmp>/tmp/x and /tmp/pronto-plugins/x stays itself, as is the random middle
 # of a file directly in it (mktemp's roles.XXXXXX.json); and pronto's derive, which runs in a
 # scratch folder named for its run (.pronto-derive-<hash>), has one name for all of them.
-# An absolute path is named so, and so is the value of an equals-form flag (--outfile=/abs/out.json).
 # tmpnorm <path>: the path with its runner clone or temporary folder's name rewritten.
 tmpnorm() {
   case $1 in
@@ -124,6 +123,7 @@ first=${where%%
 *}
 key=$(tmpnorm "$first")${where#"$first"}
 # pathnorm <absolute path>: prints it normalised; run in $(...) so its variables stay its own.
+# A bare absolute argument is named so, and so is the value of an equals-form flag (--outfile=/abs/out.json).
 pathnorm() {
   a=$1
   d=$a; [ -d "$a" ] || d=${a%/*}
@@ -143,7 +143,8 @@ pathnorm() {
 for a in "$@"; do
   case "$a" in
     /*) a=$(pathnorm "$a") ;;
-    -*=/*) flag=${a%%=*}; val=${a#*=}; a="$flag=$(pathnorm "$val")" ;;
+    # Only a flag whose whole value is a path: --inject=k=/x is CUE's value, not a file.
+    -*=/*) flag=${a%%=*}; val=${a#*=}; case $val in /*) a="$flag=$(pathnorm "$val")" ;; esac ;;
   esac
   key="$key $a"
 done

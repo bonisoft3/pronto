@@ -311,15 +311,13 @@ Deno.test("an absolute path argument in two worktrees of one repository keys as 
   await Deno.remove(repo, { recursive: true });
 });
 
-Deno.test("a plain evaluation's id is what it was", async () => {
+// Without HOME there is no folder that is neither temporary nor a runner's clone to make the repository in.
+Deno.test({ name: "a plain evaluation's id is what it was", ignore: !realHome }, async () => {
   const dir = await Deno.makeTempDir();
   await fake(dir);
   // Neither a temporary folder nor a CI runner's clone, whose names the wrapper rewrites.
-  let home = new URL(".", import.meta.url).pathname;
-  if (realHome) {
-    home = `${realHome}/.cache/pronto/cuetest`;
-    await Deno.mkdir(home, { recursive: true });
-  }
+  const home = `${realHome}/.cache/pronto/cuetest`;
+  await Deno.mkdir(home, { recursive: true });
   const repo = await Deno.makeTempDir({ dir: home, prefix: "plain-" });
   try {
     await sh(repo, "init", "-q");
@@ -361,7 +359,9 @@ Deno.test("distinct temporary names stay distinct", async () => {
 });
 
 Deno.test("a separator-less random temporary folder keeps one id", async () => {
-  const [a, b] = [`/tmp/${mix()}`, `/tmp/${mix()}`];
+  const a = `/tmp/${mix()}`;
+  let b = `/tmp/${mix()}`;
+  while (b === a) b = `/tmp/${mix()}`;
   for (const c of [a, b]) await Deno.mkdir(`${c}/spec`, { recursive: true });
   try {
     const r = await twice(a, b);
@@ -437,6 +437,9 @@ Deno.test("an equals-form flag with an absolute path keys by its place in the re
     const r = await twice(repo, repo, ["export", `--outfile=${repo}/out.json`], ["export", `--outfile=${wt}/b/out.json`]);
     assertEquals(r.claimed, false);
     assertEquals(r.ids, 1);
+    // A value that is not itself a path is CUE's, kept as given: two runners' --inject differ.
+    const inj = await twice(repo, repo, ["export", "--inject=t=/x/actions-runners/r1/_work/p"], ["export", "--inject=t=/x/actions-runners/r2/_work/p"]);
+    assertEquals(inj.ids, 2);
   } finally {
     await Deno.remove(wt, { recursive: true });
     await Deno.remove(repo, { recursive: true });
