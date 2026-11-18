@@ -611,3 +611,25 @@ Deno.test("a sidecar's memory is its container's, inside the instance or apart",
   const bad = await built(withSidecar(`{port: 8687, memory: "lots"}`), "service");
   assertEquals(bad.success, false);
 });
+
+Deno.test("an existing database follows its configured tier, combining changes without patching an unchanged instance", async () => {
+  const result = await new Deno.Command("nu", {
+    args: ["-c", `source gcp/release.nu
+      let plan = {sqlTier: "db-custom-1-3840", sqlFlags: "cloudsql.logical_decoding=on,max_connections=50"}
+      let live = {settings: {tier: "db-f1-micro", databaseFlags: [{name: "max_connections", value: "50"}, {name: "cloudsql.logical_decoding", value: "on"}]}}
+      [
+        (sql-drift $live $plan)
+        (sql-drift ($live | upsert settings.tier $plan.sqlTier) $plan)
+        (sql-drift ($live | upsert settings.databaseFlags []) $plan)
+        (sql-drift {settings: {tier: $plan.sqlTier}} $plan)
+      ] | to json`],
+    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
+  }).output();
+  assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+  assertEquals(JSON.parse(new TextDecoder().decode(result.stdout)), [
+    ["--tier", "db-custom-1-3840"],
+    [],
+    ["--tier", "db-custom-1-3840", "--database-flags", "cloudsql.logical_decoding=on,max_connections=50"],
+    ["--database-flags", "cloudsql.logical_decoding=on,max_connections=50"],
+  ]);
+});

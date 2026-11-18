@@ -815,6 +815,10 @@ service's port there and a k8s release to its Dapr sidecar. Electric takes
 
 What bit on a real instance:
 
+- **Database sizing.** `GCP.sqlTier` applies to new and existing Cloud SQL
+  instances. Changing it patches the existing instance on the next release;
+  tier and database-flag changes share one patch and can restart the database.
+
 - **Cloud SQL's `postgres` is no superuser.** It creates `anon`, `app_user`
   and `service` with admin over them but no `SET`, so PostgREST could not
   switch into `anon`; initdb grants them to it on every release. PostgREST
