@@ -21,7 +21,7 @@ Deno.test("a shared entity's policies ask its role, and a group is one shape", a
   assertStringIncludes(policies, "DELETE FROM company_grant WHERE company_id = NEW.id AND user_id IN (OLD.owner_id, NEW.owner_id);");
   assertStringIncludes(policies, "INSERT INTO company_grant (id, company_id, user_id, role) VALUES (gen_random_uuid(), NEW.id, OLD.owner_id, 'writer');");
   // A group named by a column: the column, on the table and under it, and its edge.
-  assertStringIncludes(tables, `"group_finance" TEXT GENERATED ALWAYS AS ("company_id"::text || ':finance') STORED`);
+  assertStringIncludes(tables, `"group_finance" TEXT GENERATED ALWAYS AS ("company_id"::text || '':finance'') STORED`);
   assertStringIncludes(policies, "INSERT INTO mecha.shape_key VALUES ('public.advance', 'group_finance', 'public.group_member', 'group_id')");
   assertStringIncludes(policies, "INSERT INTO mecha.shape_key VALUES ('public.advance_grant', 'group_finance', 'public.group_member', 'group_id')");
   // A grant row names a user or a group: one column each, one edge each.
@@ -31,7 +31,7 @@ Deno.test("a shared entity's policies ask its role, and a group is one shape", a
   assertStringIncludes(policies, "INSERT INTO mecha.shape_key VALUES ('public.advance_grant', 'group_id', 'public.group_member', 'group_id')");
   assert(!policies.includes("company_grant', 'group_id'"));
   // A grant holds one of the two roles, and the role's helper is not an RPC.
-  assertStringIncludes(tables, `CHECK ("role" IN ('reader', 'writer'))`);
+  assertStringIncludes(tables, `CHECK ("role" IN (''reader'', ''writer''))`);
   assertStringIncludes(policies, "AND s.role = 'reader')");
   assertStringIncludes(policies, "REVOKE ALL ON FUNCTION advance_role(uuid) FROM PUBLIC;");
   assertStringIncludes(policies, "advance: only the owner files a row under another finance");
@@ -44,7 +44,7 @@ Deno.test("a shared entity's policies ask its role, and a group is one shape", a
   // And into another owner's scope, when its parent is handed over.
   assertStringIncludes(policies, "CREATE TRIGGER expense_type_rescope AFTER UPDATE ON company");
   // The membership list is floored by its member, and no policy admits a write.
-  assertStringIncludes(tables, `"scope_id" TEXT GENERATED ALWAYS AS ('user:' || "user_id") STORED NOT NULL`);
+  assertStringIncludes(tables, `"scope_id" TEXT GENERATED ALWAYS AS (''user:'' || "user_id") STORED NOT NULL`);
   assertStringIncludes(policies, "CALL rls_protect('group_member');");
   assert(!/group_member_app_user_(insert|update|delete|all)/.test(policies));
 });

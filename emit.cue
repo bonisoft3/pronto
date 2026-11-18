@@ -315,6 +315,7 @@ _sqlType: {
 	columns!: #machineColumns
 	// Parent lookup, for a composition under a row that names a group.
 	entities: _
+	rls: *false | bool
 	_lines: list.Concat([
 		[for fld in T.e.fields {
 			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
@@ -393,7 +394,10 @@ _sqlType: {
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
-	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
+	_create: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
+	// Initdb runners may commit each statement; the table must never commit
+	// before its default-deny boundary, even when the later policy step fails.
+	out: [if T.rls {"DO " + (#sqlLit & {v: "BEGIN\n" + _create + "\nALTER TABLE \(T.e.table) ENABLE ROW LEVEL SECURITY;\nEND;"}).out + ";"}, if !T.rls {_create}][0]
 }
 
 #sqlLit: {
@@ -5226,7 +5230,7 @@ _pgrollDir: "services/database/pgroll"
 					format:      "sql"
 					_indexLines: list.Concat([for ent in E._baseServer if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 					text: strings.Join(list.Concat([
-						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns, entities: E.code.state.entities}).out}],
+						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns, entities: E.code.state.entities, if ent.access != _|_ {rls: true}}).out}],
 						[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 						[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 					]), "\n\n") + "\n"
