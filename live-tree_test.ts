@@ -53,7 +53,7 @@ Deno.test("development compose uses Bayt HMR without bind mounts or changing rel
   });
   assertEquals(
     dev.services["app-render"].environment?.ENTRY,
-    "/render/shell/index.html",
+    "/render/.pronto/development/index.html",
   );
   assertEquals(
     dev.services["app-render"].environment?.PRONTO_PRESENTATION_WATCH,

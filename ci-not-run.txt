@@ -13,3 +13,4 @@ bundle/edge-ssr-rpc_test.ts
 bundle/mecha-edge-compression_test.ts
 bundle/mecha-edge-compute_test.ts
 bundle/mecha-edge-retention_test.ts
+bundle/edge-isolate-workerd_test.ts

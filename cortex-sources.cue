@@ -3,7 +3,8 @@ package pronto
 import "list"
 
 // Translate named XState implementations to the existing row-machine actions.
-#CortexMechaTransition: T={
+#CortexMechaTransition: {
+	let T = self
 	transition: string | {target?: string, guard?: string, actions?: string | [...string]}
 	event:      *false | bool
 	guards:     _
@@ -19,7 +20,8 @@ import "list"
 	}][0]
 }
 
-#CortexMechaOutcome: O={
+#CortexMechaOutcome: {
+	let O = self
 	transition: _
 	guards:     _
 	actions:    _

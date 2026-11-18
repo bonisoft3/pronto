@@ -14,9 +14,17 @@ import (
 	toolchain "github.com/bonisoft3/omnishell/toolchain"
 )
 
+#Version: "0.25.0"
+
+#Tools: {
+	...
+	for k, v in toolchain.#Tools if k != "github:bonisoft3/omnishell" {(k): v}
+	"github:bonisoft3/omnishell": #Version
+}
+
 #Project: {
 	...
-	tools: toolchain.#Tools
+	tools: #Tools
 	say: say: {
 		...
 		generate: rulemap: {
@@ -37,7 +45,7 @@ published: runtime: #RuntimePin
 // (bsoneca/pronto forks/README.md), which an app on the fork's omnishell names
 // as its build's omnishellRuntime (builders/bayt.cue).
 #RuntimePin: =~"^(bonitao/omnishell|ghcr\\.io/bsoneca/omnishell):[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
-published: runtime: "bonitao/omnishell:0.23.0@sha256:9e7861696845c9de63969944d79722fb75810e338d7850a0dcd872806bea1d37"
+published: runtime: "bonitao/omnishell:0.25.0@sha256:64ec248518bbee6e9cb2b172fe865d9a09cf3f4acbb118d0e4cbfee2c2bb91bc"
 
 // The build context an app's images copy omnishell's runtime tree from: that
 // image, or in the monorepo the target building it.

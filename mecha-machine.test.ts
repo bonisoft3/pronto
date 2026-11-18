@@ -147,7 +147,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "topbar"}
     flows: {}
   }
 }
@@ -270,7 +270,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "topbar"}
     flows: {}
   }
 }
@@ -385,7 +385,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "topbar"}
     flows: {}
   }
 }
@@ -460,7 +460,8 @@ Deno.test("entering an invoking state claims the ledger and enqueues in the tran
   assertStringIncludes(sql, `VALUES ('charge:' || NEW."id"::text, 'charge', jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
   // A second claim of a performed key is refused, not skipped.
   assertStringIncludes(sql, `IF NOT FOUND THEN\n          RAISE EXCEPTION 'external effect % was already performed: entering charging again needs a new key', 'charge:' || NEW."id"::text USING ERRCODE = 'unique_violation';`);
-  assertStringIncludes(sql, `PERFORM graphile_worker.add_job('external_effect', json_build_object('key', 'charge:' || NEW."id"::text), job_key => 'charge:' || NEW."id"::text, max_attempts => 30);`);
+  // The job key is the ledger key's digest, which mecha's job_key.sql defines once for the guards and the edge's leases.
+  assertStringIncludes(sql, `PERFORM graphile_worker.add_job('external_effect', json_build_object('key', 'charge:' || NEW."id"::text), job_key => airlock.job_key('charge:' || NEW."id"::text), max_attempts => 30);`);
   // And the ticker's one-shot row re-armed, so a cluster asleep is woken for the job.
   // The re-arm writes only a row not yet armed and waits on no lock, so
   // claims never queue on the one row (emit.cue).
@@ -753,6 +754,25 @@ Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes 
   }
   assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: {origin: "https://b.example", service: {name: "ledger", namespace: "payments"}}, idempotent: true}`)), "names one of origin, bridge and service for target k8s");
   assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: service: {name: "Ledger.x", namespace: "payments"}, idempotent: true}`)), "name");
+  // A named origin is the edge's: a program declaring k8s is refused, with the reason, and one that
+  // does not leaves the effect no sink on k8s, which the release names before it renders anything.
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: {docker: origin: "https://a.example", k8s: origin: {secret: "VENDOR_URL"}}, idempotent: true}`).replace("targets: []", 'targets: ["k8s"]')), "names its origin by the secret VENDOR_URL, which only cloudflare reads: give target k8s an origin or a bridge");
+  const undeclared = await emitFiles(bridged("", `sink: {origin: "https://a.example", targets: {docker: origin: "https://a.example", k8s: origin: {secret: "VENDOR_URL"}}, idempotent: true}`));
+  assertEquals(JSON.parse(JSON.stringify(undeclared[".pronto/cluster.json"])).data.k8sSinks, { charge: null });
+});
+
+// Regression: the origin was compiled into effects.json, so one tree could not
+// be released to a staging deployment on a vendor's sandbox and a production
+// one on its live API. A named origin is the dispatcher's secret, read per run.
+Deno.test("an origin named by a secret reaches the edge by name, and no daprd endpoint", async () => {
+  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "ACQUIRER_ORIGIN"}, targets: docker: bridge: "mail", idempotent: true}`).replace("targets: []", 'targets: ["cloudflare"]'));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.edgeOrigin, { secret: "ACQUIRER_ORIGIN" });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl, "http://smtp:8080");
+  assertStringIncludes(
+    await refusal(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "ACQUIRER_ORIGIN"}, targets: cloudflare: bridge: "mail", idempotent: true}`)),
+    "effect charge names its origin by the secret ACQUIRER_ORIGIN, which only cloudflare reads: give target docker an origin or a bridge",
+  );
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: {secret: "lower"}, targets: docker: bridge: "mail", idempotent: true}`)), "lower");
 });
 
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
@@ -850,6 +870,76 @@ Deno.test("an input reads a field the entity has, quoted", async () => {
   assertStringIncludes(await refusal(paymentProgram({ effect: `input: {amt: "NEW.totl"}` })), "input amt reads NEW.totl, which is not a field of Payment");
   const files = await emitFiles(paymentProgram({ effect: `input: {"it's": "NEW.total"}` }));
   assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, `'it''s', NEW."total"))`);
+});
+
+// The fixture's Payment holding a PIN its reader types once, which `charge`
+// names beside an environment variable.
+const PIN = `{name: "pin", type: "string", secret: true},`;
+const pinned = (effect = `secrets: ["PIX_KEY", {field: "pin"}]`, field = PIN) =>
+  paymentProgram({ effect }).replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          ${field}`);
+
+Deno.test("a secret field reaches its effect's handler through the airlock's table, and its row holds NULL", async () => {
+  const program = pinned();
+  const files = await emitFiles(program);
+  const machines = files["services/database/migrations/010_machines.sql"].text;
+  // The write moves the sealed value and empties the column before any other
+  // trigger, the interpreter included, sees the row; a value in the clear is
+  // refused without being repeated.
+  assertStringIncludes(machines, `IF NEW."pin" IS NOT NULL AND NEW."pin" !~ '^seal1\\.[A-Za-z0-9_-]{16}\\.(?:[A-Za-z0-9_-]{128}){4}$' THEN
+    RAISE EXCEPTION 'payment.pin takes a value sealed to the airlock''s key, and this one is not' USING ERRCODE = 'invalid_parameter_value';`);
+  assertStringIncludes(machines, `PERFORM set_config('pronto_secret.k' || md5('payment' || chr(10) || 'pin' || chr(10) || NEW."id"::text), coalesce(NEW."pin", '-'), true);`);
+  assertStringIncludes(machines, `RAISE EXCEPTION 'payment is offered one row twice in one transaction, which a secret field cannot tell apart'`);
+  assertStringIncludes(machines, `NEW."pin" := NULL;`);
+  assertStringIncludes(machines, `CREATE TRIGGER "0_payment_pin_secret"\n  BEFORE INSERT OR UPDATE ON "payment"`);
+  // Kept only after a write that wrote the row: an insert turned away by a
+  // conflict, onto another reader's row, keeps nothing.
+  assertStringIncludes(machines, `INSERT INTO "airlock"."secret" ("tbl", "row", "field", "value", "expires_at")
+    VALUES ('payment', jsonb_build_object('id', NEW."id"), 'pin', sealed, clock_timestamp() + interval '300 seconds')`);
+  assertStringIncludes(machines, `CREATE TRIGGER "0_payment_pin_secret_kept"\n  AFTER INSERT OR UPDATE ON "payment"`);
+  assertEquals(machines.indexOf(`"0_payment_pin_secret"`) < machines.indexOf(`CREATE TRIGGER "trg_payment_status_machine"`), true);
+  // The claim freezes the input alone.
+  assertStringIncludes(machines, `jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
+  const tables = files["services/database/migrations/005_create_tables.sql"].text;
+  assertStringIncludes(tables, `"pin" text CONSTRAINT "payment_pin_secret" CHECK ("pin" IS NULL)`);
+  const manifest = JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge;
+  assertEquals([manifest.secrets, manifest.secretFields], [["PIX_KEY"], ["pin"]]);
+  // The page learns which fields to seal, and the edge reads the same manifest.
+  assertEquals(files["shell/shell.json"].data.schema.payment.fields.find((f: { name: string }) => f.name === "pin"), { name: "pin", secret: true, type: "string", required: false });
+  // The environment requires the variable, and holds the seal key, the local
+  // stack's falling back to the repository's development one.
+  const cluster = await cue(["export", "-", "-e", "_cluster.surface.targets", "--out", "json"], program);
+  assertEquals(cluster.success, true, cluster.stderr);
+  const targets = JSON.parse(cluster.stdout);
+  assertEquals(Object.keys(targets.airlock.compose.environment).filter((k) => /PIX|PIN|SEAL/i.test(k)).sort(), ["AIRLOCK_SEAL_DEV", "AIRLOCK_SEAL_KEY", "AIRLOCK_SEAL_KEY_PREVIOUS", "PIX_KEY"]);
+  // The local stack says so, which alone lets the airlock take the development key.
+  assertEquals(targets.airlock.compose.environment.AIRLOCK_SEAL_DEV, "local");
+  assertEquals(targets.airlock.compose.environment.AIRLOCK_SEAL_KEY.startsWith("${AIRLOCK_SEAL_KEY:-MII"), true);
+  // The airlock brings its secret tables at its start (mecha's seal-tables.ts),
+  // so the cluster's upgrade and its steps are what they were.
+  assertEquals(targets["airlock-upgrade"].dockerfile.epilogue[0].includes("airlock.secret"), false);
+});
+
+Deno.test("a secret field touches nothing that keeps, derives or relates its value", async () => {
+  const at = (from: string, to: string) => pinned().replace(from, to);
+  const cases: [string, string][] = [
+    [pinned(`secrets: [{field: "pin"}]\n      input: {pin: "NEW.pin"}`), "effect charge input pin reads the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}]\n      input: {pin: {raw: "upper(NEW.\\"pin\\")"}}`), "effect charge input pin reads the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}]\n      key: ["id", "pin"]`), "effect charge keys on the secret field pin"],
+    [pinned(`secrets: [{field: "pin"}, {field: "total"}]`), `effect charge names {field: \\"total\\"} in secrets, which is no secret field of Payment`],
+    [pinned(`secrets: ["PIX_KEY"]`), "entity Payment field pin is secret, and no effect names it in secrets"],
+    [at(`durability: "server"`, `durability: "live"`), "entity Payment field pin is secret, and Payment is live"],
+    [pinned(undefined, `{name: "pin", type: "string", secret: true, cel: "size(this) == 4"},`), "entity Payment field pin is secret, and states cel"],
+    [pinned().replace(`{name: "status", type: "string"},`, `{name: "status", type: "string", pk: true},`), "entity Payment field pin is secret, and Payment has no one-field primary key to seal it to"],
+    [pinned(undefined, `{name: "pin", type: "string", secret: true, default: "'0000'"},`), "entity Payment field pin is secret, and states default"],
+    [at(`fields: [`, `indexes: [{on: "pin"}]\n        fields: [`), "entity Payment indexes the secret field pin"],
+    [at(`fields: [`, `invariant: cel: "this.pin != this.failure"\n        fields: [`), "entity Payment: its invariant reads the secret field pin"],
+    [at(`fields: [`, `seed: [{id: "00000000-0000-0000-0000-000000000001", pin: "1234"}]\n        fields: [`), "entity Payment seeds the secret field pin"],
+  ];
+  for (const [program, why] of cases) assertStringIncludes(await refusal(program), why);
+  // A string a reader types, never stored, so never required; its five minutes are the platform's.
+  for (const field of [`{name: "pin", type: "int32", secret: true},`, `{name: "pin", type: "string", secret: true, required: true},`, `{name: "pin", type: "string", secret: true, ttl: "1h"},`]) {
+    assertEquals((await cue(["vet", "-c", "-"], pinned(undefined, field))).success, false, field);
+  }
 });
 
 Deno.test("a row in an invoking state keeps its key and is not deleted until its outcome", async () => {
@@ -1053,7 +1143,7 @@ app: pronto.#App & {
   surface: {
     screens: {}
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "topbar"}
     flows: {}
   }
 }
@@ -1152,7 +1242,7 @@ app: pronto.#App & {
   surface: {
     screens: {}
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "topbar"}
     flows: {}
   }
 }

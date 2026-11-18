@@ -42,7 +42,7 @@
   },
   "dockerfile": {
     "preamble": [
-      "COPY --from=bonitao/lazybox:0.8.5@sha256:091a3b63ba222777000acc3bf8327faebfea4870e23ee07c6eb42431dadb2ac6 /lazybox/ /root/.local/share/lazybox/",
+      "COPY --from=bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df /lazybox/ /root/.local/share/lazybox/",
       "COPY --from=alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat",
       "COPY --from=alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/",
       "ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin",
@@ -59,7 +59,7 @@
     "preambleCopyContexts": [
       {
         "name": "bayt",
-        "image": "bonitao/bayt-runtime:1.3.0@sha256:c33b9187787fcbd5fa80f1f2f52c661d6e7c38a4822c269b8daff83e70dce22e"
+        "image": "bonitao/bayt-runtime:1.5.2@sha256:58f21a8e78a8270e5d7a95e65665ef3b8824a75e8229a579c6316d3b07c4e838"
       },
       {
         "name": "alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
@@ -486,12 +486,12 @@
       "upClosure": [
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
-        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml",
         "./.bayt/compose.build.yaml",
         "./.bayt/compose.generate.yaml",
-        "./.bayt/compose.setup.yaml",
-        "./.bayt/compose.caddy.yaml",
-        "./.bayt/compose.served.yaml"
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
@@ -521,12 +521,12 @@
       "upClosure": [
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
-        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml",
         "./.bayt/compose.build.yaml",
         "./.bayt/compose.generate.yaml",
-        "./.bayt/compose.setup.yaml",
-        "./.bayt/compose.caddy.yaml",
-        "./.bayt/compose.served.yaml"
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -559,12 +559,12 @@
   "upClosure": [
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
-    "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml",
     "./.bayt/compose.build.yaml",
     "./.bayt/compose.generate.yaml",
-    "./.bayt/compose.setup.yaml",
-    "./.bayt/compose.caddy.yaml",
-    "./.bayt/compose.served.yaml"
+    "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.setup.yaml"
   ],
   "chainedDeps": [
     {
@@ -676,6 +676,7 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "shell": "sh",
       "do": "if [ -n \"$BUILDKIT_SYNTAX\" ]; then\n  # depot frontend-pin workaround (full rationale in stacks/sayt/sayt.cue)\n  find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"1i # syntax=$BUILDKIT_SYNTAX\" {} \\;\nfi\n[ -n \"$BKID_PROJECT\" ] || { echo \"bkid: BKID_PROJECT is unset; sayt integrate names the inner stack\" >&2; exit 1; }\np=\"${BKID_PROJECT}_visual\"\nf=.bayt/compose.integrate.closure.yaml\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\ndocker compose -p \"$p\" --profile '*' -f \"$f\" config | docker buildx bake --allow=fs.read=/monorepo -f - --print bayt | $bake -f - --set \"*.output=type=cacheonly\" ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} bayt\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\ns=0\ndocker compose -p \"$p\" --profile '*' -f \"$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=$?\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\nexit \"$s\"",
       "dockerfile": {
@@ -819,7 +820,6 @@
           "steps": []
         }
       },
-      "name": "builtin",
       "stop": false
     }
   ],

@@ -14,10 +14,11 @@ aqua.minisign = false
 [tools]
 # The repo-wide CUE pin; exports must be byte-identical everywhere, and the
 # test verb vets testdata/emit against it.
-"github:cue-lang/cue" = "0.16.1"
+"github:cue-lang/cue" = "0.18.0-rc.4"
 # Every program this plugin ships is a deno program — derive.ts, write.ts,
 # check-facts.ts, check-loop.ts — and deno.json pins what they import.
 "github:denoland/deno" = "v2.9.7"
+"github:nushell/nushell" = "0.116.1"
 "protoc" = "33.0"
 # check-proto.ts compares every proto the app does not withhold against its git history.
 "github:bufbuild/buf" = "1.74.0"

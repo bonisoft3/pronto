@@ -30,6 +30,7 @@ cortex-walker.test.ts
 database-functions.test.ts
 derive-input.test.ts
 design-tokens.test.ts
+drive-access.test.ts
 duckstream-columns_test.ts
 duckstream.test.ts
 edge-hatches-compiler.test.ts
@@ -43,6 +44,8 @@ identity/hydra/front_test.ts
 identity_test.ts
 indexing.test.ts
 ir-machine.test.ts
+isolate-hatches.test.ts
+isolate-pdf.test.ts
 kinetic-child.test.ts
 layout_test.ts
 lifecycle-machine.test.ts
@@ -61,13 +64,17 @@ objects_test.ts
 portable-types.test.ts
 project-config.test.ts
 read.test.ts
+reads.test.ts
 release-docker.test.ts
 release-gcp.test.ts
 replay.test.ts
+rewrites.test.ts
 route-segments.test.ts
+secret-seal.test.ts
 seed_test.ts
 ssr.test.ts
 step-placement.test.ts
+token-roles.test.ts
 type-agreement.test.ts
 type-proto.roundtrip.test.ts
 type-proto.test.ts

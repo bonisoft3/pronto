@@ -59,7 +59,7 @@ _irNotes: {
 _deriving: *false | bool @tag(derive,type=bool)
 
 if !_deriving {
-	code: meta: decisions: [Id=string]: note: _irNotes[Id]
+	code: meta: decisions: [string]~(Id,_): note: _irNotes[Id]
 }
 
 _irAccepts: {
@@ -67,7 +67,7 @@ _irAccepts: {
 }
 
 if !_deriving {
-	code: meta: tests: [Id=string]: accepts: _irAccepts[Id]
+	code: meta: tests: [string]~(Id,_): accepts: _irAccepts[Id]
 }
 
 code: meta: ladder: ["ir/neighbourhood-app.svg","ir/neighbourhood-counter.svg","ir/neighbourhood-grid.svg","ir/neighbourhood-timer.svg","ir/neighbourhood-todo.svg"]

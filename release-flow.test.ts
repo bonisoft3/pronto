@@ -34,7 +34,7 @@ async function world(): Promise<World> {
   const state = `${root}-state`
   for (const d of [`${root}/cue.mod`, `${root}/gcp`, app, `${app}/.pronto`, `${app}/docker`, fakes, state]) await Deno.mkdir(d, { recursive: true })
   // The fork's own CUE module, reduced to what the plan imports.
-  await write(`${root}/cue.mod/module.cue`, `module: "github.com/bonisoft3/pronto@v0"\nlanguage: version: "v0.16.1"\n`)
+  await write(`${root}/cue.mod/module.cue`, `module: "github.com/bonisoft3/pronto@v0"\nlanguage: version: "v0.18.0"\n`)
   await new Deno.Command("cp", { args: ["-R", `${fork}/gcp/schema`, `${root}/gcp/schema`] }).output()
   await new Deno.Command("cp", { args: ["-R", `${fork}/resilience`, `${root}/resilience`] }).output()
   await write(`${app}/release.cue`, `package app

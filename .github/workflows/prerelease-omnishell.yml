@@ -92,7 +92,7 @@ jobs:
       # releases pronto and mecha require are there too.
       - name: base
         run: |
-          for v in v0.19.1 v0.20.2 v0.20.3 v0.25.0; do
+          for v in v0.19.1 v0.20.2 v0.20.3 v0.23.0 v0.25.0; do
             crane digest "$REG:$v" >/dev/null 2>&1 || crane copy "registry.cue.works/github.com/bonisoft3/omnishell:$v" "$REG:$v"
           done
       - name: runtime

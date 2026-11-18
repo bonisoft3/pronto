@@ -6,6 +6,7 @@ package pronto
 
 import (
 	"list"
+	"path"
 	"encoding/json"
 	"encoding/yaml"
 	"regexp"
@@ -24,6 +25,9 @@ import (
 #Target: "pages" | "cloudflare" | "docker" | "k8s" | "gcp" | "aws"
 #Tier:   "browser" | "edge" | "container" | "k8s" | "cloud"
 
+// A module pronto ships for an isolate hatch to name (emit.cue's _stockIsolates).
+#StockIsolate: or([for s, _ in _stockIsolates {s}])
+
 // A path relative to the app directory, resolved by derive and by the
 // terminal's module loader. No scheme and no `..`: the source is read from the
 // app's own tree and embedded in emitted artifacts.
@@ -35,22 +39,26 @@ import (
 #StepDigits: string & =~"^(0[1-9][0-9]|[1-7][0-9]{2})$"
 
 // The framework's steps an app's program runs, by name: the defaults unless
-// `state.steps` places them. The effect ledger precedes the airlock's tables,
-// as mecha's cluster.cue orders them.
-#steps: S={
-	code: _
+// `state.steps` places them. The effect ledger precedes the airlock's tables
+// and those the job key's function, as mecha's cluster.cue orders them.
+#steps: {
+	let S = self
+	code:    _
 	_placed: [if S.code.state.steps != _|_ {S.code.state.steps}, {}][0]
 	_digits: {
 		machines: [if _placed.machines != _|_ {_placed.machines}, "010"][0]
 		actors:   [if _placed.actors != _|_ {_placed.actors}, "016"][0]
 		graphile: [if _placed.graphile != _|_ {_placed.graphile}, "011"][0]
 		airlock:  [if _placed.airlock != _|_ {_placed.airlock}, "012"][0]
+		jobKey:   [if _placed.jobKey != _|_ {_placed.jobKey}, "013"][0]
 	}
-	_ledgerFirst: true & (_digits.graphile < _digits.airlock)
-	machines: "\(_digits.machines)_machines.sql"
-	actors:   "\(_digits.actors)_mecha_actors.sql"
-	graphile: "\(_digits.graphile)_graphile_worker.sql"
-	airlock:  "\(_digits.airlock)_airlock.sql"
+	_ledgerFirst:  true & (_digits.graphile < _digits.airlock)
+	_airlockFirst: true & (_digits.airlock < _digits.jobKey)
+	machines:      "\(_digits.machines)_machines.sql"
+	actors:        "\(_digits.actors)_mecha_actors.sql"
+	graphile:      "\(_digits.graphile)_graphile_worker.sql"
+	airlock:       "\(_digits.airlock)_airlock.sql"
+	jobKey:        "\(_digits.jobKey)_airlock_job_key.sql"
 }
 #SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams" | "Statechart"
 
@@ -61,116 +69,41 @@ import (
 // colours and declared as ROLES, where the twin is closed. #scale.shadow is
 // then geometry alone.
 //
-// Required of every preset below, in both halves. #scale.shadow depends on
-// these names, so a preset that omitted them would export cleanly and emit
-// `--shadow-1: 0 1px 2px -1px var(--shadow-ink-10)` with nothing declaring
-// the ink: invalid at computed-value time, and every elevation silently gone.
+// Required of every design, in both halves, with structural defaults below so
+// `--shadow-1..6` never dangle when an app leaves elevation inks untinted.
 #shadowInks: ["shadow-ink-3", "shadow-ink-4", "shadow-ink-5", "shadow-ink-6",
 	"shadow-ink-7", "shadow-ink-8", "shadow-ink-10"]
 
-// Starting points for #Design. A preset is named rather than implicit so a
-// reviewer can see which opinion an app took, and so adding a second is a data
-// change rather than a fork.
-//
-// The token NAMES are the schema contract and the platform's; the hex is the
-// designer's to evolve.
-#designPresets: [Name=string]: {
-	colors: [string]: string
-	colors: {for n in #shadowInks {(n): string}}
-	dark: [string]: string
-	dark: {for n in #shadowInks {(n): string}}
-	rounded: [string]:  string
-	spacing: [string]:  string
-	motion: [string]:   string
-	control: [string]:   string
-	measures: [string]:  string
-	type: [string]:      string
-	component: [string]: #Reference
-}
-#designPresets: press: {
-	// Identity for an editorial reading surface; the default an app takes
-	// when it names no preset.
-	colors: {
-		primary:         "#16181A"
-		secondary:       "#6B7076"
-		accent:          "#1D6A4F"
-		danger:          "#A93226"
-		neutral:         "#FBFAF7"
-		surface:         "#FFFFFF"
-		border:          "#E4E1D9"
-		"surface-muted": "#EFEDE6"
-		"shadow-ink-3":  "hsl(220 3% 15% / 3%)"
-		"shadow-ink-4":  "hsl(220 3% 15% / 4%)"
-		"shadow-ink-5":  "hsl(220 3% 15% / 5%)"
-		"shadow-ink-6":  "hsl(220 3% 15% / 6%)"
-		"shadow-ink-7":  "hsl(220 3% 15% / 7%)"
-		"shadow-ink-8":  "hsl(220 3% 15% / 8%)"
-		"shadow-ink-10": "hsl(220 3% 15% / 10%)"
-	}
-	dark: {
-		primary:         "#E9E7E2"
-		secondary:       "#9AA0A6"
-		accent:          "#63BE95"
-		danger:          "#E2705F"
-		neutral:         "#131414"
-		surface:         "#1C1E1F"
-		border:          "#2E3133"
-		"surface-muted": "#24272A"
-		"shadow-ink-3":  "hsl(220 40% 2% / 27%)"
-		"shadow-ink-4":  "hsl(220 40% 2% / 28%)"
-		"shadow-ink-5":  "hsl(220 40% 2% / 29%)"
-		"shadow-ink-6":  "hsl(220 40% 2% / 30%)"
-		"shadow-ink-7":  "hsl(220 40% 2% / 31%)"
-		"shadow-ink-8":  "hsl(220 40% 2% / 32%)"
-		"shadow-ink-10": "hsl(220 40% 2% / 34%)"
-	}
-	rounded: {sm: "4px", md: "8px", full: "999px"}
-	// px, not var(--size-N). Three of the four are exactly a rung, which is
-	// evidence the roles were already right rather than a reason to make them
-	// indirections: rewriting them would convert six apps' --sp-* from device
-	// px to rem, identical at a 16px root and not above it, while the two apps
-	// that declare `spacing` concretely would keep the literals and fork the
-	// corpus on the very role meant to show the two namespaces meeting.
-	spacing: {sm: "8px", md: "16px", lg: "24px", xl: "40px"}
-	motion: {fast: "110ms", base: "180ms", ease: "cubic-bezier(.2, 0, 0, 1)", shift: "6px"}
-	// A control's geometry, which sm/md/lg/xl could not say: that ladder
-	// orders spacing by size and is silent about which BOX gets which, so a
-	// control's height and inset had no name and became a number. pad-x is a
-	// role pointing at a role — the worked example of the two layers meeting.
-	control: {
-		"h-xs":  "28px", "h-sm": "32px", h: "36px", "h-lg": "40px"
-		"pad-x": "var(--sp-md)"
-	}
-	// Page-level widths. Identity, not scale: no vocabulary contains 720px,
-	// and pretending one does is how a measure stays a bare number. press
-	// declares none, so every entry is the app's own.
-	measures: {}
-	// Six purposes and two leadings, each value a step Primer publishes, so the
-	// identity is spelled in the vocabulary rather than beside it. A purpose
-	// decides its size and its leading together, the shape Material's typescale
-	// takes and a bare ladder cannot state. #Design.type states the tier's rules.
-	type: {
-		display:           "2.5rem"
-		title:             "2rem"
-		subtitle:          "1.25rem"
-		body:              "1rem"
-		caption:           "0.875rem"
-		label:             "0.75rem"
-		// TWO leadings, not one per purpose. The vendored ladder has five steps and
-		// two roles at one norm raise, so a preset that named four would leave an
-		// app a single free value and any override it made would cascade. Prose and headings are the two readings a
-		// leading actually decides; a purpose that needs a third names it, and has
-		// three steps left to name it with.
-		"leading-title": "1.25"
-		"leading-body":  "1.625"
-	}
-	// Geometry ordered by ELEMENT CLASS rather than by size: field-radius,
-	// selector-radius, box-radius. This is the one thing an ordered sm/md/full
-	// ladder cannot state whatever it is filled with — press orders radii by
-	// size and other systems order them by which control wears them — so it is a
-	// tier and not another rung. press declares none.
-	component: {}
-}
+// The eight semantic colour roles every app owes in both appearances. Unlike
+// the shadow inks and structural ladders, identity colours carry no platform
+// default: naming none would hand every app the same palette by inertia.
+#colorRoles: ["primary", "secondary", "accent", "danger", "neutral",
+	"surface", "border", "surface-muted"]
+
+// The five Apple-aligned navigation postures emit.cue renders at `:where(...)`
+// specificity:
+//   - `topbar`: fluid full-width sticky horizontal toolbar across viewports
+//   - `tabbar`: centered floating top pill capsule on tablet/desktop (>= 640px)
+//               that adapts to a pinned bottom tab bar on compact phones (< 640px)
+//   - `sidebar`: inline-start vertical column on wide screens (>= 860px) that
+//                collapses to a compact sticky top bar on narrower screens
+//   - `dock`: centered floating pill capsule anchored near the bottom edge
+//             across viewports, leaving the top edge chrome-free
+//   - `custom`: zero-specificity link/control resets only; app CSS owns geometry
+// Required with no default so every app chooses its chrome explicitly.
+#NavPosture: "topbar" | "tabbar" | "sidebar" | "dock" | "custom"
+
+// Named 24x24 stroke icons Omnishell's chrome renders in `body > nav` links
+// (`plugins/omnishell/interpreter/chrome.js` `CHROME_ICONS`). Held equal to
+// `CHROME_ICONS` by `login-design.test.ts`.
+#NavIcon: "home" | "compass" | "search" | "sparkles" | "globe" | "map-pin" |
+	"layout-grid" | "grid-3x3" | "list" | "kanban" | "layers" | "table" |
+	"calendar" | "clock" | "history" |
+	"chart-bar" | "chart-line" | "chart-pie" | "trending-up" | "wallet" | "credit-card" | "receipt" | "shopping-bag" |
+	"book-open" | "file-text" | "newspaper" | "scroll" | "circle-help" | "info" | "bookmark" | "tag" | "folder" |
+	"message-square" | "mail" | "inbox" | "bell" | "users" | "user" | "heart" | "share" |
+	"gamepad" | "trophy" | "award" | "flame" | "zap" | "play" | "music" | "image" |
+	"plus-circle" | "check-circle" | "sliders" | "settings" | "shield" | "code" | "terminal"
 
 // The joins the scanner implements. A bucket's dimension says which norm()
 // runs over its steps and which properties' literals can reach them, so this is
@@ -214,6 +147,7 @@ import (
 		url:       string
 		integrity: string
 	}
+
 	// An own source has no archive, so it has no version an archive could pin;
 	// the only honest one is this repository. A constraint as well as a rule: a relabelled vendor source,
 	// `{kind: "own", origin: "open-props", version: "1.7.23"}`, fails here before
@@ -235,9 +169,10 @@ import (
 	steps: [string]: string
 }
 
-#Scale: S={
-	sources: [Name=string]: #Source
-	buckets: [Name=string]: #Bucket
+#Scale: {
+	let S = self
+	sources: [string]~(Name,_): #Source
+	buckets: [string]~(Name,_): #Bucket
 	// Both of these are non-hidden because a hidden field is evaluated only where
 	// something dereferences it, and neither of these is dereferenced anywhere:
 	// a guard nothing evaluates is a guard nothing has. Non-hidden, they ride
@@ -274,7 +209,7 @@ import (
 // the generator publishes that this list drops is caught by the admission rule in
 // invariants.sql, which asks the archive rather than this list.
 //
-// Not a #designPresets entry: a preset is one identity among several, this is
+// Distinct from #Design: #Design states one app's own identity, whereas this is
 // the vocabulary every identity is spelled in. And it has no app seam at all —
 // an app that needs a length the scale lacks names a ROLE, which is a
 // decision, rather than a rung, which is not. That is what keeps a scale from
@@ -291,15 +226,15 @@ import (
 	sources: {
 		openprops: scales.openprops.source
 		primer:    scales.primer.source
-		pronto: {kind: "own", origin: "pronto", version: "this repository"}
-		terminal: {kind: "own", origin: "omnishell", version: "this repository"}
+		pronto:    {kind: "own", origin: "pronto", version: "this repository"}
+		terminal:  {kind: "own", origin: "omnishell", version: "this repository"}
 	}
 	buckets: {
 		size:   scales.openprops.buckets.size
 		border: scales.openprops.buckets.border
 		// Geometry only, and pronto's own: the six upstream NAMES republished over
-		// the twinned ink roles, for the reason #shadowInks gives. Every preset
-		// carries the inks, so these var()s never dangle.
+		// the twinned ink roles, for the reason #shadowInks gives. #Design defaults
+		// the inks, so these var()s never dangle.
 		shadow: {
 			prefix:    "--shadow-"
 			dimension: "opaque"
@@ -323,7 +258,7 @@ import (
 			prefix:    "--min-"
 			dimension: "opaque"
 			source:    "terminal"
-			steps: {for n, px in omnishell.#Terminal.capabilities.floors {(n): "\(px)px"}}
+			steps:     {for n, px in omnishell.#Terminal.capabilities.floors {(n): "\(px)px"}}
 		}
 		// Type quotes Primer's base ladder, and what decides it is step economy
 		// rather than coverage. Over the corpus the literal rule reads —
@@ -352,42 +287,81 @@ import (
 // The design system's values. An app states them once, as the YAML
 // frontmatter of its DESIGN.md, and program.cue reads them through #DesignMd
 // below — the file's body argues the identity and its frontmatter carries it,
-// the same division the ir and the program keep for behaviour. Every field is
-// optional: the preset supplies what the app does not say. The emitter alone
-// turns these into CSS; the fact-store join (invariants.sql) guards the fork.
-#Design: D={
-	// The starting set this app took. Naming a token below replaces that one
-	// and leaves the rest, exactly as `motion` works.
-	preset:  *"press" | string
-	_preset: #designPresets[D.preset]
+// the same division the ir and the program keep for behaviour. There are no
+// named theme presets: every app explicitly authors its eight core colour roles
+// in both `colors` and `dark` and selects its navigation posture in `shell.nav`,
+// while structural geometry and motion carry sensible defaults an app may
+// refine. The emitter alone turns these into CSS; the fact-store join
+// (invariants.sql) guards the fork.
+#Design: {
+	let D = self
 
-	colors: [string]: string
-	colors: {for k, v in D._preset.colors {(k): *v | string}}
+	colors: [string]: string & !=""
+	colors: {
+		for n in #colorRoles {(n): string & !=""}
+		"shadow-ink-3":  *"hsl(220 3% 15% / 3%)" | (string & !="")
+		"shadow-ink-4":  *"hsl(220 3% 15% / 4%)" | (string & !="")
+		"shadow-ink-5":  *"hsl(220 3% 15% / 5%)" | (string & !="")
+		"shadow-ink-6":  *"hsl(220 3% 15% / 6%)" | (string & !="")
+		"shadow-ink-7":  *"hsl(220 3% 15% / 7%)" | (string & !="")
+		"shadow-ink-8":  *"hsl(220 3% 15% / 8%)" | (string & !="")
+		"shadow-ink-10": *"hsl(220 3% 15% / 10%)" | (string & !="")
+	}
 	// The dark twin declares the SAME names — appearance is a token
 	// resolution, never a state. Emitted as the second argument of each
 	// token's light-dark(), so the two palettes are one declaration and a
 	// name can no longer appear in a single appearance: a missing twin and a
 	// twin nothing reads are both errors here rather than a token that
 	// silently stops changing, or never changed at all.
-	dark: close({for k, _ in D.colors {(k): string}})
-	dark: {for k, v in D._preset.dark {(k): *v | string}}
+	dark: close({for k, _ in D.colors {(k): string & !=""}})
+	dark: {
+		"shadow-ink-3":  *"hsl(220 40% 2% / 27%)" | (string & !="")
+		"shadow-ink-4":  *"hsl(220 40% 2% / 28%)" | (string & !="")
+		"shadow-ink-5":  *"hsl(220 40% 2% / 29%)" | (string & !="")
+		"shadow-ink-6":  *"hsl(220 40% 2% / 30%)" | (string & !="")
+		"shadow-ink-7":  *"hsl(220 40% 2% / 31%)" | (string & !="")
+		"shadow-ink-8":  *"hsl(220 40% 2% / 32%)" | (string & !="")
+		"shadow-ink-10": *"hsl(220 40% 2% / 34%)" | (string & !="")
+	}
 	rounded: [string]: string
-	rounded: {for k, v in D._preset.rounded {(k): *v | string}}
+	rounded: {
+		sm:   *"4px" | string
+		md:   *"8px" | string
+		full: *"999px" | string
+	}
+	// px, not var(--size-N): rewriting structural roles to rem indirections
+	// would fork apps that declare `spacing` concretely at non-16px roots.
 	spacing: [string]: string
-	spacing: {for k, v in D._preset.spacing {(k): *v | string}}
+	spacing: {
+		sm: *"8px" | string
+		md: *"16px" | string
+		lg: *"24px" | string
+		xl: *"40px" | string
+	}
 	// The motion vocabulary. The terminal ships no style at all — its
 	// shell.css is the empty contract — so this is the only declaration;
-	// the preset supplies the defaults and naming one here replaces it.
+	// naming a key here replaces its structural default.
 	motion: [string]: string
-	motion: {for k, v in D._preset.motion {(k): *v | string}}
+	motion: {
+		fast:  *"110ms" | string
+		base:  *"180ms" | string
+		ease:  *"cubic-bezier(.2, 0, 0, 1)" | string
+		shift: *"6px" | string
+	}
 	// Lengths a screen reaches for by role rather than by rung. #scale is the
 	// vocabulary beneath these and has no app seam; a length the scale lacks
 	// is named HERE, because a decision belongs in the app's own block and a
-	// rung does not.
+	// rung does not. pad-x points at a spacing role — the two layers meeting.
 	control: [string]: string
-	control: {for k, v in D._preset.control {(k): *v | string}}
+	control: {
+		"h-xs":  *"28px" | string
+		"h-sm":  *"32px" | string
+		h:       *"36px" | string
+		"h-lg":  *"40px" | string
+		"pad-x": *"var(--sp-md)" | string
+	}
+	// Page-level widths. Identity, not scale: every entry is the app's own.
 	measures: [string]: string
-	measures: {for k, v in D._preset.measures {(k): *v | string}}
 	// A named size or leading, emitted --type-*, chosen so it collides with no
 	// vendored ladder's prefix. A key spelled leading-* is a line-height and any
 	// other is a font size, because a role's dimension is read off its name and a
@@ -398,8 +372,11 @@ import (
 	// A purpose is named from `display, title, subtitle, heading, lead, body,
 	// body-small, label, caption, overline, code`, each with an optional
 	// `leading-<stem>` twin: Primer's functional layer read as a list of
-	// purposes, so a reader who knows that vocabulary knows this one. What a
-	// purpose is worth is the app's or its preset's.
+	// purposes, so a reader who knows that vocabulary knows this one.
+	//
+	// TWO default leadings, not one per purpose: the vendored ladder has five
+	// steps and two roles at one norm raise, so prose and headings leave three
+	// steps free for any purpose that needs its own.
 	//
 	// A role carries its VALUE. A role that aliased a rung would win its norm, and
 	// `best` keeps one step per (dimension, norm), so the rung would drop out of
@@ -408,7 +385,16 @@ import (
 	// that purpose", which is also the one legal spelling of it, since two roles
 	// at one norm raise.
 	type: [string]: string
-	type: {for k, v in D._preset.type {(k): *v | string}}
+	type: {
+		display:         *"2.5rem" | string
+		title:           *"2rem" | string
+		subtitle:        *"1.25rem" | string
+		body:            *"1rem" | string
+		caption:         *"0.875rem" | string
+		label:           *"0.75rem" | string
+		"leading-title": *"1.25" | string
+		"leading-body":  *"1.625" | string
+	}
 	// Keys are <element>-<property> and values POINT AT a role or a rung, so the
 	// tier says which geometry a class of control wears without inventing a value.
 	// A constraint, not a convention: this tier publishes no step, so a literal
@@ -420,18 +406,26 @@ import (
 	// Emitted --c-*, and like control and measures it publishes no step: which box
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
-	component: {for k, v in D._preset.component {(k): *v | string}}
 	// The appearances the app is drawn in. Absent, both: each colour's dark
 	// twin answers a dark colour-scheme. "light" pins the page to its light
 	// half, for an identity that has no dark one yet (its twins then restate
 	// the light values, as #Design.dark is closed over the same names).
 	colorScheme?: "light"
-	// Which colour the terminal's own chrome resolves to; the shell has no
-	// opinion about which swatch is a background.
+	// Which colour the terminal's own chrome resolves to, optional brand title
+	// rendered at the inline start of `body > nav`, and which navigation posture
+	// (`topbar`, `tabbar`, `sidebar`, `dock`, or `custom`) `design.css` emits at
+	// `:where(...)` specificity. `nav` has no default: every app chooses its
+	// chrome explicitly.
 	shell: {
-		bg:   *"neutral" | string
-		fg:   *"primary" | string
-		rule: *"border" | string
+		bg:        *"neutral" | string
+		fg:        *"primary" | string
+		rule:      *"border" | string
+		nav:       #NavPosture
+		title?:    string & !=""
+		titleKey?: string & !=""
+		if titleKey != _|_ {
+			title: string & !=""
+		}
 	}
 }
 
@@ -439,13 +433,10 @@ import (
 // (`_designMd: _ @embed(file="DESIGN.md", type=text)` under `@extern(embed)`),
 // and `design` is its YAML frontmatter — the lines between a first line that is
 // exactly `---` and the next such line — unified with #Design, so that a key
-// #Design lacks, a value of the wrong shape and a file without a frontmatter
-// are all errors at `cue vet` and at export. The frontmatter is the one
-// declaration: program.cue restates none of it (`surface: design:
-// (pronto.#DesignMd & {text: _designMd}).design`), and it carries the app's own
-// overrides and additions, `var(--…)` references included — never the resolved
-// palette, so the preset keeps filling the rest. An empty frontmatter is the
-// preset as it is.
+// #Design lacks, a missing required palette role or `shell.nav` posture, a value
+// of the wrong shape and a file without a frontmatter are all errors at `cue vet`
+// and at export. The frontmatter is the one declaration: program.cue restates
+// none of it (`surface: design: (pronto.#DesignMd & {text: _designMd}).design`).
 #DesignMd: {
 	text:   string
 	_lines: strings.Split(text, "\n")
@@ -455,8 +446,7 @@ import (
 	_closes: [for i, l in _lines if i > 0 && l == "---" {i}]
 	_fenced: _lines[0] == "---" && len(_closes) > 0
 	// The error sits on `design` itself, so it surfaces wherever the design is
-	// read rather than only where the reader is inspected. An empty frontmatter
-	// unmarshals to top, which is the preset untouched.
+	// read rather than only where the reader is inspected.
 	if _fenced {
 		design: #Design & yaml.Unmarshal(strings.Join(list.Slice(_lines, 1, _closes[0]), "\n"))
 	}
@@ -472,7 +462,7 @@ import (
 
 // A field's type is a portable type the table names (types.cue), or one of the
 // physical labels an older program still spells.
-#Type: or([for _name, _ in #types {_name}])
+#Type:       or([for _name, _ in #types {_name}])
 #LegacyType: or([for _name, _ in #typeAlias {_name}])
 
 #Field: {
@@ -492,7 +482,7 @@ import (
 	type: #Type | #LegacyType
 	if type == "decimal" {
 		precision!: int & >=1 & <=38
-		scale!: int & >=0 & <=precision
+		scale!:     int & >=0 & <=precision
 	}
 	pk:       *false | bool
 	required: *true | bool
@@ -506,6 +496,20 @@ import (
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
 	cel?: string
+	// A value the reader types once for an external effect, a PIN, kept as
+	// Kubernetes keeps a sealed secret: the screen seals it to the airlock's
+	// public key, so only ciphertext travels and is stored, and the airlock
+	// opens it in memory just before its handler's call. The column is NULL in
+	// every row; a write naming it hands the sealed value to the airlock's
+	// secret table for five minutes, where the effect naming it in `secrets`
+	// reads it. What else it may not touch is refused at #App
+	// (docs/decisions/2026-11-16-secret-fields.md).
+	secret?: true
+	if secret != _|_ {
+		type:     "string"
+		required: false
+		pk:       false
+	}
 	// What the integer counts, where it counts money: minor units of a currency
 	// the column states once or each row states in a sibling field
 	// (docs/types-and-identity.md#money). The terminal shows it with
@@ -528,20 +532,34 @@ import (
 }
 
 // Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
-// Google Drive access model:
-//   scope: "private"   - owned by user, optional shared list
+// Google Drive access model, in its words:
+//   scope: "private"   - owned by user, optional shared list and group grants
 //   scope: "folder"    - inherited access from parent entity
 //   scope: "public"    - public read-only to anyone
 //   scope: "internal"  - restricted to backend services
-// Column names (`owner`, `on`, `user`) are of the entity's own table;
-// `via` is a table name, `parent` an entity name whose access is private.
+//   scope: "group"     - the membership list: who is in which group
+// Column names (`owner`, `on`, `user`, `role`, `of`, `group` under scope
+// "group") are of the entity's own table; `via` is a table name, `parent` an
+// entity name whose access is private.
+//
+// A grant carries a Drive role. `shared.role` names the grant table's column
+// holding it, and a grant table without one grants "writer". A reader reads
+// the row and what is under it; a writer also changes both and edits its
+// grants, unless `writersCanShare: false`, Drive's setting of that name, keeps
+// the grants the owner's; only the owner deletes the row or hands it to
+// another owner, and is left its writer by a grant row the cluster writes.
+//
+// A grant names a user or, where `shared.group` names a second column of the
+// grant table, a group: the membership list's group id as it is written. A
+// grant row fills one of the two columns, and which one is the grantee's type.
 #Access: {
-	scope: "private" | "folder" | "public" | "internal"
+	scope: "private" | "folder" | "public" | "internal" | "group"
 	if scope == "private" {
 		close({
-			scope:  "private"
-			owner:  string
-			shared?: {via: string, on: string, user: string}
+			scope:   "private"
+			owner:   string
+			shared?: {via: string, on: string, user: string, group?: string, role?: string, writersCanShare?: bool}
+			groups?: [#GroupGrant, ...#GroupGrant]
 		})
 	}
 	if scope == "folder" {
@@ -562,7 +580,26 @@ import (
 			scope: "internal"
 		})
 	}
+	if scope == "group" {
+		close({
+			scope: "group"
+			group: string
+			user:  string
+		})
+	}
 }
+
+#Role: "reader" | "writer"
+
+// A row shared with a group it names: the group `<value of "of">:<group>`,
+// where `of` is a column of the row and its key when omitted, as Drive's
+// finance@acme is a name at a domain. Membership is the program's one
+// scope "group" entity, which the service writes.
+#GroupGrant: close({
+	group: =~"^[a-z][a-z0-9_]{0,30}$"
+	of?:   string
+	role:  #Role
+})
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
 
@@ -581,7 +618,8 @@ import (
 	server:  "replicated"
 }
 
-#Entity: E={
+#Entity: {
+	let E = self
 	name:  string
 	ir:    *name | string
 	table: string
@@ -592,7 +630,7 @@ import (
 	// to do that.
 	fields: [...{ordinal?: <=len(E.fields)}]
 	// A stated row meets its types' canonical forms where it meets its cel.
-	seed: [...{for f in E.fields if #TypeConstraint[f.type] != _|_ {(f.name)?: #TypeConstraint[f.type].valid}}]
+	seed:      [...{for f in E.fields if #TypeConstraint[f.type] != _|_ {(f.name)?: #TypeConstraint[f.type].valid}}]
 	_ordinals: {for f in E.fields if f.ordinal != _|_ {"\(f.ordinal)": f.name}}
 	// Every value names a guarantee, and they are monotonic in expense:
 	//
@@ -632,6 +670,7 @@ import (
 	if durability != "tab" && durability != "device" {
 		access?: #Access
 	}
+
 	// How the terminal reads the table: "eager" takes the whole shape before
 	// a screen reads it; "lazy" loads what each active query demands.
 	// #App.#read decides it for every server entity (read.cue), so an authored
@@ -642,12 +681,13 @@ import (
 	if !server {
 		read?: _|_
 	}
+
 	// Who writes rows here, derived at #App (writers.cue) from every
 	// declaration that names the entity; the card prints each as
 	// `kind:by op·op`. Nothing refuses two kinds of writer on one entity
 	// (PENDING.md).
 	writers: [...#Writer]
-	fields: [...#Field]
+	fields:  [...#Field]
 	// DDL: CREATE INDEX IF NOT EXISTS idx_<table>_<on> ON <table>
 	// USING <using> (<on>); emitted after the tables in 005.
 	indexes?: [...{on: string, using: *"btree" | "gin"}]
@@ -689,7 +729,7 @@ import (
 
 	// Derived from lifecycle-machine guards; the refusal names are shared by
 	// the server interpreter and the browser preflight.
-	validations: [Name=string]: #Validation & {name: Name, machine?: string, on?: [...string]}
+	validations: [string]~(Name,_): #Validation & {name: Name, machine?: string, on?: [...string]}
 
 	// Bootstrap rows: the rows a store holds before anyone writes one. A
 	// cluster durability renders them into 900_seed.sql; a `tab` entity has no
@@ -726,7 +766,7 @@ import (
 
 #Validation: {
 	machine?: string
-	on?: [...string]
+	on?:      [...string]
 	order?: [string]: [int, int]
 	name: string & =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
@@ -747,10 +787,10 @@ import (
 // run by mecha's compute service, whose services/compute/main.ts states the
 // contract.
 #Computation: {
-	name: string
-	src:  *"computations/\(name).js" | string
+	name:     string
+	src:      *"computations/\(name).js" | string
 	feldera?: string & !=""
-	steps?: string & !=""
+	steps?:   string & !=""
 	// The live entities it alone writes.
 	to: [...string] & [_, ...]
 	sinkWrites?: [string]: "replace" | "upsert"
@@ -762,24 +802,27 @@ import (
 			list.Contains(to, sink) & list.Contains(columns, "id") & true
 		}]
 	}
+
 	// App-relative paths of the committed wasm modules its jobs call, each
 	// named in a job by its file's stem.
 	wasm: *[] | [...string]
 	// What its module may use past the language, as an omnishell module
 	// declares Intl: Crypto among them. Undeclared, a use is a refusal.
-	endowments: *[] | [...mechaCluster.#CageEndowment]
+	endowments:  *[] | [...mechaCluster.#CageEndowment]
 	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 	queryTypes?: [string]: [...mechaCluster.#ComputationField & {type: #Type | #LegacyType}]
-	typedSinks: *false | bool
+	typedSinks:     *false | bool
 	declaredReads?: [...string]
 }
 
-#Pipeline: P={
+#Pipeline: {
+	let P = self
+
 	// Equivalent SQL recount for hosts without the CDC pipeline runtime.
 	portableDrain?: #Drain & {name: P.name}
-	name:    string
-	ir:      *name | string
-	trigger: *"cdc" | "schedule"
+	name:           string
+	ir:             *name | string
+	trigger:        *"cdc" | "schedule"
 	// Complex pipelines are assembly: `src` (under pipelines/) holds the whole
 	// rpk stream YAML, copied verbatim to docker/<app>-<name>.yaml. The file
 	// owns input, transform, and output alike — aggregate/bloblang/key/shim do
@@ -787,24 +830,24 @@ import (
 	// cannot see inside).
 	raw?: true
 	if raw != _|_ {
-		src: *"pipelines/\(name).yaml" | string
+		src:        *"pipelines/\(name).yaml" | string
 		note!:      string & !=""
 		delivery:   "unspecified"
 		transform?: _|_
 		key?:       _|_
 	}
 
-	from?:   string // source entity name (CDC events); cdc pipelines set it
-	to:      string // sink entity name (upsert, or scheduled mutation target)
-	group?:  string // bus consumer group; cdc pipelines set it
+	from?:  string // source entity name (CDC events); cdc pipelines set it
+	to:     string // sink entity name (upsert, or scheduled mutation target)
+	group?: string // bus consumer group; cdc pipelines set it
 	// Keyed aggregate: the transform groups source rows by this column and
 	// emits an ARRAY of sink rows; the sink upsert conflicts on the sink pk.
 	// Unset = singleton transform emitting one row.
 	key?: string
 	transform?: {
-		aggregate: string // PostgREST query the transform reads from the source table
-		src: *"pipelines/\(name).blobl" | string // assembly file holding the mapping
-		bloblang: string // its content — inlined where the consumer cannot reference files
+		aggregate: string                              // PostgREST query the transform reads from the source table
+		src:       *"pipelines/\(name).blobl" | string // assembly file holding the mapping
+		bloblang:  string                              // its content — inlined where the consumer cannot reference files
 	}
 	// A keyed aggregate's transform, written as a fold: empty(key),
 	// step(acc, row), combine(a, b), result(acc), with `harden` supplied by
@@ -877,7 +920,7 @@ import (
 	// Go-style duration of h/m/s units (e.g. "168h", "30m"); required when
 	// filter uses {cutoff}: cutoff = now - window.
 	window?: string
-	set?: {[string]: bool | int | string} // PATCH body for action "update"
+	set?:    {[string]: bool | int | string} // PATCH body for action "update"
 	// A cdc pipeline's browser twin of its bloblang: a pure ES module, rows →
 	// sink row, declared and served. The page's cluster runs no stream, so
 	// nothing executes it (docs/pipelines-and-schedules.md#below-the-cluster).
@@ -893,9 +936,8 @@ import (
 // the entity that exists. The ticker writes all five LAST, after the
 // declaration's own values, so nothing an app states can overwrite them.
 //
-// Combine with `list.Concat([#tickFields, [...]])`: cue 0.16 supersedes `+` on
-// lists and says so as an error, not a warning.
-#tickFields: [
+// Combine with `list.Concat([#tickFields, [...]])`: `+` on lists is not supported.
+#tickFields: [...#Field] & [
 	{name: "id", type: "uuid", pk: true},
 	{name: "schedule", type: "text"},
 	{name: "tick_at", type: "timestamptz"},
@@ -912,7 +954,8 @@ import (
 // instant, can be missed, and fires at most once for that instant. A pipeline
 // whose job is "make this predicate false, repeatedly" wants #Pipeline's own
 // trigger instead — it needs no identity, no watermark and no lateness.
-#Schedule: S={
+#Schedule: {
+	let S = self
 	name: string
 	ir:   *name | string
 	// Five fields, the only grammar. A step steps over `*` or a range
@@ -964,8 +1007,8 @@ import (
 	// A function whose answer moves with the date names a #Schedule's tick
 	// entity here, and the tick wakes it.
 	// Unqualified, as a change names its table: `public.x` would never match.
-	on: [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
-	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	on:     [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
+	call:   string & =~"^[a-z_][a-z0-9_]{0,62}$"
 	stream: *true | bool
 	// The JSON arguments of every call, each named as a function's argument
 	// is: the page's and the edge's clusters call `call(key => value, …)`.
@@ -992,7 +1035,7 @@ import (
 #RelationalOp: omnishell.#MutationOp & ("create" | "ensure" | "upsert" | "accumulate" | "update" | "delete")
 
 #RelationalEffect: {
-	schema?: string & =~"^[a-z_][a-z0-9_]*$"
+	schema?:       string & =~"^[a-z_][a-z0-9_]*$"
 	op:            #RelationalOp
 	table:         string
 	values?:       {[string]: _}
@@ -1004,7 +1047,7 @@ import (
 }
 
 #SqlHatchCall: {
-	name: string
+	name:  string
 	call:  string
 	args?: [...] | {[string]: _}
 }
@@ -1027,20 +1070,20 @@ import (
 	schema?: string & =~"^[a-z_][a-z0-9_]*$"
 	table:   string & =~"^[a-z_][a-z0-9_]*$"
 	key:     string & =~"^[a-z_][a-z0-9_]*$"
-	values: [_, ...]
+	values:  [_, ...]
 }
 
 #MechaSpawn: {machine: string & =~"^[a-z][a-z0-9_]*$", id: _, input: {[string]: _}, members: {[string]: _}}
-#MechaSend: {machine: string & =~"^[a-z][a-z0-9_]*$", id: _, event: string, payload: {[string]: _}}
+#MechaSend:  {machine: string & =~"^[a-z][a-z0-9_]*$", id: _, event: string, payload: {[string]: _}}
 
 #MechaAction: {
-	spawn?: #MechaSpawn
-	send?: #MechaSend
-	lock?: #MechaReadLock
+	spawn?:  #MechaSpawn
+	send?:   #MechaSend
+	lock?:   #MechaReadLock
 	assign?: {[string]: _}
 	effect?: #RelationalEffect | [...#RelationalEffect]
-	hatch?: #SqlHatchCall | [...#SqlHatchCall]
-	raise?: #MechaRaise | [...#MechaRaise]
+	hatch?:  #SqlHatchCall | [...#SqlHatchCall]
+	raise?:  #MechaRaise | [...#MechaRaise]
 	reject?: string
 }
 
@@ -1055,12 +1098,12 @@ import (
 // An arrow out of an invoking state. Its actions read the ledger's outcome as
 // the PL/pgSQL variable `outcome`: {target, kind, data, reconciled}, where kind
 // is done, failed or unknown.
-#OutcomeBranch: {target: string, guard?: string, actions?: #MechaAction | [...#MechaAction]}
+#OutcomeBranch:     {target: string, guard?: string, actions?: #MechaAction | [...#MechaAction]}
 #OutcomeTransition: string | #OutcomeBranch | [#OutcomeBranch, ...#OutcomeBranch]
 
 #MechaState: {
-	type?:    "final" | "normal"
-	on?: [Event=string]: #MechaTransitionValue
+	type?: "final" | "normal"
+	on?: [string]~(Event,_):              #MechaTransitionValue
 	after?: [=~"^(0|[1-9][0-9]{0,11})$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
 	// XState's invoke, whose actor is an external effect's handler: entering
 	// the state claims the effect, and only its outcome leaves.
@@ -1074,18 +1117,19 @@ import (
 }
 
 #LifecycleTransition: {
-	guard?: string | [string, ...string]
+	guard?:   string | [string, ...string]
 	actions?: #MechaAction | [...#MechaAction]
 }
 
 #LifecycleTransitionValue: #LifecycleTransition | #MechaAction | [...#MechaAction]
 
-#MechaMachine: M={
+#MechaMachine: {
+	let M = self
 	cortex?: {id: string, sourceEvents: [...string]}
 	name:    string
 	ir:      *name | string
 	entity:  string
-	guards: [Name=string]: #Validation & {name: Name}
+	guards: [string]~(Name,_): #Validation & {name: Name}
 	level: #EffectLevel
 	_actions: list.Concat([
 		[for _, tr in M._on for act in tr.actions {act}],
@@ -1110,20 +1154,20 @@ import (
 		}
 	}}
 	_timers: [if M.states != _|_ for sn, st in M.states if st.after != _|_
-		for ms, tr in st.after
-		for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
-			state: sn
-			"delay": ms
-			"branch": idx
-			target: t.target
-			if t.guard != _|_ {guard: t.guard}
-		}]
+	for ms, tr in st.after
+	for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+		state:    sn
+		"delay":  ms
+		"branch": idx
+		target:   t.target
+		if t.guard != _|_ {guard: t.guard}
+	}]
 	_timed: len(_timers) > 0
 
-	timing?: "BEFORE" | "AFTER"
+	timing?:  "BEFORE" | "AFTER"
 	field?:   string
 	initial?: string
-	states?: [StateName=string]: #MechaState
+	states?: [string]~(StateName,_): #MechaState
 	on?: {
 		insert?: #LifecycleTransitionValue
 		update?: #LifecycleTransitionValue
@@ -1135,7 +1179,8 @@ import (
 // cluster, performed by mecha's airlock against one sink and recorded in the
 // ledger (docs/decisions/2026-10-03-external-effects.md).
 // The sink an effect reaches on a release target; null where it names none.
-#SinkAt: S={
+#SinkAt: {
+	let S = self
 	sink:   _
 	target: string
 	out: [
@@ -1151,13 +1196,9 @@ import (
 	// Also the sink's Dapr binding name, so a DNS label.
 	name: =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
-	// The ledger key is "<name>:" and these fields of the invoking machine's
-	// entity: one as its text, several JSON-encoded. It is also the sink's
-	// idempotency key, so it names the instance and never the input's content.
-	key: *["id"] | [string, ...string]
 	// XState's input: what the handler is handed, frozen into the ledger at
 	// the claim. "NEW.<col>" reads the row, {raw: sql} is an expression,
-	// anything else a literal.
+	// anything else a literal. A read's is what its path expands.
 	input: {[string]: _} | *{}
 	// An https origin naming a host by a DNS name of two labels or more, as
 	// mecha spells it (#Origin); a name that resolves inward is not refused,
@@ -1172,36 +1213,118 @@ import (
 	// `targets` overrides the sink per release target, as ai.targets does the
 	// models: the entry wins, the rest take the default, and a target left with
 	// neither is refused. docker is the compose stack every app launches and
-	// integrates on, simulators included. Sandbox or live is the app's own value.
+	// integrates on, simulators included. Sandbox or live is the app's own
+	// value, or, on cloudflare, each deployment's: `origin: {secret: NAME}`
+	// is read from the dispatcher's secret at each run, as the credential is,
+	// so one release reaches a vendor's sandbox from staging and its live API
+	// from production.
 	// k8s alone may name an in-cluster `service` instead (#InClusterSink;
 	// k8s/docs/index.md, "The airlock").
 	sink: {
-		origin?: mechaCluster.#Origin
+		origin?: mechaCluster.#Origin | #NamedOrigin
 		bridge?: string
 		ai?:     mechaCluster.#AiModality
 		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
 		targets?: {
-			[("docker" | "cloudflare" | "gcp" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
-			k8s?: {origin?: mechaCluster.#Origin, bridge?: string, service?: #InClusterSink}
+			[("docker" | "cloudflare" | "gcp" | "aws")]: {origin?: mechaCluster.#Origin | #NamedOrigin, bridge?: string}
+			k8s?: {origin?: mechaCluster.#Origin | #NamedOrigin, bridge?: string, service?: #InClusterSink}
 		}
 		credential?:  #Credential
 		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
 	}
-	// What a handler does when the ledger shows an earlier entry that may have
-	// reached the sink. An idempotent sink is simply called again; a repeat
-	// is called again too, and `note` says why a duplicate is acceptable.
-	{sink: idempotent: true} | {
-		sink: idempotent: false
-		reentry: *"reconcile" | "unknown" | "repeat"
+
+	// A read: the effect is this HTTP request, a GET, whose answer is the
+	// outcome, so it has no handler (docs/decisions/2026-10-03-external-effects.md#reads).
+	// `path` is an RFC 6570 template over `input`: `{var}` a path segment,
+	// `{?a,b}` and `{&a,b}` the query. A GET is safe (RFC 9110 §9.2.1): nothing
+	// claims it, so it states no key, idempotency, reentry, note or attempts.
+	// Like every effect it is a machine's: a screen asks it by writing the row
+	// whose state invokes it, as the row's own, and sees the answer land there.
+	request?: {
+		method: "GET"
+		path:   =~"^/([A-Za-z0-9._~!$&'()*+,;=:@/?-]|\\{[?&]?[A-Za-z_][A-Za-z0-9_]*(,[A-Za-z_][A-Za-z0-9_]*)*\\})*$"
+		// Refused below with the reason: a GET's body has no meaning (RFC 9110 §9.3.1).
+		body?: _
 	}
-	// The judgment the compiler cannot make: the sink's idempotency and what
-	// a repeat costs are claims about a peer.
-	note: string & !=""
-	// Thrown errors tolerated before the outcome is unknown.
-	attempts: *5 | int & >=1
-	// The environment variables whose values the handler is handed at each
-	// call, a key to sign with being the common case. Never in the ledger.
-	secrets?: [...#SecretName]
+	if request == _|_ {
+		// The ledger key is "<name>:" and these fields of the invoking machine's
+		// entity: one as its text, several JSON-encoded. It is also the sink's
+		// idempotency key, so it names the instance and never the input's content.
+		key: *["id"] | [string, ...string]
+		// What a handler does when the ledger shows an earlier entry that may have
+		// reached the sink. An idempotent sink is simply called again; a repeat
+		// is called again too, and `note` says why a duplicate is acceptable.
+		{sink: idempotent: true} | {
+			sink: idempotent: false
+			reentry: *"reconcile" | "unknown" | "repeat"
+		}
+
+		// The judgment the compiler cannot make: the sink's idempotency and what
+		// a repeat costs are claims about a peer.
+		note: string & !=""
+		// Thrown errors tolerated before the outcome is unknown.
+		attempts: *5 | int & >=1
+	}
+	if request != _|_ {
+		// Refused below with the reason, rather than as words a read lacks.
+		key?: _
+		sink: idempotent?: _
+		reentry?:  _
+		note?:     _
+		attempts?: _
+
+		// The int32 field of the invoking entity counting the row's entries
+		// into the invoking state, and its uuid field naming the row's
+		// incarnation, which a row deleted and made again under its key does
+		// not share. The interpreter alone writes both: the incarnation once,
+		// at the insert, and the count, adding one as the row enters. A read's
+		// journal key is `<name>:<row's key>:<incarnation>:<count>`: replay,
+		// re-running the row's transitions, reaches the same key and is
+		// answered from the journal.
+		count:       string
+		incarnation: string
+		// Freshness, in Cache-Control's own syntax (RFC 9111 §5.2.2), for an
+		// answer whose sink sends neither Cache-Control nor Expires, as many
+		// legacy services send none: `"max-age=60"`. The airlock's cache is
+		// shared by every row's read, so it keeps an answer to an authorized
+		// request only if it says `public`, `s-maxage` or `must-revalidate`
+		// (RFC 9111 §3.5), and a private one never.
+		cacheControl?: =~"^[a-z-]+(=(\"[^\"]*\"|[0-9]+|[a-z-]+))?(, ?[a-z-]+(=(\"[^\"]*\"|[0-9]+|[a-z-]+))?)*$"
+		// got's own options, the part JSON spells (got's RetryOptions and
+		// Delays, in milliseconds). Absent, two quick retries on 408, 429,
+		// 5xx and network errors, honouring Retry-After up to 5 s, and 5 s a
+		// request; the whole read is bound at 20 s.
+		got?: {
+			retry?: close({
+				limit?:         int & >=0 & <=5
+				statusCodes?:   [...(int & >=100 & <=599)]
+				errorCodes?:    [...=~"^E[A-Z_]+$"]
+				backoffLimit?:  int & >=0
+				noise?:         int & >=0
+				maxRetryAfter?: int & >=0
+			})
+			timeout?: close({
+				lookup?:        int & >0
+				connect?:       int & >0
+				secureConnect?: int & >0
+				socket?:        int & >0
+				send?:          int & >0
+				response?:      int & >0
+				read?:          int & >0
+				request?:       int & >0 & <=20000
+			})
+		}
+	}
+
+	// What the handler is handed beside its input at each call, never in the
+	// ledger: an environment variable by name, a key to sign with being the
+	// common case, or `{field: <name>}`, a secret field of the invoking
+	// entity, the value its reader typed, as Kubernetes' `secretKeyRef` names
+	// a key of a Secret. A field secret's value is the handler's `secrets[<name>]`.
+	// A read has no handler, so it takes none.
+	secrets?:      [...(#SecretName | close({field: string}))]
+	_envSecrets:   [if secrets != _|_ for s in secrets if (s & string) != _|_ {s}]
+	_fieldSecrets: [if secrets != _|_ for s in secrets if (s & string) == _|_ {s.field}]
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
 	endowments?: [...mechaCluster.#CageEndowment]
@@ -1232,9 +1355,39 @@ import (
 #Signal: {
 	machine: string
 	event:   string
-	id: {path: true} | {body: [string, ...string]}
-	count: string
+	id:      {path: true} | {body: [string, ...string]}
+	count:   string
 }
+
+// A path of the app's own, answered at another the door already answers:
+// Next.js's `rewrites`, a subset. `source` is path-to-regexp's literal and
+// `:name` segments, a parameter being letters, digits and `. _ ~ -`;
+// `destination` is a PostgREST path under `/crud`, naming the parameters it
+// uses, and takes the request's own query after its own. `methods`, as
+// Vercel's routes spell it, narrows what is otherwise every method. The
+// request is handed on as it came, its `Authorization` included, with the
+// path it asked for in `X-Rewrite-Path`. What the subset leaves out (`has`,
+// `missing`, wildcards, patterns) is refused, never ignored.
+#Rewrite: {
+	source:      =~"^(/([A-Za-z0-9][A-Za-z0-9_-]*|:[a-z][A-Za-z0-9_]*))+$" & !~"^/(crud|signal|electric|auth|poke|blob-claim|blobs|img|health|omnishell|shell|seed-assets)(/|$)"
+	destination: =~"^/crud/(rpc/)?[a-z][a-z0-9_]*(\\?[^\\s{}\"`\\\\#]*)?$"
+	methods?: [#RewriteMethod, ...#RewriteMethod] & list.UniqueItems()
+}
+#RewriteMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
+
+// A role a token may name beside the cluster's own `anon`, `app_user` and
+// `service`: PostgreSQL's NOLOGIN role, which PostgREST's login may switch to
+// and which holds nothing else. What it may do is the app's own SQL (GRANT
+// EXECUTE on a function, a policy naming it); it never bypasses row-level
+// security. A token naming it comes from an issuer the release trusts
+// (docs/identity.md#token-roles-and-trusted-issuers). `note` says who acts as
+// it, and why.
+#TokenRole: close({
+	note: string & !=""
+})
+// A Postgres role name none of the cluster's own roles, nor one Postgres or a
+// managed database reserves. Emitted SQL quotes it.
+#TokenRoleName: =~"^[a-z][a-z0-9_]{0,62}$" & !~"^(anon|app_user|service|electric|authenticator|postgres|public|none|app|streaming_replica)$" & !~"^(pg_|cloudsql|rds|azure_)"
 
 // What a sink reads a caller's credential from: `Authorization: Bearer <key>`
 // is `{scheme: "Bearer", secret: "KEY"}`; an `X-Api-Key` header is
@@ -1244,7 +1397,7 @@ import (
 // HTTP's own. A header other than Authorization follows a redirect to any
 // host, which the record states as the residual.
 #Credential: {
-	header: *"Authorization" | =~"^[A-Z][A-Za-z0-9-]*$" & !~"(?i)^(Idempotency-Key|Content-Type|Content-Length|Accept|Host|Transfer-Encoding|Traceparent|Tracestate|Baggage)$"
+	header:  *"Authorization" | =~"^[A-Z][A-Za-z0-9-]*$" & !~"(?i)^(Idempotency-Key|Content-Type|Content-Length|Accept|Host|Transfer-Encoding|Traceparent|Tracestate|Baggage)$"
 	scheme?: =~"^[A-Za-z][A-Za-z0-9-]*$"
 	secret:  #SecretName
 }
@@ -1253,16 +1406,20 @@ import (
 // domain (https://*.example.com), or any port of a host (https://localhost:*).
 #FrameSource: =~"^https://(\\*\\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)*[a-z]([a-z0-9-]*[a-z0-9])?(:([0-9]{1,5}|\\*))?$"
 
+// Only the edge's airlock reads its environment per call; a daprd endpoint's
+// baseUrl is fixed when the stack starts.
+#NamedOrigin: close({secret: #SecretName})
+
 // An environment variable an effect declares, never one the cluster's own
 // services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
 // dispatcher Worker and BRIDGE_<NAME>_URL addresses one on the mesh.
-#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$" & !~"^BRIDGE_"
+#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|PGRST_JWKS|TRUSTED_JWKS|TRUSTED_AUDIENCE|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS|AIRLOCK_SEAL_KEY|AIRLOCK_SEAL_KEY_PREVIOUS|AIRLOCK_SEAL_PUBLIC|AIRLOCK_SEAL_DEV)$" & !~"^BRIDGE_"
 
 #ActivepiecesAlias:      string & =~"^[a-zA-Z][a-zA-Z0-9_]*$"
 #ActivepiecesPath:       string & =~"^\\./pieces/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"
 #ActivepiecesSchemaPath: string & =~"^\\./pieces/([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.(input|output|auth)\\.schema\\.json$"
-#ActivepiecesJSON: null | bool | number | string | [...#ActivepiecesJSON] | {[string]: #ActivepiecesJSON}
-#MailAddress: string & =~"^[^\\s@<>\",;]+@[^\\s@<>\",;]+\\.[^\\s@<>\",;]+$"
+#ActivepiecesJSON:       null | bool | number | string | [...#ActivepiecesJSON] | {[string]: #ActivepiecesJSON}
+#MailAddress:            string & =~"^[^\\s@<>\",;]+@[^\\s@<>\",;]+\\.[^\\s@<>\",;]+$"
 #MailTargets: {
 	pages?: {
 		publicKey:  string & !=""
@@ -1271,7 +1428,8 @@ import (
 	}
 	cloudflare?: {recipients: [#MailAddress, ...#MailAddress]}
 }
-#Activepieces: AP={
+#Activepieces: {
+	let AP = self
 	lock: string & =~"^\\./pieces/([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.lock$"
 	limits: {
 		timeoutMs:       *8000 | int & >0 & <=8000
@@ -1285,12 +1443,12 @@ import (
 		}
 	}
 	actions: [#ActivepiecesAlias]: {
-		piece:        #ActivepiecesAlias
-		action:       string & =~"^[a-zA-Z][a-zA-Z0-9_-]*$"
-		inputSchema:  #ActivepiecesSchemaPath
-		outputSchema: #ActivepiecesSchemaPath
-		auth?: {jsonSecret: #SecretName, schema: #ActivepiecesSchemaPath}
-		fixedProps: *{} | {[string]: #ActivepiecesJSON}
+		piece:               #ActivepiecesAlias
+		action:              string & =~"^[a-zA-Z][a-zA-Z0-9_-]*$"
+		inputSchema:         #ActivepiecesSchemaPath
+		outputSchema:        #ActivepiecesSchemaPath
+		auth?:               {jsonSecret: #SecretName, schema: #ActivepiecesSchemaPath}
+		fixedProps:          *{} | {[string]: #ActivepiecesJSON}
 		idempotencyKeyProp?: #ActivepiecesAlias
 		mail?:               #MailTargets
 		if mail != _|_ {
@@ -1310,25 +1468,25 @@ import (
 #DuckStreamPipeline: #DuckStreamSQL | #DuckStreamCompute
 
 #DuckStreamSQL: {
-	name: string
-	ir:   *name | string
-	sql:  string
-	sources: [...string]
-	sink:  string
-	tempo: *"hot" | "cold"
+	name:       string
+	ir:         *name | string
+	sql:        string
+	sources:    [...string]
+	sink:       string
+	tempo:      *"hot" | "cold"
 	operators?: [...("tumble" | "hop" | "session" | "distinct" | "interval_join" | "cross_join")]
 }
 
 #DuckStreamCompute: {
-	name:    string
-	ir:      *name | string
-	backend: "compute"
-	src:     string & !=""
+	name:     string
+	ir:       *name | string
+	backend:  "compute"
+	src:      string & !=""
 	feldera?: string & !=""
-	steps?: string & !=""
+	steps?:   string & !=""
 	sources: [string]: {
 		entities: [...string] & [_, ...]
-		read: "snapshot"
+		read:     "snapshot"
 	}
 	sinks: [string]: {
 		entity:      string
@@ -1337,8 +1495,8 @@ import (
 		version:     "latest"
 		transaction: string & !=""
 	}
-	wasm: *[] | [...string]
-	endowments: *[] | [...mechaCluster.#CageEndowment]
+	wasm:        *[] | [...string]
+	endowments:  *[] | [...mechaCluster.#CageEndowment]
 	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 	queryTypes?: [string]: [...mechaCluster.#ComputationField & {type: #Type | #LegacyType}]
 
@@ -1351,12 +1509,12 @@ import (
 	// resulting key string.
 	// "date" submits day precision: empty → JSON null, else the picked day
 	// pinned to 00:00:00Z — the one-clock day convention.
-	control:  "text" | "checkbox" | "textarea" | "select" | "hidden" | "datetime" | "date" | "file"
-	required: *false | bool
+	control:         "text" | "checkbox" | "textarea" | "select" | "hidden" | "datetime" | "date" | "file"
+	required:        *false | bool
 	maxLength?:      int
 	placeholder?:    string
 	invalidMessage?: string
-	options?: [...string] // select controls
+	options?:        [...string] // select controls
 	// hidden controls; resolved at submit: `{param.x}`, `{now}`, and the
 	// literal `null` meaning SQL NULL.
 	value?: string
@@ -1372,7 +1530,7 @@ import (
 	filter?: string
 	// ir flow id this form realizes; unset when the form realizes no single
 	// flow (row-scoped deletes, or one form serving several flows).
-	flow?: string
+	flow?:  string
 	fields: [...#FormField]
 }
 
@@ -1400,8 +1558,8 @@ import (
 	// Server-computed filters omit clauses. Embed dependencies include nested
 	// relations, named by table or foreign-key column even for server selects.
 	clauses?: [...{col: string, op: string}]
-	embeds?: [...string]
-	limit?: int & >0
+	embeds?:  [...string]
+	limit?:   int & >0
 	// Every column an order it can be in names.
 	orders: [...string]
 }
@@ -1426,12 +1584,13 @@ import (
 	writes: [...#Write]
 }
 
-#Screen: S={
+#Screen: {
+	let S = self
 	hatches: *[] | [...string]
-	name:  string
-	ir:    *name | string
-	title: string
-	route: string // may contain `:param` segments; params reach filters, hidden values, and `{param.x}` interpolation
+	name:    string
+	ir:      *name | string
+	title:   string
+	route:   string // may contain `:param` segments; params reach filters, hidden values, and `{param.x}` interpolation
 	// A `?` makes a segment optional, and only the last segment may be: the
 	// terminal matches it there alone, and the door expands it there alone.
 	route: =~"^[^?]*(:[a-zA-Z_][a-zA-Z0-9_]*\\?)?$"
@@ -1444,7 +1603,7 @@ import (
 	slug?: string
 	// Additional literal path segments, keyed by their default spelling and
 	// resolved through the same catalogues as the first segment's slug.
-	segments?: [Segment=string & =~"^[a-z0-9]+(-[a-z0-9]+)*$"]: string
+	segments?: [string & =~"^[a-z0-9]+(-[a-z0-9]+)*$"]~(Segment,_): string
 	// The message key the terminal draws this route's STRIP label from, the
 	// counterpart of `slug` for the word rather than the address. `title`
 	// stays the default-language spelling and is what an app declaring no
@@ -1478,10 +1637,11 @@ import (
 	//   spa: client-side single page app shell
 	ssr: "spa" | "ssg" | "ssr"
 	if S.prerender {ssr: "ssg"}
-	if S.ssr == "ssg" {prerender: true}
+
 	// A slugged route's authored pattern is what the default locale's
 	// catalogue must agree with, so it needs a first segment to translate.
 	if S.slug != _|_ {route: =~"^/[a-z0-9][a-z0-9-]*(/|$)"}
+
 	// Derived from the markup (program_derived.cue). An assembly screen's html
 	// exists before any derivation, so a screen the derived file misses is a
 	// stale generation and the export fails incomplete rather than shipping a
@@ -1490,7 +1650,7 @@ import (
 	// before the first export, so the first derivation cannot see it —
 	// write.ts's fixpoint re-derives after writing and re-exports until the
 	// derived file holds what the emitted markup says.
-	reads!: [...#Read]
+	reads!:  [...#Read]
 	writes!: [...#Write]
 	charts!: [...#Chart]
 	if S.markup != _|_ {
@@ -1498,14 +1658,15 @@ import (
 		writes: *[] | [...#Write]
 		charts: *[] | [...#Chart]
 	}
+
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions
 	// (their tags survive in it as inert wrappers), and files.html becomes an
 	// emitted file rather than an assembly source. Absent, the screen is
 	// assembly authored at files.html as ever.
 	markup?: string
-	forms: [...#Form]
-	states: [...string] // ir frame ids are "\(name)-\(state)"
+	forms:   [...#Form]
+	states:  [...string] // ir frame ids are "\(name)-\(state)"
 	// How many instances of this screen the terminal's navigation stack holds
 	// once the user leaves it: the DOM stays, the subscriptions stop, and
 	// coming back repaints before it refreshes. A parametrized route would
@@ -1520,13 +1681,28 @@ import (
 	// static href. A trailing `:name?` is optional, and a route may list the
 	// addresses it takes with it as further strip entries, each a link of its
 	// own that is current at its own address: the shelves of a library.
+	// Optional named stroke icon (`#NavIcon`) rendered inside the route's link
+	// on `body > nav`, and `iconOnly: true` for compact utility routes (such as
+	// rules or stats) whose visible chrome is the icon while screen readers,
+	// `aria-label`, and `title` retain the localized label.
+	icon?:     #NavIcon
+	iconOnly?: bool
+	if S.iconOnly != _|_ if S.iconOnly {
+		icon: #NavIcon
+	}
 	strip: *true | bool
 	entries: *[] | [...{
-		label:  string
-		key?:   string
+		let E = self
+		label:     string
+		key?:      string
+		icon?:     #NavIcon
+		iconOnly?: bool
+		if E.iconOnly != _|_ if E.iconOnly {
+			icon: #NavIcon
+		}
 		params: [string]: string
 	}]
-	paths: [Name=string]: {states: [...string], accepts: [...string]}
+	paths: [string]~(Name,_): {states: [...string], accepts: [...string]}
 	// Assembly files (app-relative): the screen's semantics live in these
 	// directly generated artifacts, not in CUE. reads/forms above are the
 	// structured source they are generated from — the compiler owns their
@@ -1547,6 +1723,7 @@ import (
 		if S.markup != _|_ {
 			handlers: *[] | [...string]
 		}
+
 		// The control adapters the screen's markup names (data-value-adapter).
 		// Apart from handlers because the role decides the cage: an adapter ends
 		// in a map of pure functions, and its compartment is endowed with Intl.
@@ -1580,16 +1757,18 @@ import (
 	// Derived from the `data-accepts` of the ir element `ir` names (pronto
 	// derive.ts): the design is the one statement of what a test settles.
 	accepts: [...string]
-	says:  string
-	given: _
-	when:  string
-	then:  string // CEL over injected input/output/error
+	says:    string
+	given:   _
+	when:    string
+	then:    string // CEL over injected input/output/error
 }
 
 // A locale is ONE BCP 47 tag and nothing beside it: `pt` and `pt-BR` are
 // different locales, not spellings of one, and the tag is the key so there is
 // nowhere to write a second, disagreeing name for either.
-#I18n: I={
+#I18n: {
+	let I = self
+
 	// The locale served unprefixed, and the one x-default names. A default
 	// naming a locale the app does not carry is a root resolving to nothing,
 	// so it is constrained to a key of `locales`.
@@ -1625,7 +1804,7 @@ import (
 #Favicon: string | #FaviconItem | [...(string | #FaviconItem)]
 
 #PreconnectItem: {
-	href:         string & !~"\\.\\." & ( =~"^https?://" | =~"^//" )
+	href:         string & !~"\\.\\." & (=~"^https?://" | =~"^//")
 	crossorigin?: bool
 }
 
@@ -1688,9 +1867,10 @@ import (
 	extra?:   [...string]
 }
 
-#App: A={
+#App: {
+	let A = self
 	state: {
-		entities: [Name=string]: #Entity & {name: Name}
+		entities: [string]~(Name,_): #Entity & {name: Name}
 		// DDL table-order override: must list every entity, parents before
 		// children (a `ref` REFERENCES needs its target table emitted first).
 		// Unset = entity declaration order, which must itself be parents-first.
@@ -1714,7 +1894,7 @@ import (
 		// holds every entity.
 		baseline?: {
 			entities: [...or([for n, e in A.state.entities if e.server {n}])]
-			after: =~"^[0-9]+$"
+			after:    =~"^[0-9]+$"
 			// For each released later-entity migration the app keeps in
 			// state.migrations, the digest of what the emitter generates for
 			// its entity now: the change since is carried by a later migration.
@@ -1722,6 +1902,10 @@ import (
 		}
 		// Each a route a provider posts to (#Signal).
 		signals?: [=~"^[a-z][a-z0-9-]*$"]: #Signal
+		// Each a path answered at another under /crud (#Rewrite), on a container target.
+		rewrites?: [=~"^[a-z][a-z0-9-]*$"]: #Rewrite
+		// Each a role a token may name beside the cluster's own (#TokenRole).
+		tokenRoles?: [#TokenRoleName]: #TokenRole
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's
@@ -1734,12 +1918,14 @@ import (
 			actors?:   #StepDigits
 			graphile?: #StepDigits
 			airlock?:  #StepDigits
+			jobKey?:   #StepDigits
 			note!:     string & !=""
 		}
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
 		// internal form the compilers read, derived.
-		mecha: reducers: [Name=string]: H={
+		mecha: reducers: [string]~(Name,_): {
+			let H = self
 			machine: mechaCluster.#Machine & {config: id: Name}
 			rules:   string
 			reducer: (#Reducer & {machine: H.machine}).out
@@ -1747,7 +1933,7 @@ import (
 		// Pure Jessie the database calls inside a transaction, compiled to
 		// `public.fn_<name>(jsonb) RETURNS jsonb`
 		// ([[docs/decisions/2026-11-05-database-jessie#Functions]]).
-		functions?: [Name=string & =~"^[a-z][a-z0-9_]{0,30}$"]: {
+		functions?: [string & =~"^[a-z][a-z0-9_]{0,30}$"]~(Name,_): {
 			rules: string & =~"^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*\\.js$"
 			fuel:  int & >0 & <=1000000
 			note:  string & !=""
@@ -1768,24 +1954,24 @@ import (
 		// Typed by the grammar mecha's cluster is given them in, which is
 		// pgroll's own, so an operation this does not accept is one pgroll
 		// would not accept.
-		migrations?: [grammar.#Name]: grammar.#Migration
-		pipelines: [Name=string]: #Pipeline & {name: Name}
-		drains: [Name=string]: #Drain & {name: Name}
-		computations: [Name=string]: #Computation & {name: Name}
-		schedules: [Name=string]: #Schedule & {name: Name}
-		mecha: rows: [Name=string]: #MechaMachine & {name: Name}
+		migrations?: [grammar.#Name]:    grammar.#Migration
+		pipelines: [string]~(Name,_):    #Pipeline & {name: Name}
+		drains: [string]~(Name,_):       #Drain & {name: Name}
+		computations: [string]~(Name,_): #Computation & {name: Name}
+		schedules: [string]~(Name,_):    #Schedule & {name: Name}
+		mecha: rows: [string]~(Name,_): #MechaMachine & {name: Name}
 		if A.state.cortex != _|_ {
 			mecha: rows: {for chartName, sourceChart in A.state.cortex if sourceChart.config.meta != _|_ if sourceChart.config.meta.host != _|_ if sourceChart.config.meta.host == "mecha" {
 				(chartName): {
 					name: chartName
 					cortex: {
-						id: sourceChart.config.id
+						id:           sourceChart.config.id
 						sourceEvents: [for _, actor in sourceChart.setup.actors if actor.via == "query" {actor.event}]
 					}
 					entity:  sourceChart.config.meta.entity
 					field:   sourceChart.config.meta.field
 					initial: sourceChart.config.initial
-					guards: {}
+					guards:  {}
 					states: {for stateName, state in sourceChart.config.states {
 						(stateName): {
 							if state.type != _|_ {type: state.type}
@@ -1798,8 +1984,8 @@ import (
 							}
 							if state.invoke != _|_ {
 								invoke: {
-									src: state.invoke.src
-									onDone: (#CortexMechaOutcome & {transition: state.invoke.onDone, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions}).out
+									src:     state.invoke.src
+									onDone:  (#CortexMechaOutcome & {transition: state.invoke.onDone, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions}).out
 									onError: (#CortexMechaOutcome & {transition: state.invoke.onError, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions}).out
 								}
 							}
@@ -1808,12 +1994,15 @@ import (
 				}
 			}}
 		}
+
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program writes at effects/<name>.js, which derive bundles with the
 		// modules it imports into services/airlock/effects/<name>.js, the one
 		// module the airlock loads (libraries/mecha/services/airlock).
-		effects?: [Name=string]: #ExternalEffect & {name: Name}
-		// An Airlock-facing endpoint of a declared container hatch.
+		effects?: [string]~(Name,_): #ExternalEffect & {name: Name}
+		// An Airlock-facing endpoint of a declared container hatch, or of an
+		// isolate hatch by `isolate`, whose container, port and appliance form
+		// pronto derives ([[docs/isolate-hatches]]).
 		// A bridge runs as its simulator in the local stack and as its container
 		// on the release targets it names; elsewhere its effects fail at run time
 		// ([[docs/container-bridges#Targets]]). `docker` lowers a bridge as a
@@ -1822,8 +2011,8 @@ import (
 		// Container of the dispatcher Worker, so its container needs a
 		// Dockerfile. Naming another is refused here rather than failing every
 		// call there.
-		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name, targets: *[] | [...("docker" | "cloudflare")]}
-		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
+		bridges?: [string]~(Name,_):     mechaCluster.#Bridge & {name: Name, targets: *[] | [...("docker" | "cloudflare")]}
+		duckstreams?: [string]~(Name,_): #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —
 		// {"<Entity>": [row, ...]}. A row in the package is re-judged by every
@@ -1868,7 +2057,7 @@ import (
 		// browser's alone, so the single-label host mecha refuses to dial
 		// (localhost) is a frame's to name.
 		resources?: [string]: {
-			kind: "img" | "font" | "media" | "frame" | "connect"
+			kind:   "img" | "font" | "media" | "frame" | "connect"
 			source: string
 			if kind == "img" {source: mechaCluster.#Origin | "https:"}
 			if kind == "frame" {source: mechaCluster.#Origin | #FrameSource}
@@ -1889,7 +2078,7 @@ import (
 			required: bool
 			service:  string
 			mode:     *"passkey" | string
-			self?: {route: string, name?: {table: string, column: string}}
+			self?:    {route: string, name?: {table: string, column: string}}
 			// Where sign-in is not required, the strip offers a guest a passkey:
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
@@ -1960,14 +2149,15 @@ import (
 			// app's origin), the scope and further authorization parameters.
 			// Without a client here the deployment must give one. Never a
 			// secret, and never the terminal's.
-			provider?: [Name=string]: {
+			provider?: [string]~(Name,_): {
 				_providersPresent: true & (providers != _|_)
-				_named: true & list.Contains(providers, Name)
-				issuer?:   string
-				internal?: string
-				client?:   string
-				scope?:    string
-				params?:   string
+				_named:            true & list.Contains(providers, Name)
+				issuer?:           string
+				releaseIssuer?:    string
+				internal?:         string
+				client?:           string
+				scope?:            string
+				params?:           string
 			}
 		}
 		// The app ships a native host beside the web one, so every route
@@ -1988,6 +2178,7 @@ import (
 			plan: *"free" | "paid"
 		}
 		if edgeImages != _|_ {blobs: true}
+
 		// Files that are part of the app, as its code is: named by their sha256,
 		// served at /seed-assets/<file> and read by code, never by a row. Every
 		// { file, sha256 } the app-relative manifest names, fetched from the
@@ -2003,19 +2194,31 @@ import (
 		// other object. Pages has no blob storage, and inlines them.
 		seedBlobs?: dir: string
 		if seedBlobs != _|_ {blobs: true}
+
 		// First-class 3-tier AI model architecture (`browser`, `cheap`, `heavy`)
 		// with per-tier and per-release-target model overrides. Backend tiers
 		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the
 		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
+		// On cloudflare a backend tier may be `{secret: NAME, routes: {...}}`:
+		// each deployment's NAME selects a route at each call, so staging and
+		// production differ by a setting, not a build. NAME is a dispatcher
+		// secret the publish carries or finds held, and verify asks for; a
+		// route's provider key is required only where it is selected.
 		ai?: {
-			text?:    *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
-			image?:   *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
-			models?:  mechaCluster.#AiTierOverrides
-			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
+			text?:   *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
+			image?:  *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
+			models?: mechaCluster.#AiTierOverrides
+			targets?: {
+				[("browser" | "pages" | "docker" | "local" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
+				cloudflare?: mechaCluster.#AiEdgeOverrides
+			}
 		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
-		// the program's cluster unification beside it. A `sql` or `proto` hatch
+		// the program's cluster unification beside it. An `isolate` hatch is a
+		// container of another shape: a module in the Workers format that
+		// pronto bundles and serves itself, from `entrypoint` among `files`
+		// ([[docs/isolate-hatches]]). A `sql` or `proto` hatch
 		// withholds files from the lint that reads every other one — squawk over
 		// the SQL, buf breaking over the protos — and `files` names them,
 		// app-relative, as exact paths.
@@ -2025,9 +2228,10 @@ import (
 		// and escaping them is a declaration. Because every hatch carries `ir`,
 		// that declaration is also an element in ir.html, which is what makes an
 		// exemption reviewable rather than a line in a tool's config.
-		hatches: [Name=string]: H={
+		hatches: [string]~(Name,_): {
+			let H = self
 			ir:   *Name | string
-			kind: "container" | "sql" | "proto" | "host-dom"
+			kind: "container" | "isolate" | "sql" | "proto" | "host-dom"
 			note: string
 			edge?: {
 				kind:  *"worker" | "worker"
@@ -2037,19 +2241,20 @@ import (
 				environment: *[] | [...(string & =~"^[A-Z][A-Z0-9_]*$")]
 				// Names only: the values live in the Worker's secret store, and no release
 				// reads or uploads them ([[docs/release-targets#Keys]]).
-				secrets: *[] | [...(string & =~"^[A-Z][A-Z0-9_]*$")]
+				secrets:          *[] | [...(string & =~"^[A-Z][A-Z0-9_]*$")]
 				publicAttributes: *{} | {[string & =~"^data-[a-z][a-z0-9-]*$"]: string}
-				email?: {name: string & =~"^[A-Z][A-Z0-9_]*$", recipients: [string & =~"^[^@ ]+@[^@ ]+\\.[^@ ]+$", ...string]}
+				email?:           {name: string & =~"^[A-Z][A-Z0-9_]*$", recipients: [string & =~"^[^@ ]+@[^@ ]+\\.[^@ ]+$", ...string]}
 			}
 			if H.edge != _|_ {kind: "container"}
+
 			// The container tier's counterpart of `edge`: caddy proxies `route`,
 			// path kept, to the cluster target of the hatch's name on `port`,
 			// which the program defines beside it. That service is part of every
 			// launch, and the tree every container door serves carries
 			// `publicAttributes` ([[docs/edge-hatches#The cluster's door]]).
 			door?: {
-				route: string & =~"^/[A-Za-z][A-Za-z0-9_-]*$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice|health|omnishell|shell)$"
-				port:  int & >0 & <65536
+				route:            string & =~"^/[A-Za-z][A-Za-z0-9_-]*$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice|health|omnishell|shell)$"
+				port:             int & >0 & <65536
 				publicAttributes: *{} | {[string & =~"^data-[a-z][a-z0-9-]*$"]: string & =~"^[A-Za-z0-9_.:-]*$"}
 			}
 			if H.door != _|_ {kind: "container"}
@@ -2059,10 +2264,29 @@ import (
 				note: !=""
 			}
 			if H.kind == "host-dom" {
-				note: !=""
-				src!: string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
+				note:  !=""
+				src!:  string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
 				files: [string, ...string] & [...(string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")]
 			}
+			// The module the bundle starts from, one of `files`, which hold
+			// everything it imports beside its packages (its deno.json and lock
+			// among them), and the heap the isolate may hold, in MiB, which a
+			// Cloudflare Worker caps at 128.
+			if H.kind == "isolate" {
+				note:        !=""
+				entrypoint!: string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.(ts|js|mjs)$" & !~"(^|/)\\.\\.?(/|$)"
+				files:       [string, ...string] & [...(string & =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$" & !~"(^|/)\\.\\.?(/|$)")]
+				memory:      *128 | int & >=16 & <=128
+				// A stock isolate is one of pronto's own modules, which pronto writes
+				// beside the app's other generated files and names here
+				// ([[docs/isolate-hatches#Stock isolates]]).
+				stock?: #StockIsolate
+				if H.stock != _|_ {
+					entrypoint: ".pronto/isolates/\(H.stock)/main.ts"
+					files:      [for f, _ in _stockIsolates[H.stock] {".pronto/isolates/\(H.stock)/\(f)"}]
+				}
+			}
+
 			// A file hatch names its artifacts; host-dom serves them without
 			// removing the terminal CSP or Trusted Types boundary.
 			if H.kind != "container" {
@@ -2087,7 +2311,7 @@ import (
 		// wrapper an engineer audited, and whatever that wrapper loads beside
 		// itself. They are served as statics like any other app file, so a unit
 		// reaches no further over the network than the app already does.
-		vendored: [Name=string]: {
+		vendored: [string]~(Name,_): {
 			ir: *Name | string
 			// How far the unit reaches without the platform, as protection
 			// domains (Saltzer & Schroeder 1975) named by the web platform's own
@@ -2101,7 +2325,12 @@ import (
 			// Browser permissions the unit asks its seat to delegate, from the
 			// terminal's `hatch.realm.grants` offer; only a realm's frame carries
 			// them, and the reader is asked in the app's name.
-			grants: *[] | [...("geolocation")]
+			grants: *[] | [...("geolocation" | "camera" | "payment")]
+			// A dedicated subdomain label, served at `https://<subdomain>.<domain>`
+			// under the domain a release names, for a realm unit that embeds a
+			// third-party provider requiring a non-opaque origin while remaining
+			// cross-origin isolated from the app's origin.
+			subdomain?: =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
 			// Derived, never authored: a question asks and its answer lands in
 			// the memo; a presenter shows. An agent presenter paints the frames
 			// the terminal hands it on a canvas the terminal transfers, in a
@@ -2143,54 +2372,58 @@ import (
 			// their names, and the size bound a column declares — since an
 			// answer carries every column in one event.
 			memo?: {entity: string, key: [string, ...string]}
-			src: string
+			src:   string
 			files: [...string]
-			note: string
+			note:  string
 		}
 	}
 
 	surface: {
-		screens: [Name=string]: S=#Screen & {
-			name: Name
-			let authRequired = [if A.capabilities.auth != _|_ if A.capabilities.auth.required {true}, false][0]
-			let authOn = A.capabilities.auth != _|_
-			_topLive: [
-				for read in S.reads if read.kind == "live" && !read.nested {
-					read.table
-				},
-			]
-			_topRestricted: [
-				for read in S.reads if read.kind == "live" && !read.nested
-				let en = A._entityByTable[read.table]
-				let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
-					"\(en) (\(e.access.scope))"
-				},
-			]
-			_publicServerReads: [
-				for read in S.reads if read.kind == "live"
-				let en = A._entityByTable[read.table]
-				let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope == "public" {
-					en
-				},
-			]
-			let defaultAccess = [
-				if authRequired || (len(S._topLive) > 0 && len(S._topRestricted) == len(S._topLive)) {"private"},
-				"public",
-			][0]
-			access: *defaultAccess | "public" | "private"
-			let defaultSsr = [
-				if S.prerender {"ssg"},
-				// An app behind a sign-in renders no document (#emit): a screen it
-				// opens to visitors is drawn by the terminal.
-				if S.access == "public" && authOn && !authRequired && len(S._publicServerReads) > 0 {"ssr"},
-				"spa",
-			][0]
-			ssr: *defaultSsr | "spa" | "ssg" | "ssr"
+		screens: [string]~(Name,_): {
+			let S = self
+			#Screen & {
+				name: Name
+				let authRequired = [if A.capabilities.auth != _|_ if A.capabilities.auth.required {true}, false][0]
+				let authOn = A.capabilities.auth != _|_
+				_topLive: [
+					for read in S.reads if read.kind == "live" && !read.nested {
+						read.table
+					},
+				]
+				_topRestricted: [
+					for read in S.reads if read.kind == "live" && !read.nested
+					let en = A._entityByTable[read.table]
+					let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
+						"\(en) (\(e.access.scope))"
+					},
+				]
+				_publicServerReads: [
+					for read in S.reads if read.kind == "live"
+					let en = A._entityByTable[read.table]
+					let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope == "public" {
+						en
+					},
+				]
+				let defaultAccess = [
+					if authRequired || (len(S._topLive) > 0 && len(S._topRestricted) == len(S._topLive)) {"private"},
+					"public",
+				][0]
+				access: *defaultAccess | "public" | "private"
+				let defaultSsr = [
+					if S.prerender {"ssg"},
+					// An app behind a sign-in renders no document (#emit): a screen it
+					// opens to visitors is drawn by the terminal.
+					if S.access == "public" && authOn && !authRequired && len(S._publicServerReads) > 0 {"ssr"},
+					"spa",
+				][0]
+				ssr: *defaultSsr | "spa" | "ssg" | "ssr"
+				if S.ssr == "ssg" {prerender: true}
+			}
 		}
 		// Jessie handlers, bijection surface (ir kind "handler"): `of` is the
 		// screen, `src` the assembly module, served by the terminal. The loader
 		// resolves the screen's files.handlers, which markup binding derives.
-		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
+		handlers: [string]~(Name,_): {ir: *Name | string, of: string, src: #Jessie, note: string}
 		// The kinetic plane's Jessie module graphs: `src` is the entry, its
 		// static imports relative paths to the app's own modules. derive links
 		// it (engine-link.ts) into shell/engines/<Name>.json, which the
@@ -2200,18 +2433,18 @@ import (
 		// the terminal hands the AudioContext it tames (kinetic-sound.js), so
 		// the context is the role's one authority and an argument, not a
 		// global.
-		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
+		engines: [string]~(Name,_): {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
 		// The fronts the door's several-sites mode serves (mecha's docs/proxy.md,
 		// "Several sites"), each by the variable the deployment lists its sites
 		// in, so a deployment names them by front. Without fronts the door reads
 		// SITES.
-		fronts?: [Name=string]: close({sites!: =~"^[A-Z][A-Z0-9_]*$"})
-		flows: [Name=string]: #Flow & {name: Name}
+		fronts?: [string]: close({sites!: =~"^[A-Z][A-Z0-9_]*$"})
+		flows: [string]~(Name,_): #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
 		// app-relative path: the one spelling every loader and lint read, and
 		// a key naming no module is refused.
-		endowments?: [Path=string]: [...#SafeEndowment]
+		endowments?: [string]~(Path,_): [...#SafeEndowment]
 	}
 
 	meta: {
@@ -2221,22 +2454,22 @@ import (
 		// One line for the entry page's meta description. The hash router gives
 		// every route this same description, so it names the app, not a screen.
 		description: string
-		favicon?:     #Favicon
-		manifest?:    bool | #Manifest
-		social?:      #Social
+		favicon?:    #Favicon
+		manifest?:   bool | #Manifest
+		social?:     #Social
 		// What a reader calls the app, where its name is a service's: shell.json's title, which omnishell
 		// titles its documents and its sign-in by. Without it they say the name, as they always have.
-		title?: string & !=""
-		llms?:        bool | #Llms
-		wellKnown?:   [string]: #WellKnownItem
+		title?:      string & !=""
+		llms?:       bool | #Llms
+		wellKnown?: [string]: #WellKnownItem
 		preconnect?:  string | #PreconnectItem | [...(string | #PreconnectItem)]
 		dnsPrefetch?: string | [...string]
 		themeColor?:  string
 		sitemap?:     #Sitemap
-		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
-		ladder: *[] | [...string] // composed journal/ and ir/ files served under /srv/docs/
-		domain?: string
-		ssrOrigin?: string
+		ir:           {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
+		ladder:       *[] | [...string]                                   // composed journal/ and ir/ files served under /srv/docs/
+		domain?:      string
+		ssrOrigin?:   string
 		// Services beside the door that a host launch runs too and the door
 		// proxies to at their host addresses, by name and port: a plugin's
 		// (pronto-billing's billing, pronto-flags' flagd). The renderer is
@@ -2272,15 +2505,15 @@ import (
 		// original bug was not that the clock was in the wrong place but that
 		// nothing could tell. #emit refuses a target that declares a schedule
 		// and no clock here.
-		clocks: [...#Target]
+		clocks: *[] | [...#Target]
 		// A program names its decisions and nothing more: `note` is derived
 		// from the prose of the ir element `ir` names (pronto derive.ts), so the
 		// reviewed artifact is the only place the rationale is written. The
 		// empty default is what a first export holds before any derivation has
 		// run: program_derived.cue unifies the derived note over it, so a new
 		// app needs no stub file to complete its first generate.
-		decisions: [Id=string]: {ir: *Id | string, note: *"" | string}
-		tests: [Id=string]: #Test & {id: Id}
+		decisions: [string]~(Id,_): {ir: *Id | string, note: *"" | string}
+		tests: [string]~(Id,_):     #Test & {id: Id}
 		i18n?: #I18n
 		// The literal debt this app still carries: how many declarations wear
 		// `/* pronto-literal: pending */`. Checked for EQUALITY, not a ceiling —
@@ -2295,9 +2528,9 @@ import (
 		state: computations: {
 			for streamName, stream in A.state.duckstreams if stream.backend != _|_ {
 				(streamName): {
-					_sourceCount: len([for _, source in stream.sources {source}]) & >0
-					_sinkCount: len([for _, sink in stream.sinks {sink}]) & >0
-					_transactions: [for transaction, _ in {for _, sink in stream.sinks {(sink.transaction): true}} {transaction}]
+					_sourceCount:      len([for _, source in stream.sources {source}]) & >0
+					_sinkCount:        len([for _, sink in stream.sinks {sink}]) & >0
+					_transactions:     [for transaction, _ in {for _, sink in stream.sinks {(sink.transaction): true}} {transaction}]
 					_transactionCount: len(_transactions) & 1
 					_sourceStorage: [for _, source in stream.sources for entity in source.entities {
 						A.state.entities[entity].durability & ("offline" | "live" | "server")
@@ -2305,7 +2538,7 @@ import (
 					src: stream.src
 					if stream.feldera != _|_ {feldera: stream.feldera}
 					if stream.steps != _|_ {steps: stream.steps}
-					to: [for _, sink in stream.sinks {sink.entity}]
+					to:         [for _, sink in stream.sinks {sink.entity}]
 					sinkWrites: {for _, sink in stream.sinks {(sink.entity): sink.write}}
 					if len([for _, sink in stream.sinks if sink.columns != _|_ {true}]) > 0 {
 						sinkColumns: {for _, sink in stream.sinks if sink.columns != _|_ {(sink.entity): sink.columns}}
@@ -2326,7 +2559,7 @@ import (
 	}
 
 	_sinkColumnViolations: list.Concat([for name, computation in A.state.computations
-		if computation.sinkColumns != _|_ for entity, columns in computation.sinkColumns {
+	if computation.sinkColumns != _|_ for entity, columns in computation.sinkColumns {
 		let fields = A.state.entities[entity].fields
 		let writable = [for f in fields if !f.retired if f.generated == _|_ {f.name}]
 		list.Concat([
@@ -2334,7 +2567,7 @@ import (
 				"computation \(name) sink \(entity) column \(column) is not a writable entity field"
 			}],
 			[for f in fields if !f.retired if f.generated == _|_
-				if f.pk || (f.required && f.default == _|_) if !list.Contains(columns, f.name) {
+			if f.pk || (f.required && f.default == _|_) if !list.Contains(columns, f.name) {
 				"computation \(name) sink \(entity) requires insert column \(f.name)"
 			}],
 		])
@@ -2359,8 +2592,7 @@ import (
 		let sReadsEntities = [if s.reads != _|_ for r in s.reads {[if eLookup[r.table] != _|_ {eLookup[r.table]}, r.table][0]}]
 		let sFormsEntities = [if s.forms != _|_ for f in s.forms if f.entity != _|_ {[if eLookup[f.entity] != _|_ {eLookup[f.entity]}, f.entity][0]}]
 		if list.Contains(sReadsEntities, plSinkEntity)
-		if len([for fe in sFormsEntities if list.Contains(plSourceEntities, fe) {fe}]) > 0
-		{
+		if len([for fe in sFormsEntities if list.Contains(plSourceEntities, fe) {fe}]) > 0 {
 			pipeline: plName
 			screen:   sName
 			sink:     pl.sink
@@ -2397,7 +2629,7 @@ import (
 			for gn, g in m.guards {
 				(gn): g & {
 					machine: mn
-					on: [for op, tr in m._on if list.Contains(tr.guard, gn) {op}]
+					on:      [for op, tr in m._on if list.Contains(tr.guard, gn) {op}]
 					let ordinal = [for i, name in list.SortStrings([for other, om in A.state.mecha.rows if om.entity == en || om.entity == e.table {"trg_\(e.table)_\(other)_reducer"}]) if name == "trg_\(e.table)_\(mn)_reducer" {i}][0]
 					order: {for op, tr in m._on for i, name in tr.guard if name == gn {(op): [ordinal, i]}}
 				}
@@ -2409,11 +2641,10 @@ import (
 	// once here for every column's lookup (#machineColumn). A machine reads the
 	// App, so a lookup handed the machines themselves copies the App each time.
 	_machineColumns: {if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m.field != _|_ if m.initial != _|_
-		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
-			(en): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
-		}
-	}
-	state: mecha: rows: [mn=string]: {
+	for en, e in A.state.entities if m.entity == en || m.entity == e.table {
+		(en): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
+	}}
+	state: mecha: rows: [string]~(mn,_): {
 		let m = A.state.mecha.rows[mn]
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
 			level: [if len([if m.states != _|_ for st in m.states if st.invoke != _|_ {st}]) > 0 {"external"}, if m.states == _|_ if len(m._actions) == 0 {e.level}, "replicated"][0]
@@ -2449,38 +2680,38 @@ import (
 	_lifecycleRefusal: [if len(_lifecycleViolations) == 0 {true}, _lifecycleViolations[0]][0] & true
 
 	_machineActions: list.Concat([
-        [if A.state.mecha.rows != _|_ for mName, m in A.state.mecha.rows {machine: mName, actions: m._actions}],
-        [if A.state.mecha.reducers != _|_ for mName, m in A.state.mecha.reducers {machine: mName, actions: [for _, phase in m.reducer.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
-    ])
-    _machineCalls: [for caller in _machineActions for actionSpec in caller.actions for call in [
-        if actionSpec.spawn != _|_ {{kind: "spawn", target: actionSpec.spawn.machine}},
-        if actionSpec.send != _|_ {{kind: "send", target: actionSpec.send.machine, event: actionSpec.send.event}},
-    ] {call}]
-    _callTargets: [if A.state.mecha.reducers != _|_ {A.state.mecha.reducers}, {}][0]
-    _machineCallViolations: list.Concat([
-        [for call in _machineCalls if _callTargets[call.target] == _|_ {"undeclared Mecha operation target: \(call.target)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].reducer.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] == _|_ {"undeclared Mecha delivery event: \(call.target).\(call.event)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] != _|_ if _callTargets[call.target].reducer.events[call.event].tier != "mecha" {"delivery requires a Mecha event: \(call.target).\(call.event)"}],
-    ])
-    _machineCallRefusal: [if len(_machineCallViolations) == 0 {true}, _machineCallViolations[0]][0] & true
+		[if A.state.mecha.rows != _|_ for mName, m in A.state.mecha.rows {machine: mName, actions: m._actions}],
+		[if A.state.mecha.reducers != _|_ for mName, m in A.state.mecha.reducers {machine: mName, actions: [for _, phase in m.reducer.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
+	])
+	_machineCalls: [for caller in _machineActions for actionSpec in caller.actions for call in [
+		if actionSpec.spawn != _|_ {{kind: "spawn", target: actionSpec.spawn.machine}},
+		if actionSpec.send != _|_ {{kind: "send", target: actionSpec.send.machine, event: actionSpec.send.event}},
+	] {call}]
+	_callTargets: [if A.state.mecha.reducers != _|_ {A.state.mecha.reducers}, {}][0]
+	_machineCallViolations: list.Concat([
+		[for call in _machineCalls if _callTargets[call.target] == _|_ {"undeclared Mecha operation target: \(call.target)"}],
+		[for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].reducer.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
+		[for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] == _|_ {"undeclared Mecha delivery event: \(call.target).\(call.event)"}],
+		[for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] != _|_ if _callTargets[call.target].reducer.events[call.event].tier != "mecha" {"delivery requires a Mecha event: \(call.target).\(call.event)"}],
+	])
+	_machineCallRefusal: [if len(_machineCallViolations) == 0 {true}, _machineCallViolations[0]][0] & true
 	// A Cortex state names the screen that hosts it and the actor its child
 	// is; what an actor's `via` needs of its Mecha machine is what that
 	// machine's ports carry.
 	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex if c.config.meta == _|_ || c.config.meta.host == _|_ for sName, st in c.config.states
-		let rootInvokes = [if st.invoke == _|_ {[]}, if (st.invoke & [...]) != _|_ {st.invoke}, {[st.invoke]}][0]
-		let subInvokes = list.Concat([
-			for _, sub in [if st.states != _|_ {st.states}, {}][0] if sub.invoke != _|_ {
-				[if (sub.invoke & [...]) != _|_ {sub.invoke}, {[sub.invoke]}][0]
-			}
-		])
-		let screenInvokes = list.Concat([rootInvokes, subInvokes])
-		for v in list.Concat([
-			[if st.meta == _|_ || st.meta.screen == _|_ {"\(cName).\(sName): no meta.screen hosts it"}],
-			[if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] == _|_ {"\(cName).\(sName): no screen \(st.meta.screen)"}],
-			for inv in screenInvokes {
-				[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
-			},
+	let rootInvokes = [if st.invoke == _|_ {[]}, if (st.invoke & [...]) != _|_ {st.invoke}, {[st.invoke]}][0]
+	let subInvokes = list.Concat([
+		for _, sub in [if st.states != _|_ {st.states}, {}][0] if sub.invoke != _|_ {
+			[if (sub.invoke & [...]) != _|_ {sub.invoke}, {[sub.invoke]}][0]
+		}
+	])
+	let screenInvokes = list.Concat([rootInvokes, subInvokes])
+	for v in list.Concat([
+		[if st.meta == _|_ || st.meta.screen == _|_ {"\(cName).\(sName): no meta.screen hosts it"}],
+		[if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] == _|_ {"\(cName).\(sName): no screen \(st.meta.screen)"}],
+		for inv in screenInvokes {
+			[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
+		},
 		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via == "kinetic" {
 			let actor = c.setup.actors[inv.src]
 			let markup = [if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_ if A.surface.screens[st.meta.screen].markup != _|_ {A.surface.screens[st.meta.screen].markup}, ""][0]
@@ -2504,19 +2735,19 @@ import (
 						[if actor.via == "sync" if m.ports == _|_ || m.ports.join == _|_ {"\(cName).\(sName): a sync child joins \(m.name), which declares no join"}],
 						[if actor.via == "sync" if !strings.HasPrefix(instance, "{param.") {"\(cName).\(sName): a sync child's input.instance names its route's parameter"}],
 						[if actor.via == "sync" if strings.HasPrefix(instance, "{param.") if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_
-							if !list.Contains(strings.Split(A.surface.screens[st.meta.screen].route, "/"), ":" + strings.TrimSuffix(strings.TrimPrefix(instance, "{param."), "}")) {"\(cName).\(sName): \(st.meta.screen)'s route has no \(instance)"}],
+						if !list.Contains(strings.Split(A.surface.screens[st.meta.screen].route, "/"), ":" + strings.TrimSuffix(strings.TrimPrefix(instance, "{param."), "}")) {"\(cName).\(sName): \(st.meta.screen)'s route has no \(instance)"}],
 					])
 				},
 			])
 		},
 	]) {v}]
 	_cortexBackend: [if A.state.cortex != _|_ for chartName, chart in A.state.cortex if chart.config.meta != _|_ if chart.config.meta.host != _|_ if chart.config.meta.host == "mecha" {
-		name: chartName
-		id: chart.config.id
-		function: chart.config.meta.function
+		name:      chartName
+		id:        chart.config.id
+		function:  chart.config.meta.function
 		migration: chart.config.meta.migration
-		table: [if A.state.entities[chart.config.meta.entity] != _|_ {A.state.entities[chart.config.meta.entity].table}, chart.config.meta.entity][0]
-		field: chart.config.meta.field
+		table:     [if A.state.entities[chart.config.meta.entity] != _|_ {A.state.entities[chart.config.meta.entity].table}, chart.config.meta.entity][0]
+		field:     chart.config.meta.field
 	}]
 	_cortexBackendViolations: [for c in _cortexBackend for other in _cortexBackend if c.name != other.name {
 		if c.id == other.id {"Cortex charts \(c.name) and \(other.name) share id \(c.id)"}
@@ -2526,30 +2757,30 @@ import (
 	_cortexTerminal: [if A.state.cortex != _|_ for _, chart in A.state.cortex if chart.config.meta != _|_ if chart.config.meta.host != _|_ if chart.config.meta.host == "omnishell" {chart}]
 	_cortexTerminalViolations: list.Concat([
 		[if len(_cortexTerminal) > 1 {"one terminal Cortex root may own navigation"}],
-		[for chart in _cortexTerminal for screen, _ in A.surface.screens if chart.config.on["route:" + screen] == _|_ {"terminal Cortex root has no route:\(screen) transition"}],
+		[for chart in _cortexTerminal for screen, _ in A.surface.screens if chart.config.on["route:"+screen] == _|_ {"terminal Cortex root has no route:\(screen) transition"}],
 		[for chart in _cortexTerminal for name, actor in chart.setup.actors if actor.via == "rows" if A.surface.screens[actor.screen] == _|_ {"terminal Cortex row actor \(name) names undeclared screen \(actor.screen)"}],
 		[if A.state.cortex != _|_ for _, chart in A.state.cortex for name, actor in chart.setup.actors if actor.via == "observe" if actor.machine != _|_ if actor.table == _|_ || actor.field == _|_ {"Cortex observation \(name) requires composition to resolve machine \(actor.machine)"}],
 	])
 	_cortexAllViolations: list.Concat([_cortexViolations, _cortexBackendViolations, _cortexTerminalViolations])
-	_cortexRefusal: [if len(_cortexAllViolations) == 0 {true}, _cortexAllViolations[0]][0] & true
+	_cortexRefusal:       [if len(_cortexAllViolations) == 0 {true}, _cortexAllViolations[0]][0] & true
 	// A signal names where a Mecha machine went: `signal:<table>.<state>`, a
 	// state of the machine on that table's entity. One naming no such state is
 	// an arrow nothing ever fires, which a walk of the chart would still cover.
 	_cortexNodes: [if A.state.cortex != _|_ for cName, c in A.state.cortex if c.config != _|_ for sName, st in c.config.states
-		for at, node in {
-			(sName): st
-			if st.states != _|_ for n1, s1 in st.states {
-				"\(sName).\(n1)": s1
-				if s1.states != _|_ for n2, s2 in s1.states {"\(sName).\(n1).\(n2)": s2}
-			}
-		} {chart: cName, state: at, on: [if node.on != _|_ {node.on}, {}][0]}]
+	for at, node in {
+		(sName): st
+		if st.states != _|_ for n1, s1 in st.states {
+			"\(sName).\(n1)": s1
+			if s1.states != _|_ for n2, s2 in s1.states {"\(sName).\(n1).\(n2)": s2}
+		}
+	} {chart: cName, state: at, on: [if node.on != _|_ {node.on}, {}][0]}]
 	_cortexSignalViolations: [for n in _cortexNodes for k, _ in n.on if strings.HasPrefix(k, "signal:")
-		let parts = strings.SplitN(strings.TrimPrefix(k, "signal:"), ".", 2)
-		let entity = [if len(parts) == 2 if A._entityByTable[parts[0]] != _|_ {A._entityByTable[parts[0]]}, ""][0]
-		let states = [if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m.entity == entity {m.states}]
-		if len(parts) != 2 || entity == "" || len(states) == 0 || states[0][parts[len(parts)-1]] == _|_ {
-			"\(n.chart).\(n.state): \(k) names no state of a Mecha machine on its table"
-		}]
+	let parts = strings.SplitN(strings.TrimPrefix(k, "signal:"), ".", 2)
+	let entity = [if len(parts) == 2 if A._entityByTable[parts[0]] != _|_ {A._entityByTable[parts[0]]}, ""][0]
+	let states = [if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m.entity == entity {m.states}]
+	if len(parts) != 2 || entity == "" || len(states) == 0 || states[0][parts[len(parts)-1]] == _|_ {
+		"\(n.chart).\(n.state): \(k) names no state of a Mecha machine on its table"
+	}]
 	_cortexSignalRefusal: [if len(_cortexSignalViolations) == 0 {true}, _cortexSignalViolations[0]][0] & true
 	// The XState a Mecha machine cannot run is refused rather than read as
 	// something else: its step is its reducer's, so it invokes nothing, and an
@@ -2603,7 +2834,7 @@ import (
 		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] != _|_ if A.capabilities.hatches[hn].kind != "sql" {
 			"machine \(mn) calls hatch \(hn), which is not SQL"
 		}],
-			])
+	])
 	_machineHatchRefusal: [if len(_machineHatchViolations) == 0 {true}, _machineHatchViolations[0]][0] & true
 
 	// A machine names its entity by name or table, as emit.cue resolves it.
@@ -2686,7 +2917,7 @@ import (
 	])
 	_moneyRefusal: [if len(_moneyViolations) == 0 {true}, _moneyViolations[0]][0] & true
 
-	_authProviders: [if A.capabilities != null if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
+	_authProviders: [if (A.capabilities & null) == _|_ if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
 	_authTargetViolations: list.Concat([
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
@@ -2713,6 +2944,9 @@ import (
 		[for un, u in A.capabilities.vendored if u.isolation != "realm" if len(u.grants) > 0 {
 			"unit \(un) is seated as \(u.isolation) and asks for \(strings.Join(u.grants, ", ")): only a realm's frame is delegated a permission"
 		}],
+		[for un, u in A.capabilities.vendored if u.isolation != "realm" if u.subdomain != _|_ {
+			"unit \(un) is seated as \(u.isolation) and names subdomain \(u.subdomain): only a realm's frame has an origin of its own"
+		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if len(u.ports.raises) != 1 {
 			"unit \(un) has a memo and raises \(len(u.ports.raises)) events: a question has one answer"
 		}],
@@ -2720,23 +2954,23 @@ import (
 			"unit \(un) has a memo and declares fields for \(r): an answer's shape is the memo's key and columns, derived"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
-			let me = A.state.entities[u.memo.entity]
-			for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
+		let me = A.state.entities[u.memo.entity]
+		for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
 			"unit \(un) memo keys on \(k), which is not a field of \(u.memo.entity)"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
-			let mk = A.state.entities[u.memo.entity]
-			for k in u.memo.key for f in mk.fields if f.name == k if f.pk || f.retired {
+		let mk = A.state.entities[u.memo.entity]
+		for k in u.memo.key for f in mk.fields if f.name == k if f.pk || f.retired {
 			"unit \(un) memo keys on \(k), which is not an active non-primary field of \(u.memo.entity)"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
-			let mu = A.state.entities[u.memo.entity]
-			if len([for q in mu.uniques if q.where == _|_ if list.SortStrings(q.cols) == list.SortStrings(u.memo.key) {q}]) != 1 {
+		let mu = A.state.entities[u.memo.entity]
+		if len([for q in mu.uniques if q.where == _|_ if list.SortStrings(q.cols) == list.SortStrings(u.memo.key) {q}]) != 1 {
 			"unit \(un) memo on \(u.memo.entity) has no unique over exactly (\(strings.Join(u.memo.key, ", "))): the natural key an answer resolves against"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
-			let mc = A.state.entities[u.memo.entity]
-			for f in mc.fields if !f.pk if !f.retired if f.type != "string" {
+		let mc = A.state.entities[u.memo.entity]
+		for f in mc.fields if !f.pk if !f.retired if f.type != "string" {
 			"unit \(un) memo on \(u.memo.entity): column \(f.name) is \(f.type), and an answer crosses the seat as strings"
 		}],
 	])
@@ -2757,6 +2991,155 @@ import (
 		},
 	]
 	_signalRefusal: [if len(_signalViolations) == 0 {true}, _signalViolations[0]][0] & true
+	// A destination names only its source's parameters, and two rewrites one
+	// request matches would leave the answer to their order.
+	_rewrites: [if A.state.rewrites != _|_ {A.state.rewrites}, {}][0]
+	_rewriteSegments: {for n, r in _rewrites {(n): strings.Split(r.source, "/")}}
+	_rewriteViolations: [
+		for n, r in _rewrites
+		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
+		if t =~ "^:[a-z]" if !strings.Contains(r.source + "/", "/" + t + "/") {
+			"rewrite \(n): the destination names \(t), which the source does not"
+		},
+		// The door tries a rewrite before its own routes, so a parameter in
+		// the first segment would answer /health and the shell's files.
+		for n, _ in _rewrites if strings.HasPrefix(_rewriteSegments[n][1], ":") {
+			"rewrite \(n): the source begins with a parameter, and its first segment is a word"
+		},
+		for n, r in _rewrites if strings.Contains(r.source, ":")
+		let ps = regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1)
+		if len(ps) != len({for p in ps {(p): true}}) {
+			"rewrite \(n): the source names a parameter twice"
+		},
+		for n, r in _rewrites
+		for m, o in _rewrites if m < n
+		let rs = _rewriteSegments[n]
+		let os = _rewriteSegments[m]
+		// One request matches both where every segment is the same word, or
+		// a parameter in either.
+		if len(rs) == len(os) if len([for i, s in rs if s != os[i] if !strings.HasPrefix(s, ":") if !strings.HasPrefix(os[i], ":") {s}]) == 0
+		let rm = [if r.methods != _|_ {r.methods}, []][0]
+		let om = [if o.methods != _|_ {o.methods}, []][0]
+		if len(rm) == 0 || len(om) == 0 || len([for x in rm if list.Contains(om, x) {x}]) > 0 {
+			"rewrites \(m) and \(n): both answer \(strings.Join([for i, s in rs {[if !strings.HasPrefix(s, ":") {s}, if !strings.HasPrefix(os[i], ":") {os[i]}, ":"][0]}], "/"))"
+		},
+	]
+	_rewriteRefusal: [if len(_rewriteViolations) == 0 {true}, _rewriteViolations[0]][0] & true
+	// A group grant is read against one membership list, and a role, a group's
+	// `of` and a membership's columns each name a field that exists.
+	_groupLists: [for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group" {n}]
+	// Whose keys a group's name is read over: the entity's own, the entity a
+	// reference names, or the column's where it references nothing.
+	_groupOver: [for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ for g in e.access.groups {
+		group:  g.group
+		entity: n
+		over: [if g.of == _|_ {e.table}, for f in e.fields if g.of != _|_ if f.name == g.of if f.ref != _|_ {f.ref}, "\(e.table).\(g.of)"][0]
+	}]
+	_groupViolations: [
+		// A membership names a group as "<key>:<name>" and no entity, so one
+		// name over two entities' keys would let a member of one read the other.
+		for a in _groupOver for b in _groupOver if a.group == b.group if a.over < b.over {
+			"group \(a.group): named over \(a.over) by \(a.entity) and over \(b.over) by \(b.entity), and a group's name is one entity's"
+		},
+		if len(_groupLists) > 1 {
+			"entities \(strings.Join(_groupLists, ", ")): one entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group"
+		for c in [e.access.group, e.access.user] if len([for f in e.fields if f.name == c {f}]) == 0 {
+			"entity \(n): the membership list names \(c), which is no field of it"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ if len(_groupLists) == 0 {
+			"entity \(n): shared with a group, and no entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of != _|_ if len([for f in e.fields if f.name == g.of {f}]) == 0 {
+			"entity \(n): group \(g.group) is of \(g.of), which is no field of it"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.role) to hold a role"
+		},
+		// The policy compares the role with a name, and a membership's group
+		// with "<key>:<name>".
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role if f.type != "string" {
+			"entity \(n): the grant table \(e.access.shared.via) holds a role in \(f.name), which is a string and not \(f.type)"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group"
+		for f in e.fields if f.name == e.access.group if f.type != "string" {
+			"entity \(n): the membership list names a group in \(f.name), which is a string and not \(f.type)"
+		},
+		// A group is one column of the row, so an entity names it once.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for i, g in e.access.groups for j, h in e.access.groups if i < j if g.group == h.group {
+			"entity \(n): group \(g.group) is named twice, and a group holds one role on a row"
+		},
+	]
+	// A grant table that names groups is read against the membership list, and
+	// a grant row fills its user or its group, so neither column is required.
+	_grantViolations: [
+		// The grant table is the entity's own composition, or its policies are
+		// another's: a grant anyone may write is the row anyone may read.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via if v.access != _|_ if v.access.scope == "folder" if v.access.parent == n if v.access.on == e.access.shared.on {v}]) == 0 {
+			"entity \(n): its grant table \(e.access.shared.via) is an entity with access {scope: \"folder\", parent: \"\(n)\", on: \"\(e.access.shared.on)\"}"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for m, x in A.state.entities if n < m if x.access != _|_ if x.access.scope == "private" if x.access.shared != _|_ if x.access.shared.via == e.access.shared.via {
+			"entities \(n), \(m): one grant table, \(e.access.shared.via), shares one entity's rows"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via
+		if len([for f in v.fields if f.name == e.access.shared.user {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.user) to name a user"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role if !f.required {
+			"entity \(n): a grant in \(e.access.shared.via) holds a role, so \(f.name) is required"
+		},
+		// The policies, the triggers and the sync path address a shared row by
+		// `id`, and name a group over the row's own key by the key's text.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ || e.access.groups != _|_
+		for f in e.fields if f.pk if f.name != "id" {
+			"entity \(n): shared, and its key is \(f.name): a shared entity's key is id"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of == _|_ for f in e.fields if f.pk if f.type != "uuid" if f.type != "string" {
+			"entity \(n): group \(g.group) is named over its key, a \(f.type): a uuid or a string, whose text the cluster and the terminal spell alike"
+		},
+		// A row is filed under a group by a reference, so who may file it there
+		// is who reads the row it names.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of != _|_ for f in e.fields if f.name == g.of
+		if len([for _, x in A.state.entities if f.ref != _|_ if x.table == f.ref if x.access != _|_ if x.access.scope == "private" || x.access.scope == "public" {x}]) == 0 {
+			"entity \(n): group \(g.group) is of \(g.of), which references no private or public entity"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ if len(_groupLists) == 0 {
+			"entity \(n): its grant table names groups, and no entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.group {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.group) to name a group"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.group || f.name == e.access.shared.user if f.required {
+			"entity \(n): a grant in \(e.access.shared.via) names a user or a group, so \(f.name) is required: false"
+		},
+	]
+	// A row handed to another owner leaves the previous one a grant, which the
+	// cluster writes from the row alone: its key, the grantee and the role.
+	_handoverViolations: [
+		if len(_groupViolations) + len(_grantViolations) == 0
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields
+		if f.required if !f.retired if f.default == _|_ if f.generated == _|_ if !(f.pk && f.type == "uuid")
+		if !list.Contains([e.access.shared.on, e.access.shared.user, if e.access.shared.role != _|_ {e.access.shared.role}], f.name) {
+			"entity \(n): a row handed to another owner grants the previous one in \(e.access.shared.via), which cannot fill \(f.name): give it a default"
+		},
+	]
+	_handoverRefusal: [if len(_handoverViolations) == 0 {true}, _handoverViolations[0]][0] & true
+	_groupRefusal: [if len(_groupViolations) == 0 {true}, _groupViolations[0]][0] & true
+	_grantRefusal: [if len(_grantViolations) == 0 {true}, _grantViolations[0]][0] & true
 	_invokes: [
 		if A.state.mecha.rows != _|_
 		for mName, m in A.state.mecha.rows
@@ -2768,15 +3151,15 @@ import (
 			entity:  m.entity
 			src:     st.invoke.src
 			others:  st.on != _|_ || st.after != _|_
-			final: [if st.type != _|_ {st.type == "final"}, false][0]
-			states: [for n, _ in m.states {n}]
+			final:   [if st.type != _|_ {st.type == "final"}, false][0]
+			states:  [for n, _ in m.states {n}]
 			fallbacks: [for tr in [st.invoke.onDone, st.invoke.onError] {
 				let choices = [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0]
 				guarded: choices[len(choices)-1].guard != _|_
 			}]
 			arrows: [for tr in [st.invoke.onDone, st.invoke.onError]
-				for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
-				target: t.target
+			for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+				target:  t.target
 				actions: [if t.actions != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
 			}]
 
@@ -2786,7 +3169,7 @@ import (
 	// the effect: one is the effect's own, the row its NEW reads and its key
 	// fields come from; none or several is refused below. An effect states no
 	// entity of its own.
-	_effectEntities: {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
+	_effectEntities:    {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
 	_effectEntityNames: {for n, s in _effectEntities {(n): [for en, _ in s {en}]}}
 	// By key: an effect refused below is bottom as a value, not undeclared.
 	_effectNames: [for n, _ in _effects {n}]
@@ -2812,7 +3195,7 @@ import (
 		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if !A.state.entities[en].server {
 			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
 		}],
-		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ if _effects[n].request == _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
 			"effect \(n) keys on \(k), which is not a field of \(en)"
 		}],
 		[for i in _invokes if i.final {
@@ -2843,7 +3226,7 @@ import (
 		}],
 		// The credential is the airlock's alone: a handler handed it could put
 		// it in a body the ledger keeps.
-		[for n, x in _effects if x.sink.credential != _|_ if x.secrets != _|_ if list.Contains(x.secrets, x.sink.credential.secret) {
+		[for n, x in _effects if x.sink.credential != _|_ if list.Contains(x._envSecrets, x.sink.credential.secret) {
 			"effect \(n) lists its credential's \(x.sink.credential.secret) among the handler's secrets"
 		}],
 		// The names an effect's cluster keeps for the wake: the ticker's
@@ -2857,13 +3240,176 @@ import (
 	])
 	_invokeRefusal: [if len(_invokeViolations) == 0 {true}, _invokeViolations[0]][0] & true
 
+	// A read: an effect that is a GET (#ExternalEffect.request), invoked by a
+	// state; its input read from the row, which keeps it until the answer
+	// lands, and its count the interpreter's.
+	_reads: {for n, x in _effects if x.request != _|_ {(n): x}}
+	_readVars: {for n, x in _reads {
+		(n): [if regexp.Match("[{]", x.request.path) for e in regexp.FindAll("[{][^}]*[}]", x.request.path, -1) for v in strings.Split(strings.Trim(e, "{}?&"), ",") {v}]
+	}}
+	_readViolations: list.Concat([
+		[for n, x in _reads if x.request.body != _|_ {
+			"effect \(n) is a GET, which carries no body (RFC 9110 §9.3.1): what it sends is its path and query"
+		}],
+		[for n, x in _reads
+		for w, there in {
+			key:         x.key != _|_
+			idempotent:  x.sink.idempotent != _|_
+			reentry:     x.reentry != _|_
+			note:        x.note != _|_
+			attempts:    x.attempts != _|_
+			secrets:     x.secrets != _|_
+			endowments:  x.endowments != _|_
+			contentType: x.sink.contentType != _|_
+		} if there {
+			"effect \(n) is a read and declares \(w): a GET is safe (RFC 9110 §9.2.1), so nothing claims it, and it has no handler and sends no body"
+		}],
+		[for n, x in _reads
+		for b in list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]]) {
+			"effect \(n) is a GET on bridge \(b): a bridge stands in for a sink that does not speak HTTP, so there is nothing of it to GET"
+		}],
+		[for n, x in _reads if x.sink.ai != _|_ {
+			"effect \(n) is a GET on the AI gateway, which answers only what is posted to it"
+		}],
+		[for n, _ in _reads if A.capabilities.auth == _|_ {
+			"effect \(n) is a read, and the app declares no auth: a read spends its sink's credential, so only a signed-in writer asks one"
+		}],
+		[for n, x in _reads if list.Contains(A.meta.targets, "cloudflare") {
+			"effect \(n) is a read, which the edge's airlock does not perform: name another target"
+		}],
+		[for n, x in _reads for v in _readVars[n] if x.input[v] == _|_ {
+			"effect \(n)'s path names \(v), which its input does not"
+		}],
+		[for n, x in _reads for k, _ in x.input if !list.Contains(_readVars[n], k) {
+			"effect \(n)'s input \(k) is sent nowhere: its path names it in no expression"
+		}],
+		[for n, x in _reads for k, v in x.input if (v & string) == _|_ && (v & number) == _|_ && (v & bool) == _|_ && (v & {raw: string}) == _|_ {
+			"effect \(n)'s input \(k) is no string, number or boolean, which is all a path or a query carries"
+		}],
+		[for n, x in _reads if x.cacheControl != _|_ if regexp.Match("(^|, ?)private(,|=|$)", x.cacheControl) {
+			"effect \(n) declares its answers private, and the airlock's cache is shared by every row's read (RFC 9111 §5.2.2.7)"
+		}],
+		[for n, x in _reads for i in _invokes if i.src == n
+		for k, v in x.input if (v & string) != _|_ if strings.HasPrefix(v, "OLD.") || v == "NEW.\(A.state.mecha.rows[i.machine].field)" || v == "NEW.\(x.count)" || v == "NEW.\(x.incarnation)" {
+			"effect \(n)'s input \(k) reads \(v): a read reads the row it enters its state with, which keeps those fields until the answer lands, and its state and count fields are the interpreter's"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		if len([for f in A.state.entities[en].fields if f.name == _reads[n].count if f.type == "int32" || f.type == "int" {f}]) == 0 {
+			"effect \(n) counts its entries in \(_reads[n].count), which is no int32 field of \(en)"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		if len([for f in A.state.entities[en].fields if f.name == _reads[n].incarnation if f.type == "uuid" if f.generated == _|_ if f.pk == _|_ || !f.pk {f}]) == 0 {
+			"effect \(n) names its row's incarnation \(_reads[n].incarnation), which is no uuid field of \(en) that is neither generated nor a primary key"
+		}],
+		// Each machine's interpreter refuses any other writer's change to a
+		// count, another machine's increments among them.
+		[for n, x in _reads for n2, x2 in _reads if n < n2 if x.count == x2.count
+		for i in _invokes if i.src == n for i2 in _invokes if i2.src == n2 if i.machine != i2.machine
+		if A.state.mecha.rows[i.machine].entity == A.state.mecha.rows[i2.machine].entity {
+			"effects \(n) and \(n2) count their entries in \(x.count), and two machines invoke them: each machine counts in a field of its own"
+		}],
+		// Each machine's interpreter sets an incarnation at the insert, so a
+		// second would replace the one the first enqueued with.
+		[for n, x in _reads for n2, x2 in _reads if n < n2 if x.incarnation == x2.incarnation
+		for i in _invokes if i.src == n for i2 in _invokes if i2.src == n2 if i.machine != i2.machine
+		if A.state.mecha.rows[i.machine].entity == A.state.mecha.rows[i2.machine].entity {
+			"effects \(n) and \(n2) name their row's incarnation in \(x.incarnation), and two machines invoke them: each machine names it in a field of its own"
+		}],
+		[for n, x in _reads if x.incarnation == x.count {
+			"effect \(n) names \(x.count) both its count and its incarnation"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens
+		for f in A.state.entities[en].fields if f.name == _reads[n].count if f.generated != _|_ {
+			"effect \(n) counts its entries in \(f.name), which is generated: PostgreSQL computes it after the interpreter, which writes the count"
+		}],
+		[for n, ens in _effectEntityNames if _reads[n] != _|_ for en in ens for i in _invokes if i.src == n
+		if _reads[n].count == A.state.mecha.rows[i.machine].field || len([for f in A.state.entities[en].fields if f.name == _reads[n].count if f.pk != _|_ if f.pk {f}]) > 0 {
+			"effect \(n) counts its entries in \(_reads[n].count), which is its machine's state field or a primary key"
+		}],
+	])
+	_readRefusal: [if len(_readViolations) == 0 {true}, _readViolations[0]][0] & true
+	// A secret field (#Field.secret) is opened only while the effect naming
+	// it runs. So no client keeps a copy of its row, nothing the database
+	// derives, checks, indexes or seeds reads it, and an effect reaches it
+	// through `secrets` alone: an input is frozen into the ledger, and a key is
+	// the sink's idempotency key.
+	_secretFields: [for en, e in A.state.entities for f in e.fields if f.secret != _|_ {entity: en, field: f}]
+	_secretReads:  {for s in _secretFields {(s.entity): (s.field.name): "\\b(NEW|OLD)\\.\"?\(s.field.name)\"?(\\b|$)"}}
+	_secretViolations: list.Concat([
+		// The seal binds the value to the row it was typed for, by its key.
+		[for s in _secretFields let e = A.state.entities[s.entity] if len([for f in e.fields if f.pk {f}]) != 1 {
+			"entity \(s.entity) field \(s.field.name) is secret, and \(s.entity) has no one-field primary key to seal it to"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.durability != "server" {
+			"entity \(s.entity) field \(s.field.name) is secret, and \(s.entity) is \(e.durability): only a server entity's rows stay out of every client's copy"
+		}],
+		[for s in _secretFields for k in ["cel", "generated", "default", "ref", "unique"] if s.field[k] != _|_ {
+			"entity \(s.entity) field \(s.field.name) is secret, and states \(k): the column is always NULL, so nothing derives, checks or relates its value"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.invariant != _|_
+		for x in [e.invariant.cel, if e.invariant.check != _|_ {e.invariant.check}] if x =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity): its invariant reads the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for g in e.fields if g.generated != _|_ if g.generated =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity) field \(g.name) is generated from the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] if e.indexes != _|_ for ix in e.indexes if ix.on =~ "\\b\(s.field.name)\\b" {
+			"entity \(s.entity) indexes the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for u in e.uniques if list.Contains(u.cols, s.field.name) {
+			"entity \(s.entity) unique \(u.name) names the secret field \(s.field.name)"
+		}],
+		[for s in _secretFields let e = A.state.entities[s.entity] for r in e.seed if r[s.field.name] != _|_ {
+			"entity \(s.entity) seeds the secret field \(s.field.name)"
+		}],
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if _secretReads[en] != _|_ for f, read in _secretReads[en]
+		for k, v in _effects[n].input
+		let sql = [if (v & string) != _|_ {v}, if (v & {raw: string}) != _|_ {v.raw}, ""][0] if sql =~ read {
+			"effect \(n) input \(k) reads the secret field \(f): an input is frozen into the ledger, so the effect names it in secrets"
+		}],
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if _secretReads[en] != _|_ for f, _ in _secretReads[en] if _effects[n].key != _|_ if list.Contains(_effects[n].key, f) {
+			"effect \(n) keys on the secret field \(f): a key is the sink's idempotency key and the ledger's"
+		}],
+		[for n, x in _effects for f in x._fieldSecrets if _effectEntityNames[n] != _|_ for en in _effectEntityNames[n]
+		if len([for g in A.state.entities[en].fields if g.name == f if g.secret != _|_ {g}]) == 0 {
+			"effect \(n) names {field: \"\(f)\"} in secrets, which is no secret field of \(en): a field that is no secret belongs in its input"
+		}],
+		[for s in _secretFields if len([for n, x in _effects if _effectEntityNames[n] != _|_ if list.Contains(_effectEntityNames[n], s.entity) if list.Contains(x._fieldSecrets, s.field.name) {n}]) == 0 {
+			"entity \(s.entity) field \(s.field.name) is secret, and no effect names it in secrets: nothing would ever read it"
+		}],
+	])
+	_secretRefusal: [if len(_secretViolations) == 0 {true}, _secretViolations[0]][0] & true
+
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([
-		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] == _|_ {
+		[for n, b in _declaredBridges if b.isolate == _|_ if A.capabilities.hatches[b.container] == _|_ {
 			"bridge \(n) names undeclared container hatch: \(b.container)"
 		}],
-		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
+		[for n, b in _declaredBridges if b.isolate != _|_ if A.capabilities.hatches[b.isolate] == _|_ {
+			"bridge \(n) names undeclared isolate hatch: \(b.isolate)"
+		}],
+		[for n, b in _declaredBridges if b.isolate == _|_ if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
 			"bridge \(n) names hatch \(b.container), which is not a container"
+		}],
+		[for n, b in _declaredBridges if b.isolate != _|_ if b.appliance != _|_ {
+			"bridge \(n) states an appliance form, which pronto derives for an isolate"
+		}],
+		[for n, b in _declaredBridges if b.isolate != _|_ if A.capabilities.hatches[b.isolate] != _|_ if A.capabilities.hatches[b.isolate].kind != "isolate" {
+			"bridge \(n) names hatch \(b.isolate) by isolate, which is not an isolate"
+		}],
+		// The local stack bundles an isolate under .isolate/, beside the sources.
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate" for f in h.files if strings.HasPrefix(f, ".isolate/") {
+			"isolate hatch \(hn)'s \(f) is under .isolate/, where the local stack writes its bundle"
+		}],
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate" if !list.Contains(h.files, h.entrypoint) {
+			"isolate hatch \(hn)'s entrypoint \(h.entrypoint) is not one of its files"
+		}],
+		// The bundle, its WebAssembly shims and their WebAssembly land in one
+		// directory, where a shim is found by its name.
+		[for hn, h in A.capabilities.hatches if h.kind == "isolate"
+		let names = [for f in h.files if strings.HasSuffix(f, ".wasm") || strings.HasSuffix(f, ".wasm.js") {path.Base(f, path.Unix)}]
+		for i, n in names if list.Contains(list.Drop(names, i+1), n) {
+			"isolate hatch \(hn) has two files named \(n): its WebAssembly and shims share one directory beside the bundle"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.port != 8080 {
 			"bridge \(n) must use the Activepieces port 8080"
@@ -2893,25 +3439,30 @@ import (
 			"bridge \(n) needs an opted-in action"
 		}],
 		[for n, x in _effects
-			let reached = list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]])
-			for b in reached if _declaredBridges[b] == _|_ {
-				"effect \(n) reaches undeclared bridge: \(b)"
+		let reached = list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]])
+		for b in reached if _declaredBridges[b] == _|_ {
+			"effect \(n) reaches undeclared bridge: \(b)"
 		}],
 		[for n, x in _effects
-			let defaults = len([if x.sink.origin != _|_ {1}]) + len([if x.sink.bridge != _|_ {1}]) + len([if x.sink.ai != _|_ {1}])
-			if defaults > 1 {
-				"effect \(n) names more than one of origin, bridge and ai as its default sink"
+		let defaults = len([if x.sink.origin != _|_ {1}]) + len([if x.sink.bridge != _|_ {1}]) + len([if x.sink.ai != _|_ {1}])
+		if defaults > 1 {
+			"effect \(n) names more than one of origin, bridge and ai as its default sink"
 		}],
 		[for n, x in _effects if x.sink.targets != _|_ for t, at in x.sink.targets
-			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) + len([if at.service != _|_ {1}]) != 1 {
-				"effect \(n) names one of origin, bridge and service for target \(t)"
+		if len([if at.origin != _|_ {1}])+len([if at.bridge != _|_ {1}])+len([if at.service != _|_ {1}]) != 1 {
+			"effect \(n) names one of origin, bridge and service for target \(t)"
 		}],
 		[for n, x in _effects if x.sink.origin == _|_ if x.sink.bridge != _|_ || x.sink.ai != _|_ if x.sink.credential != _|_ || x.sink.contentType != _|_ {
 			"effect \(n) declares a credential or content type for a sink that is no origin"
 		}],
 		[for n, x in _effects for t in list.Concat([["docker"], [for t in A.meta.targets if t != "docker" && t != "pages" {t}]])
-			if (#SinkAt & {sink: x.sink, target: t}).out == null {
-				"effect \(n) names no sink for target \(t)"
+		if (#SinkAt & {sink: x.sink, target: t}).out == null {
+			"effect \(n) names no sink for target \(t)"
+		}],
+		[for n, x in _effects for t in list.Concat([["docker"], [for t in A.meta.targets if t != "docker" && t != "pages" && t != "cloudflare" {t}]])
+		let at = (#SinkAt & {sink: x.sink, target: t}).out
+		if at != null if at.origin != _|_ if at.origin.secret != _|_ {
+			"effect \(n) names its origin by the secret \(at.origin.secret), which only cloudflare reads: give target \(t) an origin or a bridge"
 		}],
 		[for b, _ in _declaredBridges if len(list.Concat([[for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}], [for _, x in _effects if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ if at.bridge == b {x}]])) == 0 {
 			"bridge \(b) is reached by no effect"
@@ -2919,10 +3470,10 @@ import (
 		// Past a bridge nothing is the platform's to promise, and a bridge
 		// answers no query by key, so a bridged effect states what a repeat
 		// costs rather than claiming idempotence or a reconciliation.
-		[for n, x in _effects if x.sink.bridge != _|_ if x.sink.idempotent {
+		[for n, x in _effects if x.request == _|_ if x.sink.bridge != _|_ if x.sink.idempotent {
 			"effect \(n) reaches bridge \(x.sink.bridge) as an idempotent sink: past a bridge nothing is the platform's to promise"
 		}],
-		[for n, x in _effects if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
+		[for n, x in _effects if x.request == _|_ if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
 			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or repeat"
 		}],
 	])
@@ -2933,8 +3484,8 @@ import (
 			"effect \(n) reaches AI modality \(x.sink.ai) without capabilities.ai declared"
 		}],
 		[for n, x in _effects if x.sink.ai != _|_ if A.capabilities.ai != _|_
-			let tiers = [if x.sink.ai == "text" && A.capabilities.ai.text != _|_ {A.capabilities.ai.text}, if x.sink.ai == "image" && A.capabilities.ai.image != _|_ {A.capabilities.ai.image}, []][0]
-			if !list.Contains(tiers, x.sink.tier) {
+		let tiers = [if x.sink.ai == "text" && A.capabilities.ai.text != _|_ {A.capabilities.ai.text}, if x.sink.ai == "image" && A.capabilities.ai.image != _|_ {A.capabilities.ai.image}, []][0]
+		if !list.Contains(tiers, x.sink.tier) {
 			"effect \(n) reaches AI \(x.sink.ai) tier \(x.sink.tier), which is not declared in capabilities.ai.\(x.sink.ai)"
 		}],
 	])
@@ -2965,8 +3516,7 @@ import (
 					if st.on != _|_ if st.on.delete != _|_
 					for tr in [if (st.on.delete & string) != _|_ {[]}, if (st.on.delete & [...]) != _|_ {st.on.delete}, [st.on.delete]][0]
 					if tr.actions != _|_
-					for a in [if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]
-					{a}
+					for a in [if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0] {a}
 				],
 			])
 		}
@@ -2975,8 +3525,7 @@ import (
 	_deleteNewViolations: [
 		for da in _deleteActions
 		for act in da.actions
-		if strings.Contains(json.Marshal(act), "NEW.")
-		{
+		if strings.Contains(json.Marshal(act), "NEW.") {
 			machine: da.machine
 			action:  json.Marshal(act)
 		}
@@ -2984,11 +3533,11 @@ import (
 	_deleteNewRefusal: [if len(_deleteNewViolations) == 0 {true}, "machine \(_deleteNewViolations[0].machine) references NEW in delete action: \(_deleteNewViolations[0].action)"][0] & true
 
 	_favicon: #faviconPlan & {
-		if A.meta.favicon != _|_ { raw: A.meta.favicon }
+		if A.meta.favicon != _|_ {raw: A.meta.favicon}
 	}
-	_faviconValidRefusal: [if len(_favicon._errors) == 0 { true }, _favicon._errors[0]][0] & true
-	_faviconSvgRefusal: [if _favicon._svgCount <= 1 { true }, "at most one SVG markup or emoji favicon may be declared"][0] & true
-	_faviconConflictRefusal: [if _favicon._svgCount == 0 || _favicon._pathConflict == 0 { true }, "cannot declare an emoji or SVG favicon alongside shell/favicon.svg"][0] & true
+	_faviconValidRefusal:    [if len(_favicon._errors) == 0 {true}, _favicon._errors[0]][0] & true
+	_faviconSvgRefusal:      [if _favicon._svgCount <= 1 {true}, "at most one SVG markup or emoji favicon may be declared"][0] & true
+	_faviconConflictRefusal: [if _favicon._svgCount == 0 || _favicon._pathConflict == 0 {true}, "cannot declare an emoji or SVG favicon alongside shell/favicon.svg"][0] & true
 
 	_envelope: #envelopePlan & {
 		meta:         A.meta
@@ -2996,7 +3545,7 @@ import (
 		state:        A.state
 		capabilities: A.capabilities
 	}
-	_envelopeRefusal: [if len(_envelope._errors) == 0 { true }, _envelope._errors[0]][0] & true
+	_envelopeRefusal: [if len(_envelope._errors) == 0 {true}, _envelope._errors[0]][0] & true
 }
 
 #faviconMime: {
@@ -3008,12 +3557,13 @@ import (
 	".jpeg": "image/jpeg"
 }
 
-#faviconPlan: F={
+#faviconPlan: {
+	let F = self
 	raw?: _
 	_rawItems: [
 		if F.raw != _|_ {
-			if (F.raw & [...]) != _|_ { F.raw }
-			if (F.raw & [...]) == _|_ { [F.raw] }
+			if (F.raw & [...]) != _|_ {F.raw}
+			if (F.raw & [...]) == _|_ {[F.raw]}
 		},
 		[],
 	][0]
@@ -3022,9 +3572,9 @@ import (
 		for it in _rawItems {
 			let isStr = (it & string) != _|_
 			let rawHref = [
-				if isStr { it },
-				if !isStr && it.href != _|_ { it.href },
-				""
+				if isStr {it},
+				if !isStr && it.href != _|_ {it.href},
+				"",
 			][0]
 
 			let isSvgMarkup = isStr && strings.HasPrefix(rawHref, "<svg")
@@ -3032,19 +3582,19 @@ import (
 			let isHttp = strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "//")
 			let hasDotDot = strings.Contains(rawHref, "..")
 
-			let ext = [for e, _ in #faviconMime if strings.HasSuffix(rawHref, e) { e }, ""][0]
+			let ext = [for e, _ in #faviconMime if strings.HasSuffix(rawHref, e) {e}, ""][0]
 			let hasValidExt = ext != ""
 
 			let isEmojiText = !strings.HasPrefix(rawHref, "<svg") && !isDataUri && !isHttp && !strings.Contains(rawHref, "/") && !strings.Contains(rawHref, ".") && len(strings.Runes(rawHref)) <= 8 && !regexp.Match("^[a-zA-Z0-9_-]+$", rawHref)
 			let isEmoji = isStr && isEmojiText
 
 			let rawRel = [
-				if !isStr if it.rel != _|_ { it.rel },
+				if !isStr if it.rel != _|_ {it.rel},
 				"icon",
 			][0]
 
 			let rawType = [
-				if !isStr if it.type != _|_ { it.type },
+				if !isStr if it.type != _|_ {it.type},
 				"",
 			][0]
 
@@ -3059,10 +3609,10 @@ import (
 			let isPath = !isSvgMarkup && !isDataUri && !isHttp && !isEmoji
 
 			let itemErr = [
-				if hasDotDot { "favicon path may not contain '..': '\(rawHref)'" },
-				if isStructuredInvalid { "structured favicon href must be a file path, data URI, or URL, not raw SVG markup or emoji: '\(rawHref)'" },
-				if isAppleTouchInvalid { "apple-touch-icon format not supported on Safari on iOS; must be PNG or JPEG: '\(rawHref)'" },
-				if !isValid { "unsupported favicon format or missing extension: '\(rawHref)' (supported: .ico, .png, .svg, .webp, .jpg, .jpeg, emoji, SVG markup, data:, https://)" },
+				if hasDotDot {"favicon path may not contain '..': '\(rawHref)'"},
+				if isStructuredInvalid {"structured favicon href must be a file path, data URI, or URL, not raw SVG markup or emoji: '\(rawHref)'"},
+				if isAppleTouchInvalid {"apple-touch-icon format not supported on Safari on iOS; must be PNG or JPEG: '\(rawHref)'"},
+				if !isValid {"unsupported favicon format or missing extension: '\(rawHref)' (supported: .ico, .png, .svg, .webp, .jpg, .jpeg, emoji, SVG markup, data:, https://)"},
 				"",
 			][0]
 
@@ -3070,51 +3620,51 @@ import (
 			let inShell = strings.HasPrefix(clean, "shell/")
 
 			let itemHref = [
-				if isSvgMarkup || isEmoji { "./favicon.svg" },
-				if isDataUri || isHttp { rawHref },
-				if inShell { "./" + strings.TrimPrefix(clean, "shell/") },
-				if !inShell { "/" + clean },
+				if isSvgMarkup || isEmoji {"./favicon.svg"},
+				if isDataUri || isHttp {rawHref},
+				if inShell {"./" + strings.TrimPrefix(clean, "shell/")},
+				if !inShell {"/" + clean},
 				rawHref,
 			][0]
 
 			let inferredType = [
-				if isSvgMarkup || isEmoji || strings.HasPrefix(rawHref, "data:image/svg+xml") { "image/svg+xml" },
-				if hasValidExt { #faviconMime[ext] },
-				if strings.HasPrefix(rawHref, "data:image/x-icon") { "image/x-icon" },
-				if strings.HasPrefix(rawHref, "data:image/png") { "image/png" },
-				if strings.HasPrefix(rawHref, "data:image/webp") { "image/webp" },
-				if strings.HasPrefix(rawHref, "data:image/jpeg") { "image/jpeg" },
+				if isSvgMarkup || isEmoji || strings.HasPrefix(rawHref, "data:image/svg+xml") {"image/svg+xml"},
+				if hasValidExt {#faviconMime[ext]},
+				if strings.HasPrefix(rawHref, "data:image/x-icon") {"image/x-icon"},
+				if strings.HasPrefix(rawHref, "data:image/png") {"image/png"},
+				if strings.HasPrefix(rawHref, "data:image/webp") {"image/webp"},
+				if strings.HasPrefix(rawHref, "data:image/jpeg") {"image/jpeg"},
 				"",
 			][0]
 
 			let itemType = [
-				if rawType != "" { rawType },
-				if inferredType != "" { inferredType },
+				if rawType != "" {rawType},
+				if inferredType != "" {inferredType},
 				"",
 			][0]
 
 			let itemRel = rawRel
 
 			let itemSizes = [
-				if !isStr && it.sizes != _|_ { it.sizes },
+				if !isStr && it.sizes != _|_ {it.sizes},
 				"",
 			][0]
 
 			let escapedText = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "<", "&lt;", -1)
 			let itemSvg = [
-				if isSvgMarkup { rawHref },
-				if isEmoji { "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">\(escapedText)</text></svg>\n" },
+				if isSvgMarkup {rawHref},
+				if isEmoji {"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">\(escapedText)</text></svg>\n"},
 				"",
 			][0]
 
 			let staticFile = [
-				if isSvgMarkup || isEmoji { "shell/favicon.svg" },
-				if isPath && isValid { clean },
+				if isSvgMarkup || isEmoji {"shell/favicon.svg"},
+				if isPath && isValid {clean},
 				"",
 			][0]
 
 			let staticTarget = [
-				if staticFile != "" { "/srv/\(staticFile)" },
+				if staticFile != "" {"/srv/\(staticFile)"},
 				"",
 			][0]
 
@@ -3132,46 +3682,44 @@ import (
 			svgText: itemSvg
 			file:    staticFile
 			target:  staticTarget
-			tag:     "<link rel=\"\(itemRelEsc)\"" + [if itemType != "" { " type=\"\(itemTypeEsc)\"" }, ""][0] + [if itemSizes != "" { " sizes=\"\(itemSizesEsc)\"" }, ""][0] + " href=\"\(itemHrefEsc)\">"
+			tag:     "<link rel=\"\(itemRelEsc)\"" + [if itemType != "" {" type=\"\(itemTypeEsc)\""}, ""][0] + [if itemSizes != "" {" sizes=\"\(itemSizesEsc)\""}, ""][0] + " href=\"\(itemHrefEsc)\">"
 		}
 	]
 
-	_explicitAppleTouch: [for x in items if x.valid if x.rel == "apple-touch-icon" { x }]
+	_explicitAppleTouch: [for x in items if x.valid if x.rel == "apple-touch-icon" {x}]
 	_pngOrJpegFavicons: [
 		for x in items
 		if x.valid
 		if x.rel != "apple-touch-icon"
 		if !strings.HasSuffix(x.href, ".svg") && !strings.HasSuffix(x.href, ".webp") && !strings.HasSuffix(x.href, ".ico")
-		if x.type == "image/png" || x.type == "image/jpeg" || strings.HasSuffix(x.href, ".png") || strings.HasSuffix(x.href, ".jpg") || strings.HasSuffix(x.href, ".jpeg") || strings.HasPrefix(x.href, "data:image/png") || strings.HasPrefix(x.href, "data:image/jpeg")
-		{ x }
+		if x.type == "image/png" || x.type == "image/jpeg" || strings.HasSuffix(x.href, ".png") || strings.HasSuffix(x.href, ".jpg") || strings.HasSuffix(x.href, ".jpeg") || strings.HasPrefix(x.href, "data:image/png") || strings.HasPrefix(x.href, "data:image/jpeg") {x}
 	]
 	_touchSizedFavicons: [
 		for x in _pngOrJpegFavicons
-		if strings.Contains(x.sizes, "180") || strings.Contains(x.sizes, "192") || strings.Contains(x.sizes, "512")
-		{ x }
+		if strings.Contains(x.sizes, "180") || strings.Contains(x.sizes, "192") || strings.Contains(x.sizes, "512") {x}
 	]
 	_bestAppleTouch: [
-		if len(_touchSizedFavicons) > 0 { _touchSizedFavicons[0] },
-		if len(_pngOrJpegFavicons) > 0 { _pngOrJpegFavicons[0] },
-		null
+		if len(_touchSizedFavicons) > 0 {_touchSizedFavicons[0]},
+		if len(_pngOrJpegFavicons) > 0 {_pngOrJpegFavicons[0]},
+		null,
 	][0]
 	_autoAppleTouchTag: [
 		if len(_explicitAppleTouch) == 0 && _bestAppleTouch != null {
 			let escHref = strings.Replace(strings.Replace(_bestAppleTouch.href, "&", "&amp;", -1), "\"", "&quot;", -1)
 			"<link rel=\"apple-touch-icon\" href=\"\(escHref)\">"
 		},
-		""
+		"",
 	][0]
 
-	_svgItems: [for x in items if x.svgText != "" { x }]
-	_svgCount: len(_svgItems)
-	_pathConflict: len([for x in items if x.svgText == "" && x.file == "shell/favicon.svg" { x }])
-	_errors: [for x in items if !x.valid { x.err }]
+	_svgItems:     [for x in items if x.svgText != "" {x}]
+	_svgCount:     len(_svgItems)
+	_pathConflict: len([for x in items if x.svgText == "" && x.file == "shell/favicon.svg" {x}])
+	_errors:       [for x in items if !x.valid {x.err}]
 
-	svgFile: [if _svgCount == 1 { _svgItems[0].svgText }, ""][0]
+	svgFile: [if _svgCount == 1 {_svgItems[0].svgText}, ""][0]
 	links: strings.Join(list.Concat([
-		[for x in items if x.valid { x.tag }],
-		[if _autoAppleTouchTag != "" { _autoAppleTouchTag }]
+		[for x in items if x.valid {x.tag}],
+		[if _autoAppleTouchTag != "" {_autoAppleTouchTag}],
 	]), "\n")
 
 	_staticMap: {
@@ -3183,26 +3731,27 @@ import (
 			}
 		}
 	}
-	statics: [for _, s in _staticMap { s }]
+	statics: [for _, s in _staticMap {s}]
 }
 
-#hintsPlan: H={
+#hintsPlan: {
+	let H = self
 	preconnect:  *[] | _
 	dnsPrefetch: *[] | _
 
-	_preconnectList: [if (H.preconnect & [...]) != _|_ { H.preconnect }, [H.preconnect]][0]
-	_dnsPrefetchList: [if (H.dnsPrefetch & [...]) != _|_ { H.dnsPrefetch }, [H.dnsPrefetch]][0]
+	_preconnectList:  [if (H.preconnect & [...]) != _|_ {H.preconnect}, [H.preconnect]][0]
+	_dnsPrefetchList: [if (H.dnsPrefetch & [...]) != _|_ {H.dnsPrefetch}, [H.dnsPrefetch]][0]
 
 	_preconnectItems: [
 		for p in _preconnectList if p != _|_ {
 			let isStr = (p & string) != _|_
 			let hasHref = (p & {href: string}) != _|_
-			let isCross = [if !isStr for k, v in p if k == "crossorigin" if v == true { true }, false][0]
-			let rawHref = [if isStr { p }, if hasHref { p.href }, ""][0]
+			let isCross = [if !isStr for k, v in p if k == "crossorigin" if v == true {true}, false][0]
+			let rawHref = [if isStr {p}, if hasHref {p.href}, ""][0]
 			let isValid = (strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "//")) && !strings.Contains(rawHref, "..") && !strings.Contains(rawHref, " ") && !strings.Contains(rawHref, "\t") && !strings.Contains(rawHref, "\n")
-			let err = [if !isValid { "preconnect href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'" }, ""][0]
+			let err = [if !isValid {"preconnect href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'"}, ""][0]
 			let escHref = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "\"", "&quot;", -1)
-			let itemTag = "<link rel=\"preconnect\" href=\"\(escHref)\"" + [if isCross { " crossorigin" }, ""][0] + ">"
+			let itemTag = "<link rel=\"preconnect\" href=\"\(escHref)\"" + [if isCross {" crossorigin"}, ""][0] + ">"
 			valid: isValid
 			href:  rawHref
 			error: err
@@ -3214,7 +3763,7 @@ import (
 		for d in _dnsPrefetchList if d != _|_ {
 			let rawHref = d
 			let isValid = (strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "//")) && !strings.Contains(rawHref, "..") && !strings.Contains(rawHref, " ") && !strings.Contains(rawHref, "\t") && !strings.Contains(rawHref, "\n")
-			let err = [if !isValid { "dns-prefetch href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'" }, ""][0]
+			let err = [if !isValid {"dns-prefetch href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'"}, ""][0]
 			let escHref = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "\"", "&quot;", -1)
 			let itemTag = "<link rel=\"dns-prefetch\" href=\"\(escHref)\">"
 			valid: isValid
@@ -3225,35 +3774,36 @@ import (
 	]
 
 	_errors: [
-		for x in _preconnectItems if !x.valid { x.error },
-		for x in _dnsPrefetchItems if !x.valid { x.error },
+		for x in _preconnectItems if !x.valid {x.error},
+		for x in _dnsPrefetchItems if !x.valid {x.error},
 	]
 
 	tags: list.Concat([
-		[for x in _dnsPrefetchItems if x.valid { x.tag }],
-		[for x in _preconnectItems if x.valid { x.tag }],
+		[for x in _dnsPrefetchItems if x.valid {x.tag}],
+		[for x in _preconnectItems if x.valid {x.tag}],
 	])
 	links: strings.Join(tags, "\n")
 }
 
-#manifestPlan: M={
-	raw:          *null | _
-	meta:         _
-	favicon:      #faviconPlan
-	screens:      *null | _
-	design:       *null | _
-	capabilities: *null | _
+#manifestPlan: {
+	let M = self
+	raw?:          _
+	meta:          _
+	favicon:       #faviconPlan
+	screens?:      _
+	design?:       _
+	capabilities?: _
 
 	_isAuthRequired: [
-		if M.capabilities != null if M.capabilities.auth != _|_ if M.capabilities.auth.required == true { true },
-		false
+		if M.capabilities != _|_ if M.capabilities.auth != _|_ if M.capabilities.auth.required == true {true},
+		false,
 	][0]
 
-	_enabled: M.raw != null && M.raw != false
+	_enabled: [if M.raw != _|_ {(M.raw & null) == _|_ && (M.raw & false) == _|_}, false][0]
 	_isObj:   _enabled && (M.raw & bool) == _|_ && (M.raw & {}) != _|_
 
-	_hasIcons: _isObj && M.raw.icons != _|_
-	_rawIcons: [if _hasIcons { M.raw.icons }, []][0]
+	_hasIcons: [if _isObj if M.raw.icons != _|_ {true}, false][0]
+	_rawIcons: [if _hasIcons {M.raw.icons}, []][0]
 
 	_derivedIcons: [
 		if _hasIcons {
@@ -3262,17 +3812,17 @@ import (
 					let s = ic.src
 					let isSvg = strings.HasSuffix(s, ".svg") || (ic.type != _|_ && ic.type == "image/svg+xml")
 					src: [
-						if strings.HasPrefix(s, "./shell/") { "/shell/" + strings.TrimPrefix(s, "./shell/") },
-						if strings.HasPrefix(s, "shell/") { "/shell/" + strings.TrimPrefix(s, "shell/") },
-						if strings.HasPrefix(s, "./") { "/" + strings.TrimPrefix(s, "./") },
-						if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:") { s },
-						if strings.HasPrefix(s, "/") { s },
+						if strings.HasPrefix(s, "./shell/") {"/shell/" + strings.TrimPrefix(s, "./shell/")},
+						if strings.HasPrefix(s, "shell/") {"/shell/" + strings.TrimPrefix(s, "shell/")},
+						if strings.HasPrefix(s, "./") {"/" + strings.TrimPrefix(s, "./")},
+						if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:") {s},
+						if strings.HasPrefix(s, "/") {s},
 						"/" + s,
 					][0]
-					if ic.type != _|_ { type: ic.type }
-					if ic.sizes != _|_ { sizes: ic.sizes }
-					if (ic.sizes == _|_) && isSvg { sizes: "any" }
-					if ic.purpose != _|_ { purpose: ic.purpose }
+					if ic.type != _|_ {type: ic.type}
+					if ic.sizes != _|_ {sizes: ic.sizes}
+					if (ic.sizes == _|_) && isSvg {sizes: "any"}
+					if ic.purpose != _|_ {purpose: ic.purpose}
 				}
 			]
 		},
@@ -3280,74 +3830,74 @@ import (
 			for it in M.favicon.items if it.valid if it.href != "" if !strings.HasPrefix(it.href, "data:") {
 				let isRemote = strings.HasPrefix(it.href, "https://") || strings.HasPrefix(it.href, "http://") || strings.HasPrefix(it.href, "//")
 				src: [
-					if isRemote { it.href },
-					if strings.HasPrefix(it.href, "./") { "/shell/" + strings.TrimPrefix(it.href, "./") },
-					if strings.HasPrefix(it.href, "/") { it.href },
+					if isRemote {it.href},
+					if strings.HasPrefix(it.href, "./") {"/shell/" + strings.TrimPrefix(it.href, "./")},
+					if strings.HasPrefix(it.href, "/") {it.href},
 					"/shell/" + it.href,
 				][0]
-				if it.type != "" { type: it.type }
-				if it.sizes != "" { sizes: it.sizes }
-				if it.sizes == "" && it.type == "image/svg+xml" { sizes: "any" }
+				if it.type != "" {type: it.type}
+				if it.sizes != "" {sizes: it.sizes}
+				if it.sizes == "" && it.type == "image/svg+xml" {sizes: "any"}
 			}
 		],
 	][0]
 
-	_hasShortcuts: _isObj && M.raw.shortcuts != _|_
-	_rawShortcuts: [if _hasShortcuts { M.raw.shortcuts }, []][0]
+	_hasShortcuts: [if _isObj if M.raw.shortcuts != _|_ {true}, false][0]
+	_rawShortcuts: [if _hasShortcuts {M.raw.shortcuts}, []][0]
 
 	_staticScreens: [
-		if M.screens != null && !_isAuthRequired
+		if M.screens != _|_ if !_isAuthRequired
 		for sName, s in M.screens
-		if s.route != _|_ && s.route != "/" && !strings.Contains(s.route, ":") {
-			name: [if s.title != _|_ { s.title }, sName][0]
+		if s.route != _|_ if s.route != "/" && !strings.Contains(s.route, ":") {
+			name: [if s.title != _|_ {s.title}, sName][0]
 			url:  s.route
 		}
 	]
 
 	_derivedShortcuts: [
-		if _hasShortcuts { _rawShortcuts },
-		[for idx, sc in _staticScreens if idx < 4 { sc }],
+		if _hasShortcuts {_rawShortcuts},
+		[for idx, sc in _staticScreens if idx < 4 {sc}],
 	][0]
 
-	_hasTheme: _isObj && M.raw.theme_color != _|_
-	_hasBg:    _isObj && M.raw.background_color != _|_
+	_hasTheme: [if _isObj if M.raw.theme_color != _|_ {true}, false][0]
+	_hasBg:    [if _isObj if M.raw.background_color != _|_ {true}, false][0]
 
 	_designLightColor: [
-		if M.design != null if M.design.colors != _|_ if M.design.colors.surface != _|_ { strings.ToLower(M.design.colors.surface) },
-		""
+		if M.design != _|_ if M.design.colors != _|_ if M.design.colors.surface != _|_ {strings.ToLower(M.design.colors.surface)},
+		"",
 	][0]
-	_bgColor: [if _hasBg { M.raw.background_color }, if _designLightColor != "" { _designLightColor }, "#ffffff"][0]
+	_bgColor: [if _hasBg {M.raw.background_color}, if _designLightColor != "" {_designLightColor}, "#ffffff"][0]
 	_designDarkColor: [
-		if M.design != null if M.design.dark != _|_ if M.design.dark.surface != _|_ { strings.ToLower(M.design.dark.surface) },
-		""
+		if M.design != _|_ if M.design.dark != _|_ if M.design.dark.surface != _|_ {strings.ToLower(M.design.dark.surface)},
+		"",
 	][0]
 
 	_explicitTheme: [
-		if _hasTheme { M.raw.theme_color },
-		if M.meta.themeColor != _|_ { M.meta.themeColor },
-		""
+		if _hasTheme {M.raw.theme_color},
+		if M.meta.themeColor != _|_ {M.meta.themeColor},
+		"",
 	][0]
 
 	_themeColor: [
-		if _explicitTheme != "" { _explicitTheme },
-		if _enabled { _designLightColor },
+		if _explicitTheme != "" {_explicitTheme},
+		if _enabled {_designLightColor},
 		"",
 	][0]
 
 	_manifestData: {
-		name: [if _isObj if M.raw.name != _|_ { M.raw.name }, M.meta.name][0]
-		short_name: [if _isObj if M.raw.short_name != _|_ { M.raw.short_name }, [if _isObj if M.raw.name != _|_ { M.raw.name }, M.meta.name][0]][0]
-		description: [if _isObj if M.raw.description != _|_ { M.raw.description }, M.meta.description][0]
-		start_url: [if _isObj if M.raw.start_url != _|_ { M.raw.start_url }, "/"][0]
-		scope: [if _isObj if M.raw.scope != _|_ { M.raw.scope }, "/"][0]
-		display: [if _isObj if M.raw.display != _|_ { M.raw.display }, "standalone"][0]
+		name:             [if _isObj if M.raw.name != _|_ {M.raw.name}, M.meta.name][0]
+		short_name:       [if _isObj if M.raw.short_name != _|_ {M.raw.short_name}, [if _isObj if M.raw.name != _|_ {M.raw.name}, M.meta.name][0]][0]
+		description:      [if _isObj if M.raw.description != _|_ {M.raw.description}, M.meta.description][0]
+		start_url:        [if _isObj if M.raw.start_url != _|_ {M.raw.start_url}, "/"][0]
+		scope:            [if _isObj if M.raw.scope != _|_ {M.raw.scope}, "/"][0]
+		display:          [if _isObj if M.raw.display != _|_ {M.raw.display}, "standalone"][0]
 		background_color: _bgColor
-		theme_color: _themeColor
-		if len(_derivedIcons) > 0 { icons: _derivedIcons }
-		if len(_derivedShortcuts) > 0 { shortcuts: _derivedShortcuts }
-		if _isObj if M.raw.orientation != _|_ { orientation: M.raw.orientation }
-		if _isObj if M.raw.dir != _|_ { dir: M.raw.dir }
-		if _isObj if M.raw.lang != _|_ { lang: M.raw.lang }
+		theme_color:      _themeColor
+		if len(_derivedIcons) > 0 {icons: _derivedIcons}
+		if len(_derivedShortcuts) > 0 {shortcuts: _derivedShortcuts}
+		if _isObj if M.raw.orientation != _|_ {orientation: M.raw.orientation}
+		if _isObj if M.raw.dir != _|_ {dir: M.raw.dir}
+		if _isObj if M.raw.lang != _|_ {lang: M.raw.lang}
 		if _isObj {
 			for k, v in M.raw if !list.Contains(["name", "short_name", "description", "start_url", "display", "background_color", "theme_color", "icons", "shortcuts", "scope", "orientation", "dir", "lang"], k) {
 				(k): v
@@ -3358,19 +3908,18 @@ import (
 	_iconErrors: [
 		for ic in _rawIcons
 		if ic.src != _|_
-		if strings.Contains(ic.src, "..")
-		{ "manifest icon src may not contain '..': '\(ic.src)'" }
+		if strings.Contains(ic.src, "..") {"manifest icon src may not contain '..': '\(ic.src)'"}
 	]
 
 	_errors: _iconErrors
 
 	enabled:  _enabled && len(_errors) == 0
 	data:     _manifestData
-	jsonText: [if enabled { json.Marshal(_manifestData) + "\n" }, ""][0]
+	jsonText: [if enabled {json.Marshal(_manifestData) + "\n"}, ""][0]
 
-	_appNameEsc: strings.Replace(strings.Replace(_manifestData.short_name, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_appNameEsc:    strings.Replace(strings.Replace(_manifestData.short_name, "&", "&amp;", -1), "\"", "&quot;", -1)
 	_themeColorEsc: strings.Replace(strings.Replace(_themeColor, "&", "&amp;", -1), "\"", "&quot;", -1)
-	_darkColorEsc: strings.Replace(strings.Replace(_designDarkColor, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_darkColorEsc:  strings.Replace(strings.Replace(_designDarkColor, "&", "&amp;", -1), "\"", "&quot;", -1)
 
 	_themeTags: [
 		if _explicitTheme != "" {
@@ -3380,24 +3929,24 @@ import (
 			if _designDarkColor != "" && _designDarkColor != _designLightColor {
 				[
 					"<meta name=\"theme-color\" media=\"(prefers-color-scheme: light)\" content=\"\(_themeColorEsc)\">",
-					"<meta name=\"theme-color\" media=\"(prefers-color-scheme: dark)\" content=\"\(_darkColorEsc)\">"
+					"<meta name=\"theme-color\" media=\"(prefers-color-scheme: dark)\" content=\"\(_darkColorEsc)\">",
 				]
 			}
 			if _designDarkColor == "" || _designDarkColor == _designLightColor {
 				["<meta name=\"theme-color\" content=\"\(_themeColorEsc)\">"]
 			}
 		},
-		[]
+		[],
 	][0]
 
 	tags: list.Concat([
-		[if enabled { "<link rel=\"manifest\" href=\"/manifest.webmanifest\">" }],
+		[if enabled {"<link rel=\"manifest\" href=\"/manifest.webmanifest\">"}],
 		_themeTags,
 		[
-			if enabled { "<meta name=\"mobile-web-app-capable\" content=\"yes\">" },
-			if enabled { "<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">" },
-			if enabled { "<meta name=\"apple-mobile-web-app-title\" content=\"\(_appNameEsc)\">" },
-		]
+			if enabled {"<meta name=\"mobile-web-app-capable\" content=\"yes\">"},
+			if enabled {"<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">"},
+			if enabled {"<meta name=\"apple-mobile-web-app-title\" content=\"\(_appNameEsc)\">"},
+		],
 	])
 	links: strings.Join(tags, "\n")
 
@@ -3414,35 +3963,36 @@ import (
 	]
 }
 
-#socialPlan: S={
-	raw:  *null | _
+#socialPlan: {
+	let S = self
+	raw?: _
 	meta: _
 
-	_enabled: S.raw != null
-	_isObj:   _enabled && (S.raw & bool) == _|_ && (S.raw & {}) != _|_
+	_enabled: [if S.raw != _|_ {(S.raw & null) == _|_}, false][0]
+	_isObj:   [if _enabled {(S.raw & bool) == _|_ && (S.raw & {}) != _|_}, false][0]
 
-	_title: [if _isObj if S.raw.title != _|_ { S.raw.title }, S.meta.name][0]
-	_desc: [if _isObj if S.raw.description != _|_ { S.raw.description }, S.meta.description][0]
-	_type: [if _isObj if S.raw.type != _|_ { S.raw.type }, "website"][0]
-	_card: [if _isObj if S.raw.card != _|_ { S.raw.card }, if _hasImage { "summary_large_image" }, "summary"][0]
+	_title: [if _isObj if S.raw.title != _|_ {S.raw.title}, S.meta.name][0]
+	_desc:  [if _isObj if S.raw.description != _|_ {S.raw.description}, S.meta.description][0]
+	_type:  [if _isObj if S.raw.type != _|_ {S.raw.type}, "website"][0]
+	_card:  [if _isObj if S.raw.card != _|_ {S.raw.card}, if _hasImage {"summary_large_image"}, "summary"][0]
 
-	_hasImage: _isObj && S.raw.image != _|_
-	_rawImage: [if _hasImage { S.raw.image }, ""][0]
-	_hasDotDot: strings.Contains(_rawImage, "..")
+	_hasImage:           [if _isObj if S.raw.image != _|_ {true}, false][0]
+	_rawImage:           [if _hasImage {S.raw.image}, ""][0]
+	_hasDotDot:          strings.Contains(_rawImage, "..")
 	_isProtocolRelative: strings.HasPrefix(_rawImage, "//")
-	_isHttp: strings.HasPrefix(_rawImage, "http://") || strings.HasPrefix(_rawImage, "https://")
-	_isData: strings.HasPrefix(_rawImage, "data:")
+	_isHttp:             strings.HasPrefix(_rawImage, "http://") || strings.HasPrefix(_rawImage, "https://")
+	_isData:             strings.HasPrefix(_rawImage, "data:")
 
 	_cleanImage: strings.TrimPrefix(strings.TrimPrefix(_rawImage, "./"), "/")
 
 	_imageUrl: [
-		if !_hasImage { "" },
-		if _isHttp { _rawImage },
+		if !_hasImage {""},
+		if _isHttp {_rawImage},
 		"/" + _cleanImage,
 	][0]
 
 	_errors: [
-		if _hasDotDot { "social image path may not contain '..': '\(_rawImage)'" },
+		if _hasDotDot {"social image path may not contain '..': '\(_rawImage)'"},
 		if _isProtocolRelative {
 			"social.image must not be protocol-relative ('\(_rawImage)'); OpenGraph and Twitter cards require explicit https:// or http://"
 		},
@@ -3452,24 +4002,24 @@ import (
 	]
 
 	_titleEsc: strings.Replace(strings.Replace(_title, "&", "&amp;", -1), "\"", "&quot;", -1)
-	_descEsc: strings.Replace(strings.Replace(_desc, "&", "&amp;", -1), "\"", "&quot;", -1)
-	_typeEsc: strings.Replace(strings.Replace(_type, "&", "&amp;", -1), "\"", "&quot;", -1)
-	_cardEsc: strings.Replace(strings.Replace(_card, "&", "&amp;", -1), "\"", "&quot;", -1)
-	_imgEsc: strings.Replace(strings.Replace(_imageUrl, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_descEsc:  strings.Replace(strings.Replace(_desc, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_typeEsc:  strings.Replace(strings.Replace(_type, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_cardEsc:  strings.Replace(strings.Replace(_card, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_imgEsc:   strings.Replace(strings.Replace(_imageUrl, "&", "&amp;", -1), "\"", "&quot;", -1)
 
 	tags: [
-		if _enabled { "<meta property=\"og:type\" content=\"\(_typeEsc)\">" },
-		if _enabled { "<meta property=\"og:title\" content=\"\(_titleEsc)\">" },
-		if _enabled { "<meta property=\"og:description\" content=\"\(_descEsc)\">" },
-		if _hasImage && _imageUrl != "" { "<meta property=\"og:image\" content=\"\(_imgEsc)\">" },
+		if _enabled {"<meta property=\"og:type\" content=\"\(_typeEsc)\">"},
+		if _enabled {"<meta property=\"og:title\" content=\"\(_titleEsc)\">"},
+		if _enabled {"<meta property=\"og:description\" content=\"\(_descEsc)\">"},
+		if _hasImage && _imageUrl != "" {"<meta property=\"og:image\" content=\"\(_imgEsc)\">"},
 		if _isObj if S.raw.imageAlt != _|_ if _hasImage && _imageUrl != "" {
 			let altEsc = strings.Replace(strings.Replace(S.raw.imageAlt, "&", "&amp;", -1), "\"", "&quot;", -1)
 			"<meta property=\"og:image:alt\" content=\"\(altEsc)\">"
 		},
-		if _enabled { "<meta name=\"twitter:card\" content=\"\(_cardEsc)\">" },
-		if _enabled { "<meta name=\"twitter:title\" content=\"\(_titleEsc)\">" },
-		if _enabled { "<meta name=\"twitter:description\" content=\"\(_descEsc)\">" },
-		if _hasImage && _imageUrl != "" { "<meta name=\"twitter:image\" content=\"\(_imgEsc)\">" },
+		if _enabled {"<meta name=\"twitter:card\" content=\"\(_cardEsc)\">"},
+		if _enabled {"<meta name=\"twitter:title\" content=\"\(_titleEsc)\">"},
+		if _enabled {"<meta name=\"twitter:description\" content=\"\(_descEsc)\">"},
+		if _hasImage && _imageUrl != "" {"<meta name=\"twitter:image\" content=\"\(_imgEsc)\">"},
 		if _isObj if S.raw.site != _|_ {
 			let sEsc = strings.Replace(strings.Replace(S.raw.site, "&", "&amp;", -1), "\"", "&quot;", -1)
 			"<meta name=\"twitter:site\" content=\"\(sEsc)\">"
@@ -3490,57 +4040,58 @@ import (
 	]
 }
 
-#llmsPlan: L={
-	raw:          *null | _
-	meta:         *null | _
-	surface:      *null | _
-	state:        *null | _
-	capabilities: *null | _
+#llmsPlan: {
+	let L = self
+	raw?:          _
+	meta?:         _
+	surface?:      _
+	state?:        _
+	capabilities?: _
 
-	_enabled: L.raw != null && L.raw != false
-	_isObj:   _enabled && (L.raw & bool) == _|_ && (L.raw & {}) != _|_
+	_enabled: [if L.raw != _|_ {(L.raw & null) == _|_ && (L.raw & false) == _|_}, false][0]
+	_isObj:   [if _enabled {(L.raw & bool) == _|_ && (L.raw & {}) != _|_}, false][0]
 
-	_hasText:     _isObj && L.raw.text != _|_
-	_hasFullText: _isObj && L.raw.fullText != _|_
-	_hasFile:     _isObj && L.raw.file != _|_
-	_hasFullFile: _isObj && L.raw.fullFile != _|_
+	_hasText:     [if _isObj if L.raw.text != _|_ {true}, false][0]
+	_hasFullText: [if _isObj if L.raw.fullText != _|_ {true}, false][0]
+	_hasFile:     [if _isObj if L.raw.file != _|_ {true}, false][0]
+	_hasFullFile: [if _isObj if L.raw.fullFile != _|_ {true}, false][0]
 
-	_rawFile:     [if _hasFile { L.raw.file }, ""][0]
-	_rawFullFile: [if _hasFullFile { L.raw.fullFile }, ""][0]
+	_rawFile:     [if _hasFile {L.raw.file}, ""][0]
+	_rawFullFile: [if _hasFullFile {L.raw.fullFile}, ""][0]
 
-	_isRawBool:      (L.raw & bool) != _|_
-	_synthBrief:     _isRawBool && L.raw == true
-	_synthFull:      _isRawBool && L.raw == true
+	_isRawBool:  [if L.raw != _|_ {(L.raw & bool) != _|_}, false][0]
+	_synthBrief: [if _isRawBool {L.raw == true}, false][0]
+	_synthFull:  [if _isRawBool {L.raw == true}, false][0]
 
 	_isAuthRequired: [
-		if L.capabilities != null if L.capabilities.auth != _|_ if L.capabilities.auth.required == true { true },
-		false
+		if L.capabilities != _|_ if L.capabilities.auth != _|_ if L.capabilities.auth.required == true {true},
+		false,
 	][0]
 
-	_appName: [if L.meta != null if L.meta.name != _|_ { L.meta.name }, "App"][0]
-	_appDesc: [if L.meta != null if L.meta.description != _|_ { L.meta.description }, ""][0]
+	_appName: [if L.meta != _|_ if L.meta.name != _|_ {L.meta.name}, "App"][0]
+	_appDesc: [if L.meta != _|_ if L.meta.description != _|_ {L.meta.description}, ""][0]
 
 	_authSummary: [
 		if _isAuthRequired {
 			"Authentication is required to access protected routes."
 		},
-		"Publicly accessible web application."
+		"Publicly accessible web application.",
 	][0]
 
 	_screenSummaries: [
-		if L.surface != null if L.surface.screens != _|_
+		if L.surface != _|_ if L.surface.screens != _|_
 		for sName, s in L.surface.screens
-		if s.route != _|_ && !strings.Contains(s.route, ":") {
-			let title = [if s.title != _|_ { s.title }, sName][0]
+		if s.route != _|_ if !strings.Contains(s.route, ":") {
+			let title = [if s.title != _|_ {s.title}, sName][0]
 			let route = s.route
 			"- [\(title)](\(route)): \(sName) screen"
 		}
 	]
 
 	_publicEntityNames: [
-		if L.state != null if L.state.entities != _|_
+		if L.state != _|_ if L.state.entities != _|_
 		for eName, ent in L.state.entities
-		let entAccess = [for k, v in ent if k == "access" { v }, {scope: ""}][0]
+		let entAccess = [for k, v in ent if k == "access" {v}, {scope: ""}][0]
 		if entAccess.scope == "public" {
 			eName
 		}
@@ -3556,33 +4107,33 @@ import (
 		[
 			"# \(_appName)",
 			"",
-			if _appDesc != "" { "> \(_appDesc)\n" },
+			if _appDesc != "" {"> \(_appDesc)\n"},
 			"## Overview",
 			_authSummary,
 			"",
 			"## Screens",
 		],
-		[if len(_screenSummaries) > 0 { strings.Join(_screenSummaries, "\n") }, "None declared."][0:1],
+		[if len(_screenSummaries) > 0 {strings.Join(_screenSummaries, "\n")}, "None declared."][0:1],
 		[
 			"",
 			"## Data Models",
 		],
-		[if len(_entitySummaries) > 0 { strings.Join(_entitySummaries, "\n") }, "None declared."][0:1],
-		[""]
+		[if len(_entitySummaries) > 0 {strings.Join(_entitySummaries, "\n")}, "None declared."][0:1],
+		[""],
 	]), "\n")
 
 	_tableToEntity: {
-		if L.state != null if L.state.entities != _|_
+		if L.state != _|_ if L.state.entities != _|_
 		for eName, ent in L.state.entities {
 			(ent.table): eName
 		}
 	}
 
 	_screenDetails: [
-		if L.surface != null if L.surface.screens != _|_
+		if L.surface != _|_ if L.surface.screens != _|_
 		for sName, s in L.surface.screens
-		if s.route != _|_ && !strings.Contains(s.route, ":") {
-			let title = [if s.title != _|_ { s.title }, sName][0]
+		if s.route != _|_ if !strings.Contains(s.route, ":") {
+			let title = [if s.title != _|_ {s.title}, sName][0]
 			let route = s.route
 			let publicReadsMap = {
 				if s.reads != _|_
@@ -3593,36 +4144,36 @@ import (
 					(eName): true
 				}
 			}
-			let publicReads = [for eName, _ in publicReadsMap { eName }]
-			let reads = [if len(publicReads) > 0 { strings.Join(publicReads, ", ") }, "none"][0]
+			let publicReads = [for eName, _ in publicReadsMap {eName}]
+			let reads = [if len(publicReads) > 0 {strings.Join(publicReads, ", ")}, "none"][0]
 			"""
-			### Screen: \(title)
-			- Route: `\(route)`
-			- Reads: \(reads)
-			"""
+				### Screen: \(title)
+				- Route: `\(route)`
+				- Reads: \(reads)
+				"""
 		}
 	]
 
 	_entityDetails: [
-		if L.state != null if L.state.entities != _|_
+		if L.state != _|_ if L.state.entities != _|_
 		for eName in _publicEntityNames {
 			let ent = L.state.entities[eName]
 			let fields = [
 				if ent.fields != _|_
 				for f in ent.fields
-				let fRetired = [for k, v in f if k == "retired" { v }, false][0]
+				let fRetired = [for k, v in f if k == "retired" {v}, false][0]
 				if fRetired == false {
-					let fName = [if f.name != _|_ { f.name }, "field"][0]
-					let fType = [if f.type != _|_ { f.type }, "string"][0]
+					let fName = [if f.name != _|_ {f.name}, "field"][0]
+					let fType = [if f.type != _|_ {f.type}, "string"][0]
 					"  - `\(fName)` (\(fType))"
 				}
 			]
-			let fieldsStr = [if len(fields) > 0 { strings.Join(fields, "\n") }, "  - (no fields)"][0]
+			let fieldsStr = [if len(fields) > 0 {strings.Join(fields, "\n")}, "  - (no fields)"][0]
 			"""
-			### Entity: \(eName)
-			Fields:
-			\(fieldsStr)
-			"""
+				### Entity: \(eName)
+				Fields:
+				\(fieldsStr)
+				"""
 		}
 	]
 
@@ -3630,19 +4181,19 @@ import (
 		[
 			"# \(_appName) - Full Specification",
 			"",
-			if _appDesc != "" { "> \(_appDesc)\n" },
+			if _appDesc != "" {"> \(_appDesc)\n"},
 			"## Architecture",
 			_authSummary,
 			"",
 			"## Screens Specification",
 		],
-		[if len(_screenDetails) > 0 { strings.Join(_screenDetails, "\n\n") }, "None declared."][0:1],
+		[if len(_screenDetails) > 0 {strings.Join(_screenDetails, "\n\n")}, "None declared."][0:1],
 		[
 			"",
 			"## Data Models Schema",
 		],
-		[if len(_entityDetails) > 0 { strings.Join(_entityDetails, "\n\n") }, "None declared."][0:1],
-		[""]
+		[if len(_entityDetails) > 0 {strings.Join(_entityDetails, "\n\n")}, "None declared."][0:1],
+		[""],
 	]), "\n")
 
 	_errors: [
@@ -3714,46 +4265,43 @@ import (
 	]
 }
 
-#wellKnownPlan: W={
-	raw: *null | _
+#wellKnownPlan: {
+	let W = self
+	raw?: _
 
-	_enabled: W.raw != null
-	_rawMap: [if _enabled && (W.raw & bool) == _|_ && (W.raw & {}) != _|_ { W.raw }, {}][0]
+	_enabled: [if W.raw != _|_ {(W.raw & null) == _|_}, false][0]
+	_rawMap:  [if _enabled if (W.raw & bool) == _|_ if (W.raw & {}) != _|_ {W.raw}, {}][0]
 
 	_errors: list.Concat([
 		[
 			for name, _ in _rawMap
-			if name == "" || name == "." || strings.Contains(name, "..") || strings.Contains(name, "/")
-			{ "wellKnown key may not contain '..' or '/' and may not be empty or '.': '\(name)'" }
+			if name == "" || name == "." || strings.Contains(name, "..") || strings.Contains(name, "/") {"wellKnown key may not contain '..' or '/' and may not be empty or '.': '\(name)'"}
 		],
 		[
 			for name, item in _rawMap
 			if (item & {}) != _|_
-			if item.text != _|_ && item.file != _|_
-			{ "wellKnown '\(name)' cannot declare both text and file" }
+			if item.text != _|_ && item.file != _|_ {"wellKnown '\(name)' cannot declare both text and file"}
 		],
 		[
 			for name, item in _rawMap
 			if (item & {}) != _|_
-			if item.text == _|_ && item.file == _|_
-			{ "wellKnown '\(name)' must declare either text or file" }
+			if item.text == _|_ && item.file == _|_ {"wellKnown '\(name)' must declare either text or file"}
 		],
 		[
 			for _, item in _rawMap
 			if (item & {}) != _|_
 			if item.file != _|_
-			if strings.Contains(item.file, "..") || strings.HasPrefix(item.file, "/")
-			{ "wellKnown file may not contain '..' or begin with '/': '\(item.file)'" }
+			if strings.Contains(item.file, "..") || strings.HasPrefix(item.file, "/") {"wellKnown file may not contain '..' or begin with '/': '\(item.file)'"}
 		],
 	])
 
 	files: {
 		for name, item in _rawMap {
 			let isStr = (item & string) != _|_
-			let hasText = (item & {}) != _|_ && item.text != _|_
-			let hasFile = (item & {}) != _|_ && item.file != _|_
+			let hasText = [if (item & {}) != _|_ if item.text != _|_ {true}, false][0]
+			let hasFile = [if (item & {}) != _|_ if item.file != _|_ {true}, false][0]
 			if (isStr || hasText) && !hasFile {
-				let content = [if isStr { item }, if hasText { item.text }, ""][0]
+				let content = [if isStr {item}, if hasText {item.text}, ""][0]
 				".well-known/\(name)": {
 					format: "text"
 					text:   content
@@ -3766,10 +4314,9 @@ import (
 		[
 			for name, item in _rawMap
 			let isStr = (item & string) != _|_
-			let hasText = (item & {}) != _|_ && item.text != _|_
-			let hasFile = (item & {}) != _|_ && item.file != _|_
-			if (isStr || hasText) && !hasFile && name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/")
-			{
+			let hasText = [if (item & {}) != _|_ if item.text != _|_ {true}, false][0]
+			let hasFile = [if (item & {}) != _|_ if item.file != _|_ {true}, false][0]
+			if (isStr || hasText) && !hasFile && name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/") {
 				file:   ".well-known/\(name)"
 				target: "/srv/.well-known/\(name)"
 				watch:  true
@@ -3777,11 +4324,10 @@ import (
 		],
 		[
 			for name, item in _rawMap
-			let hasText = (item & {}) != _|_ && item.text != _|_
-			let hasFile = (item & {}) != _|_ && item.file != _|_
+			let hasText = [if (item & {}) != _|_ if item.text != _|_ {true}, false][0]
+			let hasFile = [if (item & {}) != _|_ if item.file != _|_ {true}, false][0]
 			if hasFile && !hasText
-			if name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/") && !strings.Contains(item.file, "..") && !strings.HasPrefix(item.file, "/")
-			{
+			if name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/") && !strings.Contains(item.file, "..") && !strings.HasPrefix(item.file, "/") {
 				file:   item.file
 				target: "/srv/.well-known/\(name)"
 				watch:  true
@@ -3790,44 +4336,42 @@ import (
 	])
 }
 
-#sitemapPlan: S={
-	raw:          *null | _
-	meta:         *null | _
-	capabilities: *null | _
+#sitemapPlan: {
+	let S = self
+	raw?:          _
+	meta?:         _
+	capabilities?: _
 
-	_isExplicitBool: (S.raw & bool) != _|_
-	_isExplicitObj:  (S.raw & {}) != _|_
-	_isDeclared:     S.raw != null
+	_isExplicitBool: [if S.raw != _|_ {(S.raw & bool) != _|_}, false][0]
+	_isExplicitObj:  [if S.raw != _|_ {(S.raw & {}) != _|_}, false][0]
+	_isDeclared:     [if S.raw != _|_ {(S.raw & null) == _|_}, false][0]
 
 	_isAuthRequired: [
-		if S.capabilities != null if S.capabilities.auth != _|_ if S.capabilities.auth.required == true { true },
-		false
+		if S.capabilities != _|_ if S.capabilities.auth != _|_ if S.capabilities.auth.required == true {true},
+		false,
 	][0]
 
 	enabled: [
-		if _isExplicitBool { S.raw },
-		if _isExplicitObj if S.raw.enabled != _|_ { S.raw.enabled },
-		true
+		if _isExplicitBool {S.raw},
+		if _isExplicitObj if S.raw.enabled != _|_ {S.raw.enabled},
+		true,
 	][0]
 
 	declared: _isDeclared
 
-	_exclude: [if _isExplicitObj if S.raw.exclude != _|_ { S.raw.exclude }, []][0]
-	_extra:   [if _isExplicitObj if S.raw.extra != _|_ { S.raw.extra }, []][0]
+	_exclude: [if _isExplicitObj if S.raw.exclude != _|_ {S.raw.exclude}, []][0]
+	_extra:   [if _isExplicitObj if S.raw.extra != _|_ {S.raw.extra}, []][0]
 
 	_excludeErrors: [
 		for ex in _exclude
-		if !strings.HasPrefix(ex, "/")
-		{ "sitemap exclude path must begin with '/': '\(ex)'" }
+		if !strings.HasPrefix(ex, "/") {"sitemap exclude path must begin with '/': '\(ex)'"}
 	]
 
 	_extraErrors: [
 		for ext in _extra
-		if !strings.HasPrefix(ext, "/") && !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://")
-		{ "sitemap extra path must begin with '/', 'http://', or 'https://': '\(ext)'" },
+		if !strings.HasPrefix(ext, "/") && !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://") {"sitemap extra path must begin with '/', 'http://', or 'https://': '\(ext)'"},
 		for ext in _extra
-		if strings.Contains(ext, "{{") || strings.Contains(ext, "}}")
-		{ "sitemap extra path may not contain template delimiters '{{' or '}}': '\(ext)'" }
+		if strings.Contains(ext, "{{") || strings.Contains(ext, "}}") {"sitemap extra path may not contain template delimiters '{{' or '}}': '\(ext)'"},
 	]
 
 	_authConflictErrors: [
@@ -3842,58 +4386,59 @@ import (
 	extra:   _extra
 
 	tag: [
-		if enabled && _isDeclared { "<link rel=\"sitemap\" type=\"application/xml\" href=\"/sitemap.xml\">" },
-		""
+		if enabled && _isDeclared {"<link rel=\"sitemap\" type=\"application/xml\" href=\"/sitemap.xml\">"},
+		"",
 	][0]
 }
 
-#envelopePlan: P={
-	meta:         _
-	surface:      *null | _
-	state:        *null | _
-	capabilities: *null | _
+#envelopePlan: {
+	let P = self
+	meta:          _
+	surface?:      _
+	state?:        _
+	capabilities?: _
 
 	favicon: #faviconPlan & {
-		if P.meta.favicon != _|_ { raw: P.meta.favicon }
+		if P.meta.favicon != _|_ {raw: P.meta.favicon}
 	}
 
 	hints: #hintsPlan & {
-		if P.meta.preconnect != _|_ { preconnect: P.meta.preconnect }
-		if P.meta.dnsPrefetch != _|_ { dnsPrefetch: P.meta.dnsPrefetch }
+		if P.meta.preconnect != _|_ {preconnect: P.meta.preconnect}
+		if P.meta.dnsPrefetch != _|_ {dnsPrefetch: P.meta.dnsPrefetch}
 	}
 
 	manifest: #manifestPlan & {
-		meta:         P.meta
-		favicon:      P.favicon
-		capabilities: P.capabilities
-		if P.surface != null {
-			if P.surface.screens != _|_ { screens: P.surface.screens }
-			if P.surface.design != _|_ { design: P.surface.design }
+		meta:    P.meta
+		favicon: P.favicon
+		if P.capabilities != _|_ {capabilities: P.capabilities}
+		if P.surface != _|_ {
+			if P.surface.screens != _|_ {screens: P.surface.screens}
+			if P.surface.design != _|_ {design: P.surface.design}
 		}
-		if P.meta.manifest != _|_ { raw: P.meta.manifest }
+		if P.meta.manifest != _|_ {raw: P.meta.manifest}
 	}
 
 	social: #socialPlan & {
 		meta: P.meta
-		if P.meta.social != _|_ { raw: P.meta.social }
+		if P.meta.social != _|_ {raw: P.meta.social}
 	}
 
 	llms: #llmsPlan & {
-		meta:         P.meta
-		surface:      P.surface
-		state:        P.state
-		capabilities: P.capabilities
-		if P.meta.llms != _|_ { raw: P.meta.llms }
+		meta: P.meta
+		if P.surface != _|_ {surface: P.surface}
+		if P.state != _|_ {state: P.state}
+		if P.capabilities != _|_ {capabilities: P.capabilities}
+		if P.meta.llms != _|_ {raw: P.meta.llms}
 	}
 
 	wellKnown: #wellKnownPlan & {
-		if P.meta.wellKnown != _|_ { raw: P.meta.wellKnown }
+		if P.meta.wellKnown != _|_ {raw: P.meta.wellKnown}
 	}
 
 	sitemap: #sitemapPlan & {
-		meta:         P.meta
-		capabilities: P.capabilities
-		if P.meta.sitemap != _|_ { raw: P.meta.sitemap }
+		meta: P.meta
+		if P.capabilities != _|_ {capabilities: P.capabilities}
+		if P.meta.sitemap != _|_ {raw: P.meta.sitemap}
 	}
 
 	_errors: list.Concat([
@@ -3915,11 +4460,11 @@ import (
 			strings.Join([
 				for s in [
 					P.hints.links,
-					[if P.meta.favicon != _|_ { P.favicon.links }, "<link rel=\"icon\" href=\"data:,\">"][0],
+					[if P.meta.favicon != _|_ {P.favicon.links}, "<link rel=\"icon\" href=\"data:,\">"][0],
 					P.manifest.links,
 					P.social.links,
 					P.sitemap.tag,
-				] if s != "" { s }
+				] if s != "" {s}
 			], "\n")
 		},
 	][0]
@@ -3931,7 +4476,7 @@ import (
 				text:   P.favicon.svgFile
 			}
 		}
-		if P.manifest.jsonText != "" {
+		if P.manifest.enabled {
 			"shell/manifest.webmanifest": {
 				format: "text"
 				text:   P.manifest.jsonText
@@ -3970,7 +4515,7 @@ import (
 			(s.target): s
 		}
 	}
-	statics: [for _, s in _staticMap { s }]
+	statics: [for _, s in _staticMap {s}]
 }
 
 // What an open constraint admits, for a reader that has to propose a value:

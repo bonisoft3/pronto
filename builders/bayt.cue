@@ -14,6 +14,10 @@
 package bayt
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/yaml"
 	"list"
 	"regexp"
@@ -27,7 +31,8 @@ import (
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
-	zypper "github.com/bonisoft3/bayt/distros/zypper"
+	"github.com/bonisoft3/pronto/identity"
+	apt "github.com/bonisoft3/bayt/distros/apt"
 )
 
 // bayt's own project schema, re-exported so a compiler (or anyone) can
@@ -45,7 +50,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.71.0", ...}
+	tools:     {"github:bonisoft3/bayt": "0.72.4", ...}
 	hostTools: {"github:F1bonacc1/process-compose": "v1.122.0", ...}
 	say: say: {
 		...
@@ -59,13 +64,14 @@ import (
 // The platform trees mise.local.toml resolves an app's toolchain to in the
 // monorepo (docs/monorepo.md).
 #CompilerSources: {
-	paths: ["cue.mod", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+	paths:   ["cue.mod", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
 	exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*", "**/.bayt/**", "**/.task/**", "**/node_modules/**"]
 }
 
 // The canonical pronto build graph for one app, authored as the program's
 // `build:` seat.
-#Build: B={
+#Build: {
+	let B = self
 	meta: {
 		app: string
 		// Where the app sits under the monorepo's root, which its images take
@@ -78,7 +84,7 @@ import (
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
 	// with bare names, lowered into this project by mecha's own #Runtime.
-	cluster: mecha.#Cluster
+	cluster!: _
 
 	// The omnishell runtime image the app's served image copies: pronto's pin,
 	// unless the app runs another omnishell (a fork's prerelease, whose copy
@@ -96,16 +102,16 @@ import (
 			defaultGlobs: "pronto-tree": {glob: "**"}
 			// Generated, the checks' own, or local to a checkout.
 			defaultExclude: {
-				"pronto-bayt": *{glob: ".bayt/**"} | null
-				"pronto-tests": *{glob: "tests/**"} | null
-				"pronto-task": {glob: ".task/**"}
+				"pronto-bayt":    *{glob: ".bayt/**"} | null
+				"pronto-tests":   *{glob: "tests/**"} | null
+				"pronto-task":    {glob: ".task/**"}
 				"pronto-history": *{glob: ".pronto/proto-baseline.json"} | null
-				"pronto-live": *{glob: ".pronto/live/**"} | null
-				"pronto-node": {glob: "**/node_modules/**"}
+				"pronto-live":    *{glob: ".pronto/live/**"} | null
+				"pronto-node":    {glob: "**/node_modules/**"}
 				// A checkout's mise lock records its absolute paths.
 				"pronto-local-lock": {glob: "mise.local.lock"}
-				"pronto-host-mise": {glob: ".mise.host.toml"}
-				"pronto-host-lock": {glob: "mise.host.lock"}
+				"pronto-host-mise":  {glob: ".mise.host.toml"}
+				"pronto-host-lock":  {glob: "mise.host.lock"}
 			}
 		}
 	}
@@ -139,9 +145,11 @@ import (
 	// the runtime's compose network, reaching the app at the TLS door, whose
 	// exit code is the verdict. One container per check rather than one per
 	// app, so each keeps its own rule, priority and verdict on the loop.
-	checks: [Name=string]: C={
+	checks: [string]~(Name,_): {
+		let C = self
+
 		// Run in order from the app's directory, under its toolchain's mise.
-		cmds: [string, ...string]
+		cmds:      [string, ...string]
 		note:      string
 		priority?: int
 		// Playwright's base, with its browsers; without, setup's image.
@@ -200,10 +208,13 @@ import (
 		["visual"],
 	]) {"'\(s)'"}], " ")
 	_prepareHostWork: """
-		if (not (".certs/localhost.pem" | path exists)) or (not (".certs/localhost-key.pem" | path exists)) {
+		let subs = (if ("shell/shell.json" | path exists) { open shell/shell.json | get -o units | default {} | values | get -o subdomain | where ($it != null and $it != "") | uniq | each {|s| [$"($s).localhost" $"($s).caddy"] } | flatten } else { [] })
+		let dns_hosts = (["localhost" "caddy"] | append $subs)
+		let san = (if (".certs/localhost.pem" | path exists) { try { ^openssl x509 -in .certs/localhost.pem -noout -ext subjectAltName } catch { "" } } else { "" })
+		if (not (".certs/localhost.pem" | path exists)) or (not (".certs/localhost-key.pem" | path exists)) or ($dns_hosts | any {|h| not ($san | str contains $"DNS:($h)") }) {
 		  mkdir .certs
 		  with-env { CAROOT: (".certs" | path expand) } {
-		    ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost caddy 127.0.0.1 ::1
+		    ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem ...$dns_hosts 127.0.0.1 ::1
 		  }
 		}
 		let caroot_ca = ((^mise x -- mkcert -CAROOT | str trim) | path join "rootCA.pem")
@@ -237,7 +248,8 @@ import (
 		    }
 		    if not $matched { error make { msg: $d.msg } }
 		  }
-		  ^mise x -- deno run --config ($omnishell | path join "server/deno.json") $"--allow-read=($tree_dir)" $"--allow-write=($tree_dir),($scripts_out)" ($omnishell | path join "server/address.ts") $tree_dir $scripts_out
+		  let frames = ($ep | parse -r '--frames \\x27(?<f>[^\\x27]+)\\x27' | get f)
+		  ^mise x -- deno run --config ($omnishell | path join "server/deno.json") $"--allow-read=($tree_dir)" $"--allow-write=($tree_dir),($scripts_out)" ($omnishell | path join "server/address.ts") $tree_dir $scripts_out ...($frames | each {|f| ["--frames" $f] } | flatten)
 		  glob ($tree_dir | path join "*" | str replace -a (char -u 5c) "/") | each {|item| cp -rf $item $srv_dir } | ignore
 		  if (($tree_dir | path join "omnishell") | path exists) { cp -rf ($tree_dir | path join "omnishell") $omni_dir }
 		  for rdir in [$srv_dir $omni_dir] {
@@ -313,7 +325,7 @@ import (
 		}
 		\(B._prepareHostWork)
 		$"log_location: ($work_fwd)/proc.log\n" | save -f ($work | path join "pc-logs.yaml")
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
 		let start_p = (20000 + (($h | str substring 0..6 | into int -r 16) mod 7000))
 		let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: "127.0.0.1", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' ($pvars | to json -r) ($start_p | into string) | from json)
 		let port = ($alloc._PC_PORT? | default $def_port)
@@ -400,7 +412,7 @@ import (
 		  DENO_CERT: $cert_p
 		}
 		let pc_bin = (^mise which process-compose | str trim)
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) | get var | uniq | sort)
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort)
 		mut next_p = (15000 + (((($nu.pid * 2654435761) + (random int 0..999999)) mod 85) * 200))
 		let ok = (try {
 		  for suite in [\(B._localSuites)] {
@@ -452,7 +464,8 @@ import (
 	// else the pinned image. The app's images take the monorepo's layout under
 	// it (project.imageDir), so whatever a view brings lands where the
 	// checkout keeps it, and mise.local.toml's relative paths hold inside.
-	_switch: S={
+	_switch: {
+		let S = self
 		service: string
 		pin:     string
 		out:     "${MONOREPO_COMPOSE_MODE:-docker-image://\(S.pin)}${MONOREPO_COMPOSE_MODE:+:\(S.service)}"
@@ -460,7 +473,8 @@ import (
 	// mecha's images, named by #DefaultCluster. PRONTO_IMAGE_REGISTRY, set where
 	// the build runs, pulls each from that registry instead of its publisher's:
 	// the same name and digest, so a mirror serves the same bytes or none.
-	_registered: R={
+	_registered: {
+		let R = self
 		pin:    string
 		_parts: strings.Split(R.pin, "/")
 		out:    "${PRONTO_IMAGE_REGISTRY:-\(strings.Join(list.Slice(R._parts, 0, len(R._parts)-1), "/"))}/\(R._parts[len(R._parts)-1])"
@@ -469,6 +483,7 @@ import (
 		for s, pin in mecha.published {
 			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": (_registered & {"pin": pin}).out}).out
 		}
+
 		// An image mecha has not published yet builds in the monorepo alone:
 		// elsewhere a build that needs it pulls a reference that names why.
 		for s in mecha.#Images if mecha.published[s] == _|_ {
@@ -482,13 +497,14 @@ import (
 	// Monorepo trees a stage carries in the monorepo: views of the siblings'
 	// targets, which in a mirror switch to an image with no /monorepo, and
 	// so copy nothing.
-	_views: V={
+	_views: {
+		let V = self
 		#views: [...string]
 		dockerfile: defaultCopy: {for v in V.#views {
 			(v): {
 				from: name: v
 				srcs: ["/monorep[o]"]
-				dst: "/monorepo/"
+				dst:  "/monorepo/"
 			}
 		}}
 		compose: build: additional_contexts: {for v in V.#views {(v): (_switch & {service: v, pin: core.lock.images.busybox}).out}}
@@ -503,7 +519,7 @@ import (
 		// then resolve the trees before they are copied.
 		dockerfile: epilogue: list.Concat([
 			[for v in _toolchainViews {"COPY --from=\(v) /monorep[o] /monorepo/"}],
-			["COPY [m]ise.local.toml ./", "RUN mise install"],
+			[{srcs: ["[m]ise.local.toml"]}, "RUN mise install"],
 		])
 		compose: build: additional_contexts: {for v in _toolchainViews {(v): (_switch & {service: v, pin: core.lock.images.busybox}).out}}
 	}
@@ -521,9 +537,9 @@ import (
 	// runtime's images are built from. Launch reaches them through `:outs`
 	// edges, which a `:srcs` view does not follow, so each is named.
 	_stackSrcs: [for k, _ in B._mechaRuntime.targets
-		let t = project.targets[k]
-		if t != null if t.dockerfile != _|_
-		if len(t.srcs.globs) > 0 || t.srcs.defaultGlobs != null {":\(k):srcs"}]
+	let t = project.targets[k]
+	if t != null if t.dockerfile != _|_
+	if len(t.srcs.globs) > 0 || t.srcs.defaultGlobs != null {":\(k):srcs"}]
 	// A runner's RUN builds its stack inside, where only what its image holds
 	// and its build args reach: the switch, bayt's runtime the host names, the
 	// siblings' views, and every mode's file, since the views carry only the
@@ -565,29 +581,33 @@ import (
 	// own (#DefaultCluster). Named from omnishell's root, and never none: a
 	// caddy without them would serve no interpreter.
 	terminalStatics: [_, ...{file: string, target: string, ...}]
-	screenSources: [...string]
+	screenSources:   [...string]
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
 	_presentation: {
 		caddy: {
 			workdir: "/pronto"
 			hmr: {
-				native: true
-				code: [".pronto/live/readiness/**"]
-				configs: [B.cluster.meta.caddyfile]
+				native:    true
+				code:      [".pronto/live/readiness/**"]
+				configs:   [B.cluster.meta.caddyfile]
 				reactions: {code: "none", configs: "restart", assets: "restart"}
-				assets: [".certs/**"]
-				tools: [], docs: []
+				assets:    [".certs/**"]
+				tools:     []
+				docs:      []
 			}
 		}
 		render: {
 			workdir: "/render"
 			hmr: {
 				native: true
-				code: ["shell/index.html"]
+				// The development door's entry (emit.cue's _doorPolicy).
+				code:      [".pronto/development/index.html"]
 				reactions: {code: "none", assets: "restart"}
-				assets: [".pronto/development/shell.json"]
-				configs: [], tools: [], docs: []
+				assets:    [".pronto/development/shell.json"]
+				configs:   []
+				tools:     []
+				docs:      []
 			}
 		}
 	}
@@ -619,10 +639,11 @@ import (
 					host: {
 						platform: "host"
 						stop:     true
-						cmds: [{use: "./bayt-task.nu", do: "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}]
+						cmds:     [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}]
 					}
 				}
 			}
+
 			// integrate@local, beside the builtin rather than among the loop's
 			// checks: sayt's loop closes integrate's rulemap over them, and a check
 			// names no platform. launch@local is the loop's (emit.cue).
@@ -630,15 +651,37 @@ import (
 				platform: "local"
 				priority: -1
 				stop:     true
-				cmds: [{do: distribution.#IntegrateLocal.out}]
+				cmds:     [{do: distribution.#IntegrateLocal.out}]
 			}
 		}
-		// The host tier serves omnishell from `mise where`, and its data-plane
+		// A verb that reads omnishell's tree (OMNISHELL_DIR, else `mise
+		// where`) — build's served tree, launch's and integrate's live tree,
+		// release@pages's interpreter and release@cloudflare's fragment
+		// (bundle/bundle.ts, bundle/edge.ts) — runs this first at each such
+		// platform. sayt keeps a rule without a platform at the verb's default
+		// platform alone, and a platform's own rules alone under
+		// `verb@platform`; it runs rules in ascending priority, and the
+		// builtin (0) and every platform rule stop. omnishell's data-plane
 		// bundle is a build product (omnishell's bayt `bundle`): in the
-		// monorepo, where the switch is set, the host verbs build it from the
+		// monorepo, where the switch is set, the verb builds it from the
 		// checkout's mecha; a release ships it, and one without it is refused
-		// here rather than served as a dead terminal.
-		_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
+		// here rather than served as a dead terminal. The graph cannot carry
+		// this edge: the targets an app commits are its mirror's, and a
+		// cross-project dep includes a tree the mirror lacks.
+		_bundleGates: {
+			build:     {default: true, platforms: []}
+			launch:    {default: true, platforms: ["host", "compose", "cloudflare", "local"]}
+			integrate: {default: true, platforms: ["host", "local"]}
+			release:   {default: false, platforms: [for t in B.meta.targets if t == "pages" || t == "cloudflare" {t}]}
+		}
+		_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
+		files: "say.yaml": say: {for verb, g in _bundleGates if g.default || len(g.platforms) > 0 {
+			(verb): rulemap: {
+				if g.default {"omnishell-bundle": _bundleGate}
+				for p in g.platforms {"omnishell-bundle-\(p)": _bundleGate & {platform: p}}
+			}
+		}}
+		_omnishellBundle: "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
 		// The app is its repository's root, in its mirror and in the monorepo
 		// alike: the files it commits are its mirror's. Its images take the
 		// monorepo's layout where the switch is on.
@@ -646,7 +689,26 @@ import (
 		name:     B.meta.app
 		imageDir: "${MONOREPO_COMPOSE_MODE:+\(B.meta.dir)}"
 
-		targets: {for k, t in B._mechaRuntime.targets if k != "launch" {(k): t}}
+		// Cluster targets built from or copying omnishell's tree or mecha's
+		// images resolve them through the monorepo switch.
+		targets: {for k, t in B._mechaRuntime.targets {
+			if k != "launch" {(k): t}
+			if t != null if t.dockerfile != _|_ {
+				if t.dockerfile.from != null if t.dockerfile.from.name != _|_ if B._mechaContexts[t.dockerfile.from.name] != _|_ {
+					(k): compose: build: additional_contexts: (t.dockerfile.from.name): B._mechaContexts[t.dockerfile.from.name]
+				}
+				if t.dockerfile.copy != _|_ {
+					for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_ {
+						if c.from.name == B._omnishell {
+							(k): compose: build: additional_contexts: (B._omnishell): B._omnishellContext
+						}
+						if B._mechaContexts[c.from.name] != _|_ {
+							(k): compose: build: additional_contexts: (c.from.name): B._mechaContexts[c.from.name]
+						}
+					}
+				}
+			}
+		}}
 		// What every up closure includes: the switch's file, and the networks
 		// the cluster's targets join, declared in a file of the app's (emit.cue
 		// writes both). One list, since two declarations of it would conflict
@@ -662,29 +724,6 @@ import (
 					(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}
 				}}
 				compose: build: additional_contexts: (B._omnishell): B._omnishellContext
-			}
-		}
-
-		// A cluster target copying from omnishell's tree (the renderer)
-		// resolves it through the same switch.
-		targets: {for k, t in B._mechaRuntime.targets
-			if t != null && t.dockerfile != _|_ && t.dockerfile.copy != _|_
-			if len([for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_ if c.from.name == B._omnishell {c}]) > 0 {
-				(k): compose: build: additional_contexts: (B._omnishell): B._omnishellContext
-			}
-		}
-		targets: {for k, t in B._mechaRuntime.targets
-			if t != null && t.dockerfile != _|_ && t.dockerfile.from != null
-			if t.dockerfile.from.name != _|_
-			if B._mechaContexts[t.dockerfile.from.name] != _|_ {
-				(k): compose: build: additional_contexts: (t.dockerfile.from.name): B._mechaContexts[t.dockerfile.from.name]
-			}
-		}
-		targets: {for k, t in B._mechaRuntime.targets
-			if t != null && t.dockerfile != _|_ && t.dockerfile.copy != _|_
-			for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_
-			if B._mechaContexts[c.from.name] != _|_ {
-				(k): compose: build: additional_contexts: (c.from.name): B._mechaContexts[c.from.name]
 			}
 		}
 		targets: {
@@ -710,7 +749,7 @@ import (
 				cache: full: false
 				dockerfile: from: ref: ":generate"
 				srcs: {
-					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
+					globs:          [".bayt/checks.yaml", ".pronto/facts.json"]
 					defaultExclude: {"pronto-tests": null, "pronto-bayt": null, "pronto-history": null}
 				}
 				cmd: builtin: {do: B._actions.lint, shell: "nu", dockerfile: do: "cue vet -c ./..."}
@@ -731,7 +770,7 @@ import (
 				// outside this project's source view.
 				taskfile: incremental: false
 				srcs: B._program.srcs & {
-					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
+					globs:          [".bayt/checks.yaml", ".pronto/facts.json"]
 					defaultExclude: {"pronto-tests": null, "pronto-bayt": null}
 				}
 				cmd: builtin: {do: B._actions.test, shell: "nu", dockerfile: do: B.meta.testCmd}
@@ -739,7 +778,7 @@ import (
 			}
 			for verb in ["launch", "integrate"] {
 				"\(verb)-action": {
-					deps: [":build"]
+					deps:     [":build"]
 					taskfile: {incremental: false, run: "always"}
 					cmd: builtin: {do: B._actions[verb], shell: "nu"}
 				}
@@ -766,7 +805,7 @@ import (
 					env: {
 						APP_URL: {peer: "caddy", port: "door", host: "localhost", prefix: "https://"}
 						let door = resilience.resilience.timeouts.door
-						SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+						SETTLE_TIMEOUT_MS: "\((door.auth+door.crud)*1000)"
 					}
 					after: {
 						launch: "healthy"
@@ -781,7 +820,7 @@ import (
 				// Image-only runtime dependencies keep its toolchain out of the visual checker.
 				deps: [":launch:outs"]
 				taskfile: incremental: false
-				srcs: globs: list.Concat([["shell/shell.yaml"], B.screenSources])
+				srcs: globs:           list.Concat([["shell/shell.yaml"], B.screenSources])
 				activate: ""
 				dockerfile: {
 					from: name: core.lock.images.playwright
@@ -798,7 +837,7 @@ import (
 						shell:      "nu"
 						dockerfile: null
 						srcs: globs: list.Concat([["[t]ests/**"], [for _, c in B.checks for s in c.srcs {s}]])
-						do:         B._localIntegrateDo
+						do: B._localIntegrateDo
 					}
 					"deno-install": (deno.#containerCmd & {
 						do: "deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts"
@@ -816,7 +855,7 @@ import (
 						// A screen settles once its guest and its reads have
 						// answered, each inside its door's bound.
 						let door = resilience.resilience.timeouts.door
-						SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+						SETTLE_TIMEOUT_MS: "\((door.auth+door.crud)*1000)"
 					}
 					// The aggregate the whole runtime hangs off, healthy: loaded on its
 					// own the closure brings the plane up, and under the verb, which
@@ -842,7 +881,7 @@ import (
 			"ci-visual": sayt.ci & B._ciTask & B._runner & {
 				#closure: "integrate"
 				#check:   "visual"
-				deps: list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
+				deps:     list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
 			}
 			if B.cluster.capabilities.server {
 				let schema = B.cluster.surface.schema
@@ -912,9 +951,9 @@ import (
 					dockerfile: {
 						from: name: core.lock.images.playwright
 						defaultPreamble: {
-							"lazybox-copy": {priority: -10, line: "COPY --from=\(core.lock.images.lazybox) /lazybox/ /root/.local/share/lazybox/"}
-							"path-env": {priority: -9, line: "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH"}
-							"mise-trusted": {priority: -8, line: "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo"}
+							"lazybox-copy":    {priority: -10, line: "COPY --from=\(core.lock.images.lazybox) /lazybox/ /root/.local/share/lazybox/"}
+							"path-env":        {priority: -9, line: "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH"}
+							"mise-trusted":    {priority: -8, line: "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo"}
 							"playwright-path": {priority: -7, line: "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright"}
 							"playwright-skip": {priority: -6, line: "ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"}
 						}
@@ -934,7 +973,7 @@ import (
 				"check-\(name)": {
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
-					srcs: globs: list.Concat([["tests/**"], c.srcs])
+					srcs: globs:                 list.Concat([["tests/**"], c.srcs])
 					"process-compose": activate: "mise x --"
 					entrypoint: {
 						shell: "nu"
@@ -945,7 +984,7 @@ import (
 							ORIGIN:  ["${ORIGIN:-\(B.cluster.meta.door.scheme)://", {peer: "caddy", port: "door", host: "localhost"}, "}"]
 							if c.browser {
 								let door = resilience.resilience.timeouts.door
-								SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+								SETTLE_TIMEOUT_MS: "\((door.auth+door.crud)*1000)"
 							}
 							if c.database {
 								DATABASE_URL:     ["postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@", {peer: "database", port: "pg"}, "/${POSTGRES_DB:-\(B.meta.app)}"]
@@ -975,7 +1014,7 @@ import (
 							// A browser check waits on screens as visual lint does.
 							if c.browser {
 								let door = resilience.resilience.timeouts.door
-								SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+								SETTLE_TIMEOUT_MS: "\((door.auth+door.crud)*1000)"
 							}
 							if c.database {
 								DATABASE_URL:     B.cluster.surface.databaseUrl
@@ -991,15 +1030,16 @@ import (
 				"ci-\(name)": sayt.ci & B._ciTask & B._runner & {
 					#closure: "check-\(name)"
 					#check:   name
-					deps: list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])
+					deps:     list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])
 				}
 			}
+
 			// Every suite in one runner, in turn: the target a CI with one
 			// build per app runs (sayt/depot's `ci`). Each suite brings its own
 			// stack up on the runner's daemon, so they run one at a time.
 			"ci": sayt.ci & B._ciTask & B._runner & {
 				_suites: [for n, _ in project.targets if strings.HasPrefix(n, "ci-") {n}]
-				deps: [for n in _suites for v in ["srcs", "bayt"] {":\(n):\(v)"}]
+				deps:    [for n in _suites for v in ["srcs", "bayt"] {":\(n):\(v)"}]
 				srcs: defaultGlobs: graph: {glob: ".bayt/**"}
 				cmd: builtin: do: #"""
 					set -eu
@@ -1019,35 +1059,49 @@ import (
 				let _effects = len(B.cluster.state.effects) > 0
 				let _ai = _effects && (len([for e in B.cluster.state.effects if e.ai != _|_ {e}]) > 0 || B.cluster.capabilities.ai != _|_)
 				let _bridges = [for b in B.cluster.state.bridges if list.Contains(b.targets, "docker") {b}]
+
 				// A container several bridges share (one per action) runs once.
 				let _containers = {for b in _bridges {(b.container): b.appliance}}
+
 				// The change feed, as compose runs it: Conduit off the logical slot,
 				// the bus on daprd and Redis, and Redpanda Connect running the
 				// pipelines and the drains' streams. These are process-compose's own
 				// processes (.bayt/process-compose.yaml), given the images' binaries.
 				let _capture = B.cluster.capabilities.capture
 				let _compute = len(B.cluster.state.computations) > 0
+				let _feldera = _compute && B.cluster.state.duckstreamEngine == "feldera"
+
 				// The transform runs the pipelines and the drains' streams, and
 				// carries compute's invalidations to it.
 				let _streams = len(B.cluster.state.pipelines) > 0 || _compute
+
 				// The ticker sweeps schedules and timers; the airlock runs for as
 				// long as the appliance does, so nothing wakes it.
 				let _wakes = len(B.cluster.state.schedules) > 0 || len(B.cluster.state.timers) > 0
 				let _timers = len(B.cluster.state.timers) > 0
 				let _blobs = B.cluster.capabilities.blobs
+
 				// What an effect declares it reads, which compose refuses to start
 				// without (the airlock's environment there).
-				let _secrets = [for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}]
+				// A secret field's seal key among them: a released appliance holds a
+				// key of its own, never the repository's development one
+				// (mecha.#DevSealKey).
+				let _secrets = list.Concat([
+					[for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}],
+					[if len([for e in B.cluster.state.effects if e.secretFields != _|_ {e}]) > 0 {"AIRLOCK_SEAL_KEY"}],
+				])
+
 				// A computation's files, by the paths the processes' environment
 				// names them, relative to the app.
-				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}]]) {(f): true}} {f}]
-				let _overlaid = _effects || _wakes
+				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}], [if c.steps != _|_ {"\(c.steps).bundle.js"}]]) {(f): true}} {f}]
+
 				// The forward migrations, which compose's migrate service applies: the
 				// appliance runs that same process (process-compose.yaml), which what
 				// reads the schema already waits on, over the migrate image's files.
 				let _pgroll = B.cluster.surface.schema.pgroll
 				let _db = "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-\(B.meta.app)}"
 				let _ready = {period_seconds: 1, timeout_seconds: 5, failure_threshold: 120}
+
 				// process-compose.yaml declares these processes too: an override's
 				// `command` replaces their entrypoint (an override's entrypoint would
 				// not), and its environment merges over theirs by name.
@@ -1056,7 +1110,7 @@ import (
 				// loads the file, which the appliance's own commands rely on; a
 				// bridge's command, the app's, is taken as written: its `$` doubled.
 				let _command = {
-					args: [...string]
+					args:    [...string]
 					literal: *false | bool
 					out: strings.Join([for a in args {
 						let q = strings.Replace(a, "'", "'\\''", -1)
@@ -1066,6 +1120,12 @@ import (
 				let _overlay = {
 					version: "0.5"
 					processes: {
+						database: {
+							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on", "-c", "shared_buffers=512MB"]])}).out
+						}
+						electric: {
+							command: (_command & {args: ["env", "DATABASE_URL=postgresql://electric:${ELECTRIC_PASSWORD:-dev-electric-password}@127.0.0.1:5432/${POSTGRES_DB:-\(B.meta.app)}?sslmode=disable", "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true", "ELECTRIC_PORT=3002", "ELECTRIC_STORAGE_DIR=${PGDATA:-/var/lib/pgsql/data}/electric", "LD_LIBRARY_PATH=/electric-libs", "ELIXIR_ERL_OPTIONS=+fnu", "/electric-app/bin/entrypoint", "start"]}).out
+						}
 						if _effects {
 							"airlock-upgrade": {
 								command: (_command & {args: ["psql", _db, "-X", "--set=ON_ERROR_STOP=1", "--single-transaction", "--file=/airlock-upgrade.sql"]}).out
@@ -1073,7 +1133,7 @@ import (
 							}
 							for c, a in _containers {
 								(c): {
-									command: (_command & {args: a.command, literal: true}).out
+									command:         (_command & {args: a.command, literal: true}).out
 									readiness_probe: _ready & {exec: command: "portcheck --port \(a.port)"}
 									availability: restart: "on_failure"
 								}
@@ -1081,7 +1141,7 @@ import (
 							"airlock-mesh": {
 								// As compose runs it: every listener on loopback, metrics and
 								// profiling off.
-								command: (_command & {args: ["/daprd", "--app-id", "airlock", "--dapr-listen-addresses", "127.0.0.1", "--dapr-internal-grpc-listen-address", "127.0.0.1", "--resources-path", "/dapr/airlock", "--config", "/dapr/config.yaml", "--dapr-http-port", "\(mecha.#AppliancePort.meshHttp)", "--dapr-grpc-port", "\(mecha.#AppliancePort.meshGrpc)", "--dapr-internal-grpc-port", "\(mecha.#AppliancePort.meshInternal)", "--metrics-port", "0", "--profile-port", "0", "--log-level", "info"]}).out
+								command:    (_command & {args: ["/daprd", "--app-id", "airlock", "--dapr-listen-addresses", "127.0.0.1", "--dapr-internal-grpc-listen-address", "127.0.0.1", "--resources-path", "/dapr/airlock", "--config", "/dapr/config.yaml", "--dapr-http-port", "\(mecha.#AppliancePort.meshHttp)", "--dapr-grpc-port", "\(mecha.#AppliancePort.meshGrpc)", "--dapr-internal-grpc-port", "\(mecha.#AppliancePort.meshInternal)", "--metrics-port", "0", "--profile-port", "0", "--log-level", "info"]}).out
 								depends_on: {for c, _ in _containers {(c): condition: "process_healthy"}}
 								// Each binding reads its bridge's address from the environment.
 								environment: [for b in _bridges {
@@ -1092,7 +1152,7 @@ import (
 								availability: restart: "on_failure"
 							}
 							airlock: {
-								command: (_command & {args: ["airlock-deno", "run", "--frozen", "--unstable-worker-options", "--allow-net=database:\(mecha.#AppliancePort.database),airlock-mesh:\(mecha.#AppliancePort.meshHttp),0.0.0.0:\(mecha.#AppliancePort.airlock)", "--allow-read", "--allow-env", "--allow-sys", "main.ts"]}).out
+								command:     (_command & {args: ["airlock-deno", "run", "--frozen", "--unstable-worker-options", "--allow-net=database:\(mecha.#AppliancePort.database),airlock-mesh:\(mecha.#AppliancePort.meshHttp),0.0.0.0:\(mecha.#AppliancePort.airlock)", "--allow-read", "--allow-env", "--allow-sys", "main.ts"]}).out
 								working_dir: "/app/airlock"
 								environment: list.Concat([
 									["DATABASE_URL=\(_db)", "MESH_URL=http://airlock-mesh:\(mecha.#AppliancePort.meshHttp)", "AIRLOCK_DIR=/airlock", "DENO_DIR=/airlock-deno-dir", "PORT=\(mecha.#AppliancePort.airlock)"],
@@ -1106,6 +1166,7 @@ import (
 								availability: restart: "on_failure"
 							}
 						}
+
 						// The timers' check from the script the image carries, its
 						// connection the base process's.
 						if _timers {
@@ -1113,7 +1174,7 @@ import (
 						}
 						if _wakes {
 							ticker: {
-								command: (_command & {args: ["ticker-deno", "run", "--frozen", "--allow-net", "--allow-env", "main.ts"]}).out
+								command:     (_command & {args: ["ticker-deno", "run", "--frozen", "--allow-net", "--allow-env", "main.ts"]}).out
 								working_dir: "/ticker-app"
 								environment: list.Concat([
 									["CRUD_URL=http://crud:3000", "CALL_TIMEOUT_MS=\(B.cluster.meta.bounds.tickerCallMs)", "SERVICE_JWT=${SERVICE_JWT:-\(mecha.#DevServiceJwt)}", "DENO_DIR=/ticker-deno-dir", "PORT=\(mecha.#AppliancePort.ticker)"],
@@ -1127,7 +1188,7 @@ import (
 							// refused one ends the clock, which its restart makes visible.
 							clock: {
 								// A script, since process-compose expands variables in commands.
-								command: (_command & {args: ["/usr/local/bin/appliance-clock.sh"]}).out
+								command:     (_command & {args: ["/usr/local/bin/appliance-clock.sh"]}).out
 								environment: ["SERVICE_JWT=${SERVICE_JWT:-\(mecha.#DevServiceJwt)}"]
 								depends_on: ticker: condition: "process_healthy"
 								availability: restart: "on_failure"
@@ -1135,15 +1196,56 @@ import (
 						}
 					}
 				}
+
 				// The secrets an effect declares, which the airlock inherits from the
 				// container: the appliance does not start without one, as compose's
 				// airlock does not (process-compose substitutes no `:?` refusal).
+				let _engine = [if _feldera {"'export DUCKSTREAM_ENGINE=feldera' "}, ""][0]
 				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
+
+				// The seal key is the deployment's own: the repository's development
+				// one is the local stack's alone. The airlock refuses it by its id at
+				// start (seal.ts refuseDevKey); this refuses its usual spellings, the
+				// bytes it decodes to in either base64 alphabet, before anything runs.
+				let _devSealCheck = [if list.Contains(_secrets, "AIRLOCK_SEAL_KEY") {"'for k in AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS; do' '  eval \"v=\\${$k:-}\"' '  s=$(printf %s \"$v\" | tr -d \" \\t\\r\\n=\" | tr -- -_ +/)' '  while [ $(( ${#s} % 4 )) -ne 0 ]; do s=\"$s=\"; done' '  [ -z \"$s\" ] || [ \"$(printf %s \"$s\" | base64 -d 2>/dev/null | sha256sum | cut -d\" \" -f1)\" != \(hex.Encode(sha256.Sum256(base64.Decode(null, mecha.#DevSealKey)))) ] || { echo \"appliance: $k is the development key in the repository: give the appliance a key of its own\" >&2; exit 1; }' 'done' "}, ""][0]
+
+				// The door's port, which the one starting the appliance may move, is
+				// no port a bridge's process of it listens on.
+				let _portCheck = strings.Join([for c, a in _containers {"'if [ \"$PORT\" = \(a.port) ]; then echo \"appliance: PORT \(a.port) is where the bridge process \(c) listens; set another\" >&2; exit 1; fi' "}], "")
 				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, [for c, _ in _containers {c}]]), " ")
+				if _feldera {
+					"feldera-artifacts": core.#target & {
+						activate: ""
+						deps:     [":compute:outs"]
+						compose: manual: true
+						cmd: builtin: {
+							shell: "sh"
+							do:    "deno run --no-check --config /app/deno.json --frozen -A /app/native-artifacts-build.ts /app/feldera-build-specs.json /opt/feldera"
+						}
+						dockerfile: {
+							from: name: B.cluster.surface.targets.feldera.dockerfile.from.name
+							preamble: [
+								"USER root",
+								"COPY <<'SPECS' /app/feldera-build-specs.json\n\(json.Marshal([for c in B.cluster.state.computations {name: c.name, feldera: "/app/computations/\(c.name).feldera.json"}]))\nSPECS",
+								"RUN mkdir -p /opt/feldera && chown ubuntu:ubuntu /opt/feldera",
+								"USER ubuntu",
+							]
+							copy: [
+								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
+								for f in ["native-artifacts-build.ts", "native-artifacts.ts", "native-sources.ts", "native-supervisor.c", "deno.json", "deno.lock"] {
+									{from: {ref: ":compute"}, srcs: ["/app/\(f)"], dst: "/app/\(f)"}
+								},
+								for c in B.cluster.state.computations {
+									{from: {ref: ":compute"}, srcs: ["/app/computations/\(c.name).feldera.json"], dst: "/app/computations/\(c.name).feldera.json"}
+								},
+							]
+						}
+					}
+				}
 				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
-						[":database", ":crud", ":caddy"],
+						[":database", ":crud", ":caddy", ":electric:outs"],
 						if _pgroll != _|_ {[":\(_pgroll.target):outs"]},
 						// Image-only: these images keep their files outside the
 						// monorepo tree, which a workdir dependency copies.
@@ -1155,6 +1257,7 @@ import (
 						if _wakes {[":ticker:outs"]},
 						if _timers {[":timer-check:outs"]},
 						if _compute {[":compute:outs"]},
+						if _feldera {[":feldera-artifacts:outs"]},
 						[for c, _ in _containers {":\(c)-appliance:outs"}],
 					])
 					srcs: globs: list.Concat([[".bayt/process-compose.yaml"], if _capture {["docker/*.yaml"]}, _computed])
@@ -1166,21 +1269,17 @@ import (
 						image: "${BAYT_DOCKER_REPOSITORY:-ghcr.io/bonisoft3/\(B.meta.app)}:${BAYT_IMAGE_TAG:-latest}"
 					}
 					dockerfile: core.nubox & {
-						defaultPreamble: "zypper-postgres": (zypper.#install & {
-							pkgs: list.Concat([
-								[
-									"postgresql18-server=\(mecha.#AppliancePostgres)",
-									"postgresql18-contrib=\(mecha.#AppliancePostgres)",
-									"libopenssl3=3.5.0-160000.10.1",
-								],
-								// The bus's store; Redis's own image links musl.
-								[if _capture {"redis=8.2.0-bp160.1.3"}],
-							])
-							then: [
-								"rm -rf /usr/lib/locale/*",
-								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
-							]
-						}).out
+						defaultPreamble: {
+							"pgdg": {priority: -6, line: mecha.#AppliancePgdg}
+							"postgres": (apt.#install & {
+								pkgs: list.Concat([
+									["postgresql-\(mecha.#AppliancePostgres)=\(mecha.#AppliancePostgres).*"],
+									// The bus's store; Redis's own image links musl.
+									[if _capture {"redis-server=5:8.0.*"}],
+								])
+								then: ["mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql"]
+							}).out
+						}
 						add: B._processComposeAdd
 						copy: list.Concat([
 							[
@@ -1188,13 +1287,15 @@ import (
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/portcheck"], dst: "/usr/local/bin/portcheck"},
 								{from: {ref: ":database"}, srcs: ["/docker-entrypoint-initdb.d"], dst: "/docker-entrypoint-initdb.d"},
 								{from: {ref: ":crud"}, srcs: ["/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
+								{from: {ref: ":electric"}, srcs: ["/app/"], dst: "/electric-app/"},
+								{from: {ref: ":electric"}, srcs: ["/lib/*-linux-gnu/libtinfo.so.6*"], dst: "/electric-libs/"},
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
-								// pljs as `plv8` and pg_ivm, which leap ships without, built once by
+								// pljs as `plv8` and pg_ivm, which PGDG ships without, built once by
 								// mecha against this same server (mecha.#AppliancePostgres).
-								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/lib/"], dst: "/usr/lib/postgresql18/lib64/"},
-								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/extension/"], dst: "/usr/share/postgresql18/extension/"},
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/lib/"], dst: "/usr/lib/postgresql/\(mecha.#AppliancePostgres)/lib/"},
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/extension/"], dst: "/usr/share/postgresql/\(mecha.#AppliancePostgres)/extension/"},
 							],
 							// The door's tree as this target releases it (emit.cue's
 							// served-release), and the inline scripts its policy names.
@@ -1254,12 +1355,16 @@ import (
 							// Compute's app, its cache and DuckDB's extensions, its sibling
 							// sources where its imports reach them, and the program's
 							// computations where the environment names them.
+							if _feldera {[
+								{from: {ref: ":feldera-artifacts"}, srcs: ["/opt/feldera/"], dst: "/opt/feldera/"},
+							]},
 							if _compute {list.Concat([
 								[
 									{from: {ref: ":compute"}, srcs: ["/app/"], dst: "/compute-app/"},
 									// One cache, content-addressed, beside auth's.
 									{from: {ref: ":compute"}, srcs: ["/deno-dir"], dst: "/deno-dir"},
 									{from: {ref: ":compute"}, srcs: ["/durex"], dst: "/durex"},
+									{from: {ref: ":compute"}, srcs: ["/airlock"], dst: "/airlock"},
 									{from: {ref: ":compute"}, srcs: ["/packages"], dst: "/packages"},
 								],
 								[if !B.cluster.capabilities.auth {{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"}}],
@@ -1284,30 +1389,36 @@ import (
 							if _effects && _blobs {[
 								#"RUN echo "release@docker does not yet run the blob plane an effect's answer is stored in; refusing to omit a runtime service" >&2 && exit 1"#,
 							]},
-							// The computations on DuckDB snapshots, as launch@local runs them:
+							// The computations on DuckDB snapshots, as launch@host runs them:
 							// compute and the transform reading its invalidations both find
 							// its app and extensions here, the container's environment.
 							if _compute {[
 								"ENV COMPUTE_APP_DIR=/compute-app",
+								"ENV COMPUTE_STATE_DIR=/var/lib/duckstream",
 								"ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions",
 								"ENV DENO_DIR=/deno-dir",
+							]},
+							if _feldera {[
+								"ENV DUCKSTREAM_ENGINE=feldera",
+								"ENV FELDERA_ARTIFACTS_DIR=/opt/feldera",
+								"ENV FELDERA_WORK_DIR=/var/lib/feldera",
 							]},
 							if _capture {[
 								"ENV MECHA_MESH_DIR=/mesh-events",
 								"ENV MECHA_TRANSFORM_DIR=/transform",
 							]},
-							if _overlaid {[
-								"COPY <<'APPLIANCE' /.bayt/process-compose.appliance.yaml\n\(yaml.Marshal(_overlay))APPLIANCE",
-							]},
+							["COPY <<'APPLIANCE' /.bayt/process-compose.appliance.yaml\n\(yaml.Marshal(_overlay))APPLIANCE"],
 							if _wakes {[
 								#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'while sleep "${POKE_INTERVAL_SECONDS:-60}"; do' '  curl -fsS -X POST -H "Authorization: Bearer ${SERVICE_JWT}" "http://ticker:\#(mecha.#AppliancePort.ticker)/poke?caller=appliance" >/dev/null || { echo "clock: the ticker refused its poke" >&2; exit 1; }' 'done' > /usr/local/bin/appliance-clock.sh && chmod 755 /usr/local/bin/appliance-clock.sh"#,
 							]},
 							[
-								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
+								"ENV PATH=/usr/lib/postgresql/\(mecha.#AppliancePostgres)/bin:/usr/local/bin:$PATH",
 								"ENV PGDATA=/var/lib/pgsql/data",
 								"ENV DATABASE_PG_PORT=5432",
 								"ENV CRUD_HTTP_PORT=3000",
 								"ENV CRUD_ADMIN_PORT=3001",
+								"ENV ELECTRIC_HTTP_PORT=3002",
+								"ENV PRONTO_UPSTREAM_ELECTRIC=127.0.0.1:3002",
 								"ENV AUTH_HTTP_PORT=9999",
 								"ENV CADDY_HTTP_PORT=8080",
 								"ENV PORT=8080",
@@ -1316,6 +1427,7 @@ import (
 								// The door's own config, edited below: an app's docker/Caddyfile,
 								// which caddy prefers where a tree brings it, keeps the renderer.
 								"ENV CADDY_CONFIG_FILE=/etc/caddy/Caddyfile",
+								"ENV CADDY_DATA_HOME=/var/lib/caddy",
 							],
 							if B.cluster.capabilities.auth {[
 								"ENV DENO_DIR=/deno-dir",
@@ -1323,33 +1435,38 @@ import (
 						])
 						epilogue: [
 							// The temporary server starts with the server's options.
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if [ "$1" = "postgres" ]; then shift; fi' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if [ "$1" = "postgres" ]; then shift; fi' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql/\#(mecha.#AppliancePostgres)/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'if [ "$1" = "microcheck" ]; then' '  shift' '  exec "$@"' 'fi' 'exec "$@"' > /usr/local/bin/bayt && chmod 755 /usr/local/bin/bayt"#,
 							// nu, wherever mise installed it, by its own account.
 							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do if [ "$1" = "--" ]; then shift; break; fi; shift; done' 'exec "$@"' > /usr/local/bin/mise && chmod 755 /usr/local/bin/mise"#,
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)'export PORT="${PORT:-8080}"' 'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_devSealCheck)\#(_engine)'export PORT="${PORT:-8080}"' \#(_portCheck)'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
 							// The appliance runs no renderer: its handler goes, braces counted,
 							// since a handler holds nested blocks a line match would cut short.
 							#"RUN awk 'skip { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) skip = 0; next } /handle @rendered \{/ { skip = 1; d = 1; next } { print }' /etc/caddy/Caddyfile > /tmp/Caddyfile && mv /tmp/Caddyfile /etc/caddy/Caddyfile"#,
-							#"RUN awk '/handle \/electric\/\* \{/{p=1; d=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) p = 0; next } {print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
+							for e in B.cluster.state.effects if e.bridge != _|_ for b in _bridges if e.bridge == b.name {
+								let act = [if b.action != _|_ {"/actions/\(b.action)"}, ""][0]
+								let old = "http://\(b.container):\(b.port)\(act)"
+								let new = "http://\(b.container):\(b.appliance.port)\(act)"
+								#"RUN nu -c 'let f = "/dapr/airlock/\#(e.name).yaml"; let b = (open $f); if $b.spec.baseUrl != "\#(old)" { error make {msg: "appliance: unexpected bridge endpoint in \#(e.name)"} }; $b | upsert spec.baseUrl "\#(new)" | to yaml | save -f $f'"#
+							},
 							// The extensions came with compute's image: it installs none at start.
-							if _compute {"RUN touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
+							if _compute {"RUN --network=none deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts /compute-app/step-worker.ts && touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
 							// A bridge's port is no port an appliance process takes, the ones bayt
 							// assigns the app included, and no other bridge's.
 							if len(_bridges) > 0 {
 								#"RUN ports="\#(strings.Join([for _, a in _containers {"\(a.port)"}], " "))"; for p in $ports; do if grep -Eq ":-$p\}" /.bayt/process-compose.yaml; then echo "appliance: bridge port $p is one an appliance process takes; name another" >&2; exit 1; fi; done; dup="$(printf '%s\n' $ports | sort | uniq -d)"; if [ -n "$dup" ]; then echo "appliance: bridges share port $dup" >&2; exit 1; fi"#
 							},
 							// Every edit above leaves a Caddyfile the door can load, or the image fails here.
-							"RUN caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
+							"RUN ELECTRIC_SECRET=validation-only caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
 						]
 						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
 						cmd: list.Concat([
 							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml"],
-							[if _overlaid for a in ["-f", "/.bayt/process-compose.appliance.yaml"] {a}],
-							["-t=false", "--no-server", "caddy"],
+							["-f", "/.bayt/process-compose.appliance.yaml"],
+							["-t=false", "--no-server", "caddy", "electric"],
 							[if B.cluster.capabilities.auth {"auth"}],
 							[if _effects {"airlock"}],
 							[if _capture {"conduit"}],

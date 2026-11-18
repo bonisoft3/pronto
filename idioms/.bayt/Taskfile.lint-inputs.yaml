@@ -1,9 +1,6 @@
 # generated from bayt.cue — do not edit
 tasks:
   default:
-    deps:
-    - "::bayt:generate"
-    run: once
     cmds:
     - >-
       nu -c "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use tools.nu
@@ -11,4 +8,7 @@ tasks:
       run-mise exec -- deno run --config (\$pronto | path join deno.json) --allow-read
       --allow-write=.pronto --allow-run --allow-env (\$pronto | path join check-proto.ts)
       --baseline .'"
+    deps:
+    - "::bayt:generate"
+    run: once
 version: "3"

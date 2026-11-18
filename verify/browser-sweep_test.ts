@@ -7,6 +7,224 @@ import {
 } from "./browser-sweep.ts";
 import { airlock } from "./airlock.ts";
 
+function electricTrap() {
+  const listeners = new Map<string, Set<(...args: any[]) => void>>();
+  const trap = attachNetworkTrap({
+    on(event: string, listener: (...args: any[]) => void) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(listener);
+    },
+    off(event: string, listener: (...args: any[]) => void) { listeners.get(event)?.delete(listener); },
+  }, { targetOrigin: "https://app.example" });
+  const response = (status: number, query: string, options: { body?: unknown; handle?: string; offset?: string; origin?: string; path?: string; method?: string } = {}) => {
+    const url = `${options.origin ?? "https://app.example"}${options.path ?? "/electric/v1/shape"}?table=item&where=public&replica=full&log=changes_only&${query}`;
+    const req = { method: () => options.method ?? "GET", url: () => url };
+    const body = options.body ?? (status === 409 ? [{ headers: { control: "must-refetch" } }] : [{ headers: { control: "up-to-date" } }]);
+    const res = {
+      status: () => status, statusText: () => String(status), url: () => url, request: () => req,
+      headers: () => ({ "electric-handle": options.handle ?? "new", "electric-offset": options.offset ?? "0_0" }),
+      json: () => Promise.resolve(body),
+    };
+    for (const listener of listeners.get("response") ?? []) listener(res);
+  };
+  const observe = (url: URL, response: Response) => {
+    const copy = response.clone();
+    const res = {
+      status: () => copy.status, statusText: () => copy.statusText, url: () => url.href,
+      request: () => ({ method: () => "GET" }), headers: () => Object.fromEntries(copy.headers), json: () => copy.json(),
+    };
+    for (const listener of listeners.get("response") ?? []) listener(res);
+  };
+  return { trap, response, observe };
+}
+
+Deno.test("pinned Electric client stream and subset refetches satisfy the trap", async () => {
+  const { ShapeStream } = await import("npm:@electric-sql/client@1.5.27");
+  for (const subset of [false, true]) {
+    const { trap, observe } = electricTrap();
+    const requests: URL[] = [];
+    const abort = new AbortController();
+    const stream = new ShapeStream({
+      url: "https://app.example/electric/v1/shape", params: { table: subset ? "subset_item" : "stream_item" },
+      handle: "old", offset: "0_0", log: "changes_only", subscribe: false, signal: abort.signal,
+      fetchClient: async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        requests.push(url);
+        const stale = requests.length === 1;
+        const headers = {
+          "content-type": "application/json", "electric-handle": "new", "electric-offset": "0_0",
+          "electric-schema": "{}", "electric-up-to-date": "true", ...(subset ? { "electric-snapshot": "true" } : {}),
+        };
+        const body = stale ? [{ headers: { control: "must-refetch" } }]
+          : subset ? { metadata: { xmin: "1", xmax: "2", xip_list: [], snapshot_mark: 1, database_lsn: "1" }, data: [] }
+          : [{ headers: { control: "up-to-date" } }];
+        const response = Response.json(body, { status: stale ? 409 : 200, headers });
+        observe(url, response);
+        return response;
+      },
+    });
+    try {
+      if (subset) await stream.fetchSnapshot({ where: "id = 1", limit: 1 });
+      else await new Promise<void>((resolve, reject) => {
+        stream.subscribe((messages: { headers: Record<string, unknown> }[]) => {
+          if (messages.some((message) => message.headers.control === "up-to-date")) resolve();
+        }, reject);
+      });
+      assertEquals(requests.length, 2);
+      assertEquals(requests[1].searchParams.get("handle"), "new");
+      assertEquals(requests[1].searchParams.get("expired_handle"), "old");
+      await trap.waitForPendingAssets(100);
+      trap.assertNoErrors();
+    } finally {
+      abort.abort();
+      stream.unsubscribeAll();
+      trap.detach();
+    }
+  }
+});
+
+Deno.test("Electric must-refetch requires its completed snapshot, including same-handle recovery", async () => {
+  for (const handle of ["new", "old"]) {
+    const { trap, response } = electricTrap();
+    response(409, "handle=old&offset=1_0&live=true", { handle });
+    let finish!: (body: unknown) => void;
+    const body = new Promise((resolve) => { finish = resolve; });
+    // The pinned SDK carries expired_handle and a cache buster on recovery.
+    response(200, `handle=${handle}&offset=-1&expired_handle=old&cache-buster=retry`, { handle, body });
+    assertThrows(() => trap.assertNoErrors(), Error, "has not completed");
+    finish([{ headers: { control: "up-to-date" } }]);
+    await trap.waitForPendingAssets(100);
+    trap.assertNoErrors();
+    trap.detach();
+  }
+});
+
+Deno.test("Electric recovery must match the subset that failed", async () => {
+  const { trap, response } = electricTrap();
+  const body = { metadata: { xmin: "1", xmax: "2", xip_list: [], snapshot_mark: 1, database_lsn: "1" }, data: [] };
+  response(409, "handle=old&offset=1_0&subset__where=id%3D1");
+  response(200, "handle=new&offset=1_0&expired_handle=old&subset__where=id%3D2", { body });
+  await trap.waitForPendingAssets(20);
+  assertThrows(() => trap.assertNoErrors(), Error, "has not completed");
+  response(200, "handle=new&offset=1_0&expired_handle=old&subset__where=id%3D1", { body });
+  await trap.waitForPendingAssets(100);
+  trap.assertNoErrors();
+  trap.detach();
+});
+
+Deno.test("Electric 409 exemptions require the exact endpoint and response contract", async () => {
+  const invalid = [
+    { origin: "https://other.example" },
+    { path: "/crud/item" },
+    { method: "POST" },
+    { handle: "" },
+    { body: { error: "conflict" } },
+    { body: [{ headers: { control: "must-refetch" }, value: "untrusted" }] },
+    { body: [{ headers: { control: "up-to-date" } }] },
+  ];
+  for (const options of invalid) {
+    const { trap, response } = electricTrap();
+    response(409, "handle=old&offset=1_0", options);
+    response(200, "handle=new&offset=-1&expired_handle=old");
+    await trap.waitForPendingAssets(100);
+    assertThrows(() => trap.assertNoErrors(), Error, "HTTP 409");
+    trap.detach();
+  }
+});
+
+Deno.test("Electric recovery cannot use an unrelated, malformed or missing refetch", async () => {
+  for (const recovery of [
+    { query: "handle=new&offset=-1", options: {} },
+    { query: "handle=wrong&offset=-1&expired_handle=old", options: {} },
+    { query: "handle=new&offset=-1&expired_handle=other", options: {} },
+    { query: "handle=new&offset=-1&expired_handle=old", options: { handle: "wrong" } },
+    { query: "handle=new&offset=1_0&expired_handle=old&live=true", options: {} },
+  ]) {
+    const { trap, response } = electricTrap();
+    response(409, "handle=old&offset=1_0");
+    response(200, recovery.query, recovery.options);
+    await trap.waitForPendingAssets(20);
+    assertThrows(() => trap.assertNoErrors(), Error, "has not completed");
+    trap.detach();
+  }
+  for (const options of [{ body: { error: "failure" } }, { offset: "invalid" }]) {
+    const { trap, response } = electricTrap();
+    response(409, "handle=old&offset=1_0");
+    response(200, "handle=new&offset=-1&expired_handle=old", options);
+    await trap.waitForPendingAssets(100);
+    assertThrows(() => trap.assertNoErrors(), Error, "invalid snapshot");
+    trap.detach();
+  }
+});
+
+Deno.test("Electric completed recoveries may recur, but pending retry loops fail", async () => {
+  const first = electricTrap();
+  first.response(409, "handle=old&offset=1_0&live=true");
+  first.response(409, "handle=old&offset=1_0");
+  first.response(200, "handle=new&offset=-1&expired_handle=old");
+  await first.trap.waitForPendingAssets(100);
+  first.trap.assertNoErrors();
+  first.response(409, "handle=new&offset=1_0", { handle: "newer" });
+  first.response(200, "handle=newer&offset=-1&expired_handle=new", { handle: "newer" });
+  await first.trap.waitForPendingAssets(100);
+  first.trap.assertNoErrors();
+  first.trap.detach();
+
+  const second = electricTrap();
+  second.response(409, "handle=old&offset=1_0", { handle: "old" });
+  second.response(409, "handle=old&offset=-1&expired_handle=old&cache-buster=retry", { handle: "old" });
+  await second.trap.waitForPendingAssets(100);
+  assertThrows(() => second.trap.assertNoErrors(), Error, "repeated must-refetch");
+  second.trap.detach();
+
+  const third = electricTrap();
+  third.response(409, "handle=old&offset=1_0");
+  third.response(409, "handle=new&offset=-1&expired_handle=old", { handle: "newer" });
+  third.response(200, "handle=newer&offset=-1&expired_handle=new", { handle: "newer" });
+  await third.trap.waitForPendingAssets(100);
+  assertThrows(() => third.trap.assertNoErrors(), Error, "repeated must-refetch");
+  third.trap.detach();
+});
+
+Deno.test("Electric recovery never clears a 500", async () => {
+  const { trap, response } = electricTrap();
+  response(409, "handle=old&offset=1_0");
+  response(500, "handle=new&offset=-1&expired_handle=old");
+  response(200, "handle=new&offset=-1&expired_handle=old");
+  await trap.waitForPendingAssets(100);
+  assertThrows(() => trap.assertNoErrors(), Error, "HTTP 500");
+  trap.detach();
+});
+
+Deno.test("Electric response validation shares the pending-assets deadline", async () => {
+  const { trap, response } = electricTrap();
+  let finish!: (body: unknown) => void;
+  response(409, "handle=old&offset=1_0", { body: new Promise((resolve) => { finish = resolve; }) });
+  const start = Date.now();
+  await trap.waitForPendingAssets(20);
+  assertEquals(Date.now() - start < 500, true);
+  assertThrows(() => trap.assertNoErrors(), Error, "has not completed");
+  finish({ error: "not a protocol reset" });
+  await trap.waitForPendingAssets(100);
+  assertThrows(() => trap.assertNoErrors(), Error, "HTTP 409");
+  trap.detach();
+});
+
+Deno.test("malformed Electric response URLs and unreadable JSON fail verification", async () => {
+  const malformed = electricTrap();
+  malformed.response(409, "handle=old", { origin: "not a URL" });
+  assertThrows(() => malformed.trap.assertNoErrors(), Error, "could not be verified");
+  malformed.trap.detach();
+
+  const unreadable = electricTrap();
+  unreadable.observe(new URL("https://app.example/electric/v1/shape?table=item&handle=old"), new Response("not JSON", {
+    status: 409, headers: { "electric-handle": "new" },
+  }));
+  await unreadable.trap.waitForPendingAssets(100);
+  assertThrows(() => unreadable.trap.assertNoErrors(), Error, "HTTP 409");
+  unreadable.trap.detach();
+});
+
 Deno.test("buildRepresentativeJourneys extracts one journey per unique primary screen using resolved routes", () => {
   const hints = {
     routes: [
@@ -61,9 +279,11 @@ Deno.test("attachNetworkTrap traps HTTP 4xx/5xx and request aborts", () => {
       status: () => 404,
       statusText: () => "Not Found",
       url: () => "https://example.com/missing.css",
+      headers: () => ({ "cf-ray": "123abc-SJC" }),
     })
   );
   assertEquals(trap.errors.length, 1);
+  assertEquals(/ at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ray=123abc-SJC$/.test(trap.errors[0]), true);
 
   // Trigger client-side net::ERR_ABORTED (should be ignored)
   listeners["requestfailed"]?.forEach((fn) =>
@@ -304,12 +524,16 @@ Deno.test("verifyBrowser fails loudly when screen readiness times out", async ()
   };
 
   const result = await verifyBrowser({
-    targetUrl: "https://example.com",
+    targetUrl: "https://example.com/chosen?token=secret#fragment",
     browser: fakeBrowser,
+    hints: { routes: [{ path: "/chosen", screen: "chosen" }] },
   });
 
   assertEquals(result.passed, false);
   assertEquals(result.errors.length, 1);
+  assertEquals(result.errors[0].includes("(/chosen)"), true);
+  assertEquals(result.errors[0].includes("secret"), false);
+  assertEquals(result.errors[0].includes("fragment"), false);
   assertEquals(
     result.errors[0].includes("Timeout 5000ms exceeded waiting for function"),
     true
@@ -645,7 +869,7 @@ Deno.test("verifyBrowser harvests links after custom journeys to discover downst
   };
 
   const customHomeJourney = {
-    spec: { screen: "home" },
+    screen: "home",
     run: async (_page: any) => {
       visitedUrls.push("custom-home-run");
     },
@@ -666,9 +890,50 @@ Deno.test("verifyBrowser harvests links after custom journeys to discover downst
   assertEquals(result.passed, true);
   assertEquals(visitedUrls, [
     "custom-home-run",
+    "https://app.example.com/",
     "https://app.example.com/item/special-item",
   ]);
   assertEquals(result.screensChecked, 2);
+});
+
+Deno.test("a failed custom journey does not prevent discovering canonical downstream routes", async () => {
+  let current = "";
+  const visited: string[] = [];
+  const page = {
+    on: () => {}, off: () => {}, close: async () => {}, waitForFunction: async () => true,
+    goto: async (url: string) => { current = new URL(url).pathname; visited.push(current); return { status: () => 200 }; },
+    $$eval: async () => current === "/" ? ["/competition/real"] : current === "/competition/real" ? ["/chances/real"] : [],
+  };
+  const result = await verifyBrowser({
+    targetUrl: "https://app.example.com", browser: { newPage: async () => page },
+    hints: { routes: [
+      { path: "/", screen: "home" },
+      { path: "/competition/:id", screen: "competition" },
+      { path: "/chances/:id", screen: "chances" },
+    ] },
+    journeys: [{ screen: "competition", run: async () => { throw new Error("fixture failed"); } }],
+  });
+  assertEquals(visited, ["/", "/competition/real", "/chances/real"]);
+  assertEquals(result.passed, false);
+  assertEquals(result.errors.length, 1);
+  assertEquals(result.errors[0].includes("fixture failed"), true);
+});
+
+Deno.test("airlock rollback cannot seed discovery with links to removed fixtures", async () => {
+  let current = "";
+  const visited: string[] = [];
+  const page = {
+    on: () => {}, off: () => {}, close: async () => {}, waitForFunction: async () => true,
+    goto: async (url: string) => { current = new URL(url).pathname; visited.push(current); return { status: () => 200 }; },
+    $$eval: async () => current === "/fixture" ? ["/team/deleted"] : current === "/" ? ["/team/live"] : [],
+  };
+  const result = await verifyBrowser({
+    targetUrl: "https://app.example.com", browser: { newPage: async () => page },
+    hints: { routes: [{ path: "/", screen: "home" }, { path: "/team/:id", screen: "team" }] },
+    journeys: [{ spec: { screen: "home" }, run: async () => { await page.goto("https://app.example.com/fixture"); } } as any],
+  });
+  assertEquals(result.passed, true);
+  assertEquals(visited, ["/fixture", "/", "/team/live"]);
 });
 
 Deno.test("verifyBrowser preserves tab-local pronto-token between screen journeys", async () => {
@@ -966,6 +1231,7 @@ Deno.test("verifyBrowser refreshes session and discovers private screens after l
   assertEquals(result.passed, true);
   // Custom login journey ran, then static private admin-dashboard and dynamic admin-edit were both visited!
   assertEquals(visitedUrls, [
+    "https://app.example.com/login",
     "https://app.example.com/login",
     "https://app.example.com/admin/dashboard",
     "https://app.example.com/admin/edit/456",

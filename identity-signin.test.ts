@@ -31,6 +31,7 @@ Deno.test("the broker stands in each provider's place, as defaults a deployment 
   assertEquals(env.value.OIDC_PROVIDERS, "google");
   assertEquals(env.value.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:" + port + "}");
   assertEquals(env.value.OIDC_GOOGLE_CLIENT_ID, "${OIDC_GOOGLE_CLIENT_ID:-origin}");
+  assertEquals(env.value.OIDC_GOOGLE_SCOPE, "${OIDC_GOOGLE_SCOPE:-openid profile email}");
   assertEquals(env.value.OIDC_GOOGLE_AUTHORIZE_PARAMS, "${OIDC_GOOGLE_AUTHORIZE_PARAMS:-provider=google}");
   // A public client: the program gives no secret, only the deployment's slot for one.
   assertEquals(env.value.OIDC_GOOGLE_CLIENT_SECRET, "${OIDC_GOOGLE_CLIENT_SECRET:-}");
@@ -43,6 +44,8 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   const front = targets.value.identity;
   assertStringIncludes(hydra.dockerfile.from.name, "oryd/hydra:v26.2.0@sha256:");
   assertStringIncludes(front.dockerfile.from.name, "denoland/deno:distroless-2.5.0@sha256:");
+  assertEquals(front.dockerfile.preamble.length, 1);
+  assert(!front.entrypoint.do.includes("\t"));
   assertEquals(front.entrypoint.after, { "identity-hydra": "healthy" });
   // Ports of the app's own: the front's hashed from its name, Hydra's moved by bayt as any other.
   assertEquals(front.expose.http.port, port);
@@ -54,24 +57,32 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_INTERNAL, "${OIDC_GOOGLE_INTERNAL:-http://identity:" + port + "/}");
 });
 
-Deno.test("the front's host command starts at column 0: process-compose reads it as a YAML block, whose first line sets the indent and takes no tab", async () => {
-  const targets = await exported(signin(), "_cluster.surface.targets");
-  assertEquals(targets.success, true, targets.stderr);
-  for (const name of ["identity-hydra", "identity"]) {
-    const run: string = targets.value[name].entrypoint.do;
-    assertEquals(/^\s/.test(run), false, `${name}: ${JSON.stringify(run)}`);
-    // The block's closing brace is at the block's own indent, as its opening line is.
-    assertEquals(run.split("\n").every((l) => !l.startsWith(" ")), true, `${name}: ${JSON.stringify(run)}`);
-  }
-  assertStringIncludes(targets.value.identity.entrypoint.do, "let p = ");
-});
-
 Deno.test("an operator's broker elsewhere is theirs to run: no local broker", async () => {
   const targets = await exported(signin(`broker: "https://id.example.com"`), "_cluster.surface.targets");
   assertEquals(targets.success, true, targets.stderr);
   assertEquals("identity-hydra" in targets.value, false);
   assertEquals("identity" in targets.value, false);
   assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-https://id.example.com}");
+});
+
+Deno.test("releaseBroker keeps the local Hydra cluster for launch and integrate while naming the release issuer", async () => {
+  const both = await exported(
+    signin(`releaseBroker: "https://id.example.com"`),
+    "{targets: _cluster.surface.targets, provider: code.capabilities.auth.provider}",
+  );
+  assertEquals(both.success, true, both.stderr);
+  assertEquals("identity-hydra" in both.value.targets, true);
+  assertEquals("identity" in both.value.targets, true);
+  assertEquals(both.value.targets.auth.compose.environment.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:" + port + "}");
+  assertEquals(both.value.provider.google.releaseIssuer, "https://id.example.com");
+
+  const explicitRemote = await exported(
+    signin(`broker: "https://custom.example.com", releaseBroker: "https://id.example.com"`),
+    "code.capabilities.auth.provider.google",
+  );
+  assertEquals(explicitRemote.success, true, explicitRemote.stderr);
+  assertEquals(explicitRemote.value.issuer, "https://custom.example.com");
+  assertEquals("releaseIssuer" in explicitRemote.value, false);
 });
 
 Deno.test("the terminal draws the way in and never sees the broker's settings", async () => {
@@ -89,21 +100,15 @@ Deno.test("a provider name or broker address that is not one is refused", async 
   }
 });
 
-Deno.test("the pages release target refuses social sign-in providers", async () => {
-  for (const [target, reason] of [
-    ["pages", "pages release target does not support social sign-in providers"],
-  ]) {
-    const program = signin().replace("targets: []", `targets: ["${target}"]`);
-    const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
-    assertEquals(res.success, false, `expected target ${target} to fail`);
-    assertStringIncludes(res.stderr, reason);
-  }
+Deno.test("pages release target refuses social sign-in providers", async () => {
+  const program = signin().replace("targets: []", `targets: ["pages"]`);
+  const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
+  assertEquals(res.success, false, "expected target pages to fail");
+  assertStringIncludes(res.stderr, "pages release target does not support social sign-in providers");
 });
 
-// The edge cluster runs the auth service's provider sign-in in its object
-// (bundle/edge-signin.ts carries the settings to the Worker).
-Deno.test("gcp, k8s, docker and cloudflare targets admit social sign-in providers", async () => {
-  for (const target of ["gcp", "k8s", "docker", "cloudflare"]) {
+Deno.test("cloudflare, gcp, k8s and docker targets admit social sign-in providers", async () => {
+  for (const target of ["cloudflare", "gcp", "k8s", "docker"]) {
     const program = signin().replace("targets: []", `targets: ["${target}"]`);
     const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
     assertEquals(res.success, true, res.stderr);

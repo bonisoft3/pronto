@@ -1,7 +1,8 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 
-Deno.test("non-watch launch invokes the sayt nu tool-stub with MISE_LOCKED=0", async () => {
+Deno.test("non-watch launch invokes the sayt nu tool-stub with the caller's locking", async () => {
   if (Deno.build.os === "windows") return;
   const root = await Deno.makeTempDir();
   try {
@@ -17,7 +18,7 @@ Deno.test("non-watch launch invokes the sayt nu tool-stub with MISE_LOCKED=0", a
       `${root}/bin/mise`,
       `#!/bin/sh
 if [ "$1" = where ]; then printf '%s/sayt' "${root}"; exit 0; fi
-printf '%s\\n' "locked=$MISE_LOCKED" "stub=$2" "args=$PRONTO_LAUNCH_ARGS" > "${root}/observed"
+printf '%s\\n' "locked=$MISE_LOCKED" "trusted=$MISE_TRUSTED_CONFIG_PATHS" "stub=$2" "args=$PRONTO_LAUNCH_ARGS" > "${root}/observed"
 `,
     );
     await Deno.chmod(`${root}/bin/mise`, 0o755);
@@ -32,12 +33,12 @@ printf '%s\\n' "locked=$MISE_LOCKED" "stub=$2" "args=$PRONTO_LAUNCH_ARGS" > "${r
         "8080",
       ],
       cwd: root,
-      env: { PATH: `${root}/bin:${Deno.env.get("PATH")}`, MISE_LOCKED: "1" },
+      env: { PATH: `${root}/bin:${Deno.env.get("PATH")}`, MISE_LOCKED: "1", MISE_TRUSTED_CONFIG_PATHS: "/prior/trusted" },
     }).output();
     assertEquals(out.code, 0);
     assertEquals(
       await Deno.readTextFile(`${root}/observed`),
-      `locked=0\nstub=${root}/sayt/nu.toml\nargs=["--port","8080"]\n`,
+      `locked=1\ntrusted=${root}/sayt${delimiter}/prior/trusted\nstub=${root}/sayt/nu.toml\nargs=["--port","8080"]\n`,
     );
   } finally {
     await Deno.remove(root, { recursive: true });

@@ -15,6 +15,27 @@ async function built(release: string, field = "plan") {
 const pushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
 const release = (extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${pushed}, database: tokenRoles: ["anon", "app_user", "service"]${extra}}`;
 
+Deno.test("the release signs the service token with its pinned runtime", async () => {
+  const result = await new Deno.Command("nu", {
+    args: ["-c", "source gcp/release.nu; service-jwt test-secret"],
+    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
+  }).output();
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+  assertEquals(result.success, true, text(result.stderr));
+  assertEquals(text(result.stdout), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtZWNoYTpzdGFjayIsInJvbGUiOiJzZXJ2aWNlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIn0.3AS7TlxXoUPLZnMpqt8NyTkxfbsxYvoAqcDncjlRVrw");
+});
+
+Deno.test("generated database secrets are URL-safe and use the pinned runtime", async () => {
+  const result = await new Deno.Command("nu", {
+    args: ["-c", "source gcp/release.nu; [ (random-secret) (random-secret) ] | to json"],
+    cwd: new URL(".", import.meta.url), stdout: "piped", stderr: "piped",
+  }).output();
+  assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+  const secrets: string[] = JSON.parse(new TextDecoder().decode(result.stdout));
+  assert(secrets.every(secret => /^[A-Za-z0-9_-]{48}$/.test(secret)));
+  assert(secrets[0] !== secrets[1]);
+});
+
 Deno.test("the door dials each upstream at its own port in the shared instance", async () => {
   const r = await built(release(), "service");
   assertEquals(r.success, true, r.stderr);
@@ -159,8 +180,54 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi\n        if [ "$try" = 3 ]; then exit 1; fi`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
-  assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
+  assertStringIncludes(c.command[2], `GRANT "anon", "app_user", "service" TO postgres WITH INHERIT FALSE, SET TRUE`);
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
+});
+
+Deno.test("a database built before the airlock's job key gets it, ahead of the replays", async () => {
+  const sql = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  // initdb places 013_airlock_job_key.sql on a fresh volume only; the interpreters and an app's
+  // migrations enqueue through airlock.job_key, which the next effect-state write needs.
+  const key = sql.indexOf("ls [0-7][0-9][0-9]_airlock_job_key.sql");
+  assert(key > 0, sql);
+  assertStringIncludes(sql, `psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL"`);
+  assert(key < sql.indexOf("for step in 005_create_tables.sql"), "the job key goes in before the replays");
+  assert(key > sql.indexOf('echo "initdb: already built"'), "an already built database's branch");
+  assert(key < sql.indexOf("else\n  source /usr/local/bin/docker-entrypoint.sh"), "not the fresh build's, which initdb's own directory runs");
+});
+
+Deno.test("a built database with no airlock schema gets the ledger, the airlock's step and the job key, ahead of the replays", async () => {
+  const sql = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  // The airlock's own start-up upgrade runs only after this job, so the install is the job's.
+  const guard = sql.indexOf(`no_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NULL")`);
+  assert(sql.indexOf(`if [ "$no_airlock" = t ]; then`) > guard, "the guard's answer is read after psql has run, under set -e");
+  const graphile = sql.indexOf("ls [0-7][0-9][0-9]_graphile_worker.sql");
+  const airlock = sql.indexOf("ls [0-7][0-9][0-9]_airlock.sql");
+  const key = sql.indexOf("ls [0-7][0-9][0-9]_airlock_job_key.sql");
+  assert(guard > sql.indexOf('echo "initdb: already built"'), "an already built database's branch");
+  assert(guard < graphile && graphile < airlock && airlock < key, "ledger, then the airlock's step, then the job key");
+  assert(key < sql.indexOf("for step in 005_create_tables.sql"), "all before the replays");
+  assertStringIncludes(sql, `to_regclass('graphile_worker.migrations') IS NULL`);
+  assertStringIncludes(sql, "psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f");
+});
+
+Deno.test("a role named like a keyword is granted quoted", async () => {
+  const sql = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "select"]'), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  assertStringIncludes(sql, `GRANT "anon", "select" TO postgres WITH INHERIT FALSE, SET TRUE`);
+});
+
+Deno.test("a token role added to a built database is made before the grant and the replays", async () => {
+  const job = async (roles: string) => (await built(release().replace('["anon", "app_user", "service"]', roles), "job")).value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  const sql = await job('["anon", "app_user", "service", "residual_bot"]');
+  assertStringIncludes(sql, `CREATE ROLE "residual_bot" NOLOGIN;`);
+  assertStringIncludes(sql, "RAISE EXCEPTION 'role residual_bot stands with more than a token role holds");
+  const made = sql.indexOf(`CREATE ROLE "residual_bot" NOLOGIN;`);
+  assert(made > sql.indexOf('echo "initdb: already built"'));
+  assert(made < sql.indexOf("for step in 005_create_tables.sql"), "before the replays");
+  assert(made < sql.indexOf('GRANT "anon", "app_user", "service", "residual_bot" TO postgres'), "before the grant");
+  assertStringIncludes(sql, 'GRANT "anon", "app_user", "service", "residual_bot" TO postgres WITH INHERIT FALSE, SET TRUE');
+  // The schema's own roles are never remade, and an app declaring none gets no step.
+  assertEquals((await job('["anon", "app_user", "service"]')).includes("CREATE ROLE"), false);
 });
 
 Deno.test("a preview's initdb applies the tests' rows, and a release's never does", async () => {
@@ -179,7 +246,7 @@ Deno.test("a preview's initdb applies the tests' rows, and a release's never doe
 Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
   // An app without auth has no app_user; a literal grant would die on it.
   const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;
-  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
+  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], `GRANT "anon", "service" TO postgres WITH INHERIT FALSE, SET TRUE`);
   const auth = (await built(release(), "service")).value.spec.template.spec.containers[2];
   // The service refuses to start without it; the bound is resilience's client statement, in ms.
   assertEquals(auth.env.find((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").value, "5000");
@@ -332,6 +399,8 @@ Deno.test("a release refuses a provider at a developer's address, or one the pro
   const google = (issuer: string, internal = issuer) => `OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin", OIDC_GOOGLE_ISSUER: "${issuer}", OIDC_GOOGLE_INTERNAL: "${internal}"`;
   for (const [oidc, why] of [
     [google("http://localhost:28443", "http://host.docker.internal:28443"), "localhost"],
+    // An app's own local broker port (identity/signin.cue's #LocalPort), any loopback port.
+    [google("http://localhost:24681", "http://host.docker.internal:24681"), "localhost"],
     [google("https://id.example.com", "http://host.docker.internal:28443"), "host.docker.internal"],
     [google("http://127.0.0.1:9000"), "127.0.0.1"],
   ]) {

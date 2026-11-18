@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 export async function writeEdgeReader(out: string, mecha: string, definitions: readonly unknown[], name: string) {
   const directory = path.join(out, 'compute/reader')
@@ -21,9 +22,13 @@ export async function writeEdgeReader(out: string, mecha: string, definitions: r
   }
   for (const pkg of ['pglite-workerd', 'compute-snapshot']) await collect(path.join(mecha, 'packages', pkg, 'src'), `runtime/packages/${pkg}/src`, true)
   const reader = 'runtime/packages/mecha-edge/src/compute-reader.ts'
-  await Deno.mkdir(path.dirname(path.join(directory, reader)), { recursive: true })
-  await Deno.copyFile(path.join(mecha, 'packages/mecha-edge/src/compute-reader.ts'), path.join(directory, reader))
-  inputs.push([reader, await hash(await Deno.readFile(path.join(directory, reader)))])
+  for (const file of ['packages/mecha-edge/src/compute-reader.ts', 'packages/incremental-views/runtime.ts']) {
+    const target = path.join(directory, 'runtime', file)
+    await Deno.mkdir(path.dirname(target), { recursive: true })
+    const bytes = await Deno.readFile(path.join(mecha, file))
+    await Deno.writeFile(target, bytes)
+    inputs.push([`runtime/${file}`, await hash(bytes)])
+  }
   await collect(path.join(out, 'pglite'), '../../pglite', false)
   inputs.push(['../../src/compute-machine.js', await hash(await Deno.readFile(path.join(out, 'src/compute-machine.js')))])
   const entry = `import { computeReader } from './${reader}';
@@ -36,7 +41,7 @@ export const ComputeReader = computeReader({pgliteWasm,initdbWasm,pgliteData,icu
 export default { fetch() { return new Response(null,{status:404}) } };
 `
   const configuration = {
-    main: 'worker.ts', compatibility_date: '2026-09-01', workers_dev: false, limits: { cpu_ms: 300000 },
+    main: 'worker.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, workers_dev: false, limits: { cpu_ms: 300000 },
     durable_objects: { bindings: [{ name: 'READER', class_name: 'ComputeReader' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['ComputeReader'] }],
     rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false }, { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false }],

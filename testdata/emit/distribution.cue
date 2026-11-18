@@ -19,9 +19,19 @@ factsPriority:    _loop.surface.sayYaml.say.lint.rulemap.facts.priority & 1
 compilerFromMise: strings.Contains(_loop.surface.checks.types.cmds[0], "../../plugins") & false
 externalBuild:    _loop.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
-clientOnlyEdge: strings.Contains(_project.edge, "--ssr-origin") & false
-nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "--ssr-origin \"https://example.com\"") & true
-terminalCommand:          (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
+clientOnlyEdge: strings.Contains(_project.edge, "else { [] })") & true
+nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "else { [\"--ssr-origin\" \"https://example.com\"] })") & true
+// Regression: the release's domain was written into the command, so one tree
+// released to one deployment; the verb's --domain names another, and
+// meta.domain is the default.
+releaseDomain: strings.Contains((dist.#Project & {domain: "app.example"}).edge, "...(if ('SAY_RELEASE_ARGS_DOMAIN' in $env) { ['--domain' $env.SAY_RELEASE_ARGS_DOMAIN] } else { [\"--domain\" \"app.example\"] })") & true
+verifyDomain: strings.Contains((dist.#Project & {domain: "app.example"}).verifyEdge, "...(if ('SAY_VERIFY_ARGS_DOMAIN' in $env) { [$'--default-domain=($env.SAY_VERIFY_ARGS_DOMAIN)'] } else { [\"--default-domain=app.example\"] })") & true
+// Regression: every Worker, queue and bucket was named after the app, so a
+// second deployment of the tree replaced the first; the verb's --name names
+// another, and the app's name is the default.
+releaseName: strings.Contains((dist.#Project & {workerName: "app"}).edge, "...(if ('SAY_RELEASE_ARGS_NAME' in $env) { ['--name' $env.SAY_RELEASE_ARGS_NAME] } else { [\"--name\" \"app\"] })") & true
+verifyName: strings.Contains((dist.#Project & {workerName: "app"}).verifyEdge, "...(if ('SAY_VERIFY_ARGS_NAME' in $env) { [$'--name=($env.SAY_VERIFY_ARGS_NAME)'] } else { [\"--name=app\"] })") & true
+terminalCommand:         (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal:   strings.Contains(_project.write, "omnishell") & false
 _externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
@@ -63,11 +73,43 @@ externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.do
 externalLintChecksConcreteCue: _externalBuild.files["checks.yaml"].say.lint.rulemap.cue.cmds[0].do & "mise exec -- cue vet -c ./..."
 externalGenerateKeepsCheckerInputs: list.Contains(_externalBuild.targets.generate.state.globs, ".pronto/check-inputs.json") & true
 
-// A host verb builds omnishell's data-plane bundle in the monorepo (the
-// switch set) and refuses a release without it, before the stack comes up: a
-// fresh checkout's integrate@host served a dead terminal and no error.
-_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
-_hostVerb: {for verb in ["launch", "integrate"] {(verb): "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}}
+// build, launch and integrate build omnishell's data-plane bundle in the
+// monorepo (the switch set) and refuse a release without it, ahead of their
+// builtin: a fresh checkout's integrate@host served a dead terminal and no
+// error, and its launch --watch died copying the file.
+_omnishellBundle: "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
+_hostVerb: {for verb in ["launch", "integrate"] {(verb): "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}}
+_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
+_bundleGates: {
+	build:     {default: true, platforms: []}
+	launch:    {default: true, platforms: ["host", "compose", "cloudflare"]}
+	integrate: {default: true, platforms: ["host"]}
+	release:   {default: false, platforms: ["pages", "cloudflare"]}
+}
+// The fixture releases nowhere; this one releases everywhere a release goes,
+// and only the two ceremonies that bundle from omnishell's tree are gated.
+_releasing: pronto.#App & {
+	for k, v in _code if k != "meta" {(k): v}
+	meta: {
+		for k, v in _code.meta if k != "targets" {(k): v}
+		targets: ["pages", "cloudflare", "docker"]
+	}
+}
+_releasingBuild: (pronto.#DefaultBuild & {code: _releasing, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
+// The app's own release and verify name its Worker after the app.
+_releasingSay: (pronto.#DefaultLoop & {code: _releasing, terminal: _terminal, cluster: _cluster}).out.surface.sayYaml.say
+emittedName: strings.Contains(strings.Join([for c in _releasingSay.release.rulemap.cloudflare.cmds {c.do}], "\n"), "[\"--name\" \"\(_code.meta.name)\"]") & strings.Contains(strings.Join([for c in _releasingSay.verify.rulemap.cloudflare.cmds {c.do}], "\n"), "[\"--name=\(_code.meta.name)\"]") & true
+externalVerbsBuildTheBundle: {for verb, g in _bundleGates {(verb): {
+	if g.default {default: _externalBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle"] & _bundleGate}
+	for p in g.platforms {(p): _releasingBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle-\(p)"] & _bundleGate & {platform: p}}
+}}}
+externalReleaseGatesOnlyItsTargets: (_externalBuild.files["say.yaml"].say.release == _|_) & (_releasingBuild.files["say.yaml"].say.release.rulemap["omnishell-bundle"] == _|_) & (_releasingBuild.files["say.yaml"].say.release.rulemap["omnishell-bundle-docker"] == _|_) & true
+// sayt keeps a rule without a platform at the verb's default alone: every
+// platform a verb's rules name has its own gate, or that tier serves a dead
+// terminal (integrate@host did, with the gate only on the default).
+externalBundleReachesEveryPlatform: {for verb, _ in _bundleGates for name, r in _releasingBuild.files["say.yaml"].say[verb].rulemap if r.platform != _|_ {
+	"\(verb)/\(name)": _releasingBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle-\(r.platform)"].platform & r.platform
+}}
 externalLaunchHostGate: _externalBuild.files["say.yaml"].say.launch.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.launch}]
 externalIntegrateAction: _externalBuild.files["say.yaml"].say.integrate.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task integrate-action --generate"}]
 externalIntegrateHostGate: _externalBuild.files["say.yaml"].say.integrate.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.integrate}]
@@ -86,5 +128,7 @@ defaultEdgeClock: strings.Contains(_project.edge, "--clock disabled") & false
 // Explicit live targets keep the HTTP/browser runner; the default GCP check
 // runs the app's integration drivers in Cloud Build.
 gcpVerifyLiveTarget: strings.Contains(_project.verifyGcp, "SAY_VERIFY_ARGS_TARGET") & true
+// A domain alone reaches the HTTP verifier, which refuses an empty one, rather than the plan's Cloud Run service.
+gcpVerifyDomain:     strings.Contains(_project.verifyGcp, "'SAY_VERIFY_ARGS_DOMAIN' in $env") & true
 gcpVerifyHttp:       strings.Contains(_project.verifyGcp, "verify verify.ts") & true
 gcpVerifyDrivers:    strings.Contains(_project.verifyGcp, "gcp verify.nu") & true

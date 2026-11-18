@@ -8,7 +8,7 @@ app: state: mecha: rows: PaymentRules: {
     src: "shell/validations/positive.js"
     note: "payments have positive totals"
     edges: []
-    module: {statements: "", completion: "(state, event) => event.row.total > 0"}
+    module: {statements: "", completion: "({ context, event }) => event.row.total > 0"}
   }
   on: {
     insert: guard: "positive"

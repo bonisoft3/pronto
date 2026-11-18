@@ -41,6 +41,24 @@ mecha_v=$(sed -n 's/^MECHA_V=//p' "$src/.github/prerelease.env")
 omnishell_v=$(sed -n 's/^OMNISHELL_V=//p' "$src/.github/prerelease.env")
 (cd "$dest/libraries/mecha" && python3 -I "$src/.github/mecha-snapshot.py" "$mecha_v")
 (cd "$dest/plugins/omnishell" && python3 -I "$src/.github/omnishell-snapshot.py" "$omnishell_v")
+# The adapters' runtime pins (`#Version` in clusters/mecha.cue and terminals/omnishell.cue) as prerelease.sh
+# publishes them: the prerelease's own versions, so an app bootstrapped from the snapshot runs the fork's runtimes.
+(cd "$dest/plugins/pronto" && python3 -I - "$mecha_v" "$omnishell_v" <<'PY'
+import re, sys
+mecha_v, omnishell_v = sys.argv[1:]
+def pin(p, v):
+    s = open(p).read(); t, n = re.subn(r'^#Version: "[^"]+"$', f'#Version: "{v}"', s, flags=re.M); assert n == 1, p; open(p, 'w').write(t)
+pin('clusters/mecha.cue', mecha_v)
+pin('terminals/omnishell.cue', omnishell_v)
+# The mirror's cue.mod deps name the same prereleases (prerelease.sh), so a consumer resolves the fork's modules.
+for dep, v in (('mecha', mecha_v), ('omnishell', omnishell_v)):
+    p = 'cue.mod/module.cue'
+    s = open(p).read()
+    t, n = re.subn(r'("github.com/bonisoft3/' + dep + r'@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{v}"', s)
+    assert n == 1, dep
+    open(p, 'w').write(t)
+PY
+)
 assets() { gh api "repos/bsoneca/pronto-fork/releases/tags/$1" --jq '[.assets[] | {name, digest, url}]'; }
 assets "mecha-v$mecha_v" >"$dest/.mecha-assets.json"
 assets "omnishell-v$omnishell_v" >"$dest/.omnishell-assets.json"
@@ -75,6 +93,6 @@ deno bundle -q --node-modules-dir=none --no-lock --config "$client/deno.json" --
 mkdir -p "$dest/cue.mod"
 cat >"$dest/cue.mod/module.cue" <<'EOF'
 module: "bonisoft.org"
-language: version: "v0.16.1"
+language: version: "v0.18.0"
 EOF
 echo "monorepo: $dest"

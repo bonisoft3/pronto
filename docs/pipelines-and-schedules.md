@@ -13,8 +13,8 @@ must be idempotent, and it is, because the read is absolute: a redelivered
 change recomputes the same rows. Periodic work is a schedule, an occurrence
 the cluster's clock turns into a row a pipeline hears. The declarations are
 [the guide's](../GUIDE.md#schedules); the bus under the pipelines is mecha's
-[change capture](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/change-capture.md); the clock is
-the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md).
+[change capture](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/change-capture.md); the clock is
+the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/ticker/README.md).
 
 ## When a value earns a pipeline
 
@@ -134,7 +134,7 @@ drains itself from the table the emitter writes into `.pronto/cluster.json`:
 a trigger on each `on` table, the same one-second batch, every drain called
 once as the cluster installs them in place of the stream's start, and a failed call retried after
 a backoff rather than redelivered
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#drains-and-the-clock)).
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/browser.md#drains-and-the-clock)).
 No publication is involved, so a table outside it wakes the drain there too.
 The two obligations above are what keep that loop finite, as they keep the
 stream's. PGlite enforces no `statement_timeout`, so `timeout` bounds a call
@@ -161,7 +161,7 @@ A `#Schedule` names a five-field `cron`, a `timeZone` (UTC unless stated),
 tick table carries the five columns in `#tickFields`, which the ticker writes
 last so no declared value overwrites them. How a tick is keyed, when it is
 late, how the ticker wakes the change-capture unit and why a tick needs no
-durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md).
+durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/ticker/README.md).
 
 What the emitter holds, at `cue vet`:
 
@@ -174,7 +174,7 @@ What the emitter holds, at `cue vet`:
 
 The `schedule` table is mecha's: the cluster is handed the schedules' names,
 and its database image creates the table as `800_schedule.sql`
-([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md#how-a-schema-reaches-the-database)),
+([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/schema.md#how-a-schema-reaches-the-database)),
 with a ticker and a clock beside it. The emitter seeds it in
 `801_schedule_seed.sql`, by an upsert on the name, and the table's `CHECK`
 refuses a `Forbid` without `done` in the row itself. Both are initdb steps,
@@ -192,7 +192,7 @@ twenty thousand times, a rating refit over a decade — is a computation
 names its module (`src`, `computations/<name>.js` unless stated), the `live` or `offline`
 entities it alone writes (`to`) and the committed Wasm modules its jobs call
 (`wasm`). mecha's compute service
-runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/compute/main.ts) is the
+runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.25.0/services/compute/main.ts) is the
 contract, from the lake snapshot to the writes. The module is one file that
 imports nothing, and exports exactly four names:
 
@@ -287,7 +287,7 @@ admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
 clock, randomness, time zone and locale. `endowments` grants it what it names
 of `Crypto` (WebCrypto's deterministic-by-specification subset),
-`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio` and `Pdf`, as a surface module
+`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio`, `Pdf` and `Xlsx`, as a surface module
 is granted `Intl`; an undeclared one throws where it is reached.
 
 `Cheerio.load(html)` creates a private mutable document using the pinned Cheerio
@@ -305,6 +305,15 @@ page, so one image gives several pages, a face each. It is the endowment's only
 call: no load, fonts, forms or encryption, the paths that reach the clock and
 `Math.random`, and the document carries no modification date, so the same input
 writes the same bytes.
+
+`Xlsx.fromRows({sheets})` writes a workbook with the pinned SheetJS
+(`@e965/xlsx`, the npm mirror of SheetJS's own release): each sheet is
+`{name, rows}`, and each row a list of cells from column A, each text, a finite
+number, a boolean, or `null` for an empty cell. It is the endowment's only call: no
+reader, formulas, styles or dates, so text beginning with `=` stays text, a date is
+the text or number its caller makes of it, and the same rows write the same bytes.
+A sheet holds at most 1,048,576 rows; an export larger than a run should hold is
+split by the app into several files.
 
 A computation can call an ordinary Crawlee-shaped function without changing the
 platform contract. Keep that function in the same module, call it from `finish`,
@@ -373,7 +382,7 @@ remain outside it. No `exactlyOnce` flag is inferred for the whole CDC pipeline.
 profile with authored Feldera SQL followed by a pure JavaScript finish stage.
 Its server runs native Feldera views, and Pages uses translated DuckDB snapshot
 queries from the same stock compiler export. See
-[query engines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/compute.md) for capture, restart and
+[query engines](https://github.com/bonisoft3/mecha/blob/v0.25.0/docs/compute.md) for capture, restart and
 portable-value limits. The existing SQL-shaped Duckstream
 declaration remains a separate profile; broader shared semantics are described
 in [[decisions/2026-10-20-duckstream-backend-contract]].

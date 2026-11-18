@@ -87,48 +87,48 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 #typeChecks: ["calendar", "int64-range", "duration-range", "tzdb",
 	"decimal-profile", "scalar-values", "finite-numbers", "ring-closure"]
 #carrierChecks: #typeChecks
-#TypeCheck: or(#typeChecks)
-#CarrierCheck: #TypeCheck
+#TypeCheck:     or(#typeChecks)
+#CarrierCheck:  #TypeCheck
 
-#types: [Name=string]: #TypeEntry
+#types: [string]~(Name,_): #TypeEntry
 #types: {
-	string: {pg: "text", column: "plain", subset: true, base: ["text", "varchar", "bpchar", "tsvector"], json: "string", refuse: "\\x00", order: "text", beyond: ["scalar-values"]}
-	bool: {pg: "boolean", column: "plain", subset: true, base: ["bool", "boolean"], json: "boolean", order: "boolean", beyond: []}
-	int32: {pg: "integer", column: "plain", subset: true, base: ["int2", "int4", "integer", "smallint"], json: "number", min: -2147483648, max: 2147483647, order: "number", beyond: []}
-	int64: {pg: "bigint", column: "domain", subset: false, sql: "portable_int64", base: ["int8", "bigint"], json: "string", pattern: "^(0|-?[1-9][0-9]*)$", order: "integer", beyond: ["int64-range"]}
-	double: {pg: "double precision", column: "checked", subset: true, base: ["float4", "float8", "double precision", "real"], json: "number", order: "number", beyond: []}
-	bytes: {pg: "bytea", column: "domain", subset: false, sql: "portable_bytes", base: ["bytea"], json: "string", pattern: "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", order: "none", beyond: []}
-	uuid: {pg: "uuid", column: "plain", subset: true, base: ["uuid"], json: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", order: "text", beyond: []}
+	string:    {pg: "text", column: "plain", subset: true, base: ["text", "varchar", "bpchar", "tsvector"], json: "string", refuse: "\\x00", order: "text", beyond: ["scalar-values"]}
+	bool:      {pg: "boolean", column: "plain", subset: true, base: ["bool", "boolean"], json: "boolean", order: "boolean", beyond: []}
+	int32:     {pg: "integer", column: "plain", subset: true, base: ["int2", "int4", "integer", "smallint"], json: "number", min: -2147483648, max: 2147483647, order: "number", beyond: []}
+	int64:     {pg: "bigint", column: "domain", subset: false, sql: "portable_int64", base: ["int8", "bigint"], json: "string", pattern: "^(0|-?[1-9][0-9]*)$", order: "integer", beyond: ["int64-range"]}
+	double:    {pg: "double precision", column: "checked", subset: true, base: ["float4", "float8", "double precision", "real"], json: "number", order: "number", beyond: []}
+	bytes:     {pg: "bytea", column: "domain", subset: false, sql: "portable_bytes", base: ["bytea"], json: "string", pattern: "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", order: "none", beyond: []}
+	uuid:      {pg: "uuid", column: "plain", subset: true, base: ["uuid"], json: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", order: "text", beyond: []}
 	timestamp: {pg: "timestamptz", column: "domain", subset: false, sql: "portable_timestamp", base: ["timestamptz", "timestamp with time zone"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)T\(_clock)Z$", order: "text", beyond: ["calendar"]}
-	duration: {pg: "interval", column: "domain", subset: false, sql: "portable_duration", base: ["interval"], json: "string", pattern: "^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$", order: "duration", beyond: ["duration-range"]}
-	decimal: {pg: "numeric", column: "domain", subset: false, base: ["numeric", "decimal"], json: "string", pattern: "^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]*[1-9])$", order: "decimal", beyond: ["decimal-profile"]}
-	date: {pg: "date", column: "checked", subset: true, base: ["date"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)$", order: "text", beyond: ["calendar"]}
-	time: {pg: "time(6)", column: "domain", subset: false, sql: "portable_time", base: ["time", "time without time zone"], json: "string", pattern: "^\(_clock)$", order: "text", beyond: []}
-	timezone: {pg: "text", column: "checked", subset: true, base: ["text"], json: "string", pattern: "^[A-Za-z0-9+_/-]+$", order: "none", beyond: ["tzdb"]}
+	duration:  {pg: "interval", column: "domain", subset: false, sql: "portable_duration", base: ["interval"], json: "string", pattern: "^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$", order: "duration", beyond: ["duration-range"]}
+	decimal:   {pg: "numeric", column: "domain", subset: false, base: ["numeric", "decimal"], json: "string", pattern: "^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]*[1-9])$", order: "decimal", beyond: ["decimal-profile"]}
+	date:      {pg: "date", column: "checked", subset: true, base: ["date"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)$", order: "text", beyond: ["calendar"]}
+	time:      {pg: "time(6)", column: "domain", subset: false, sql: "portable_time", base: ["time", "time without time zone"], json: "string", pattern: "^\(_clock)$", order: "text", beyond: []}
+	timezone:  {pg: "text", column: "checked", subset: true, base: ["text"], json: "string", pattern: "^[A-Za-z0-9+_/-]+$", order: "none", beyond: ["tzdb"]}
 	// RFC 8259 and not RFC 8785: the column is `json`, which keeps the text it
 	// was given, and no holder reorders keys. Two spellings of one
 	// value therefore both stand, which is why a json column has no order.
-	json: {pg: "json", column: "checked", subset: false, base: ["json", "jsonb"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers"]}
+	json:    {pg: "json", column: "checked", subset: false, base: ["json", "jsonb"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers"]}
 	geojson: {pg: "json", column: "checked", subset: false, base: ["json", "jsonb", "geometry", "geography"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers", "ring-closure"]}
 }
 #carriers: #types
 
 // The physical labels an older program still spells, and the type each one
 // is. A holder maps a field's type through this before it reads the table.
-#typeAlias: {text: "string", int: "int32", bigint: "int64", timestamptz: "timestamp", tsvector: "string"}
+#typeAlias:    {text: "string", int: "int32", bigint: "int64", timestamptz: "timestamp", tsvector: "string"}
 #carrierAlias: #typeAlias
 
 // #TypeConstraint's own fields are named for their types, so inside it `string`
 // and `bool` resolve to those fields rather than to the types. These are the
 // types under names nothing shadows.
-#TypeString: string
-#TypeBool:   bool
+#TypeString:    string
+#TypeBool:      bool
 #CarrierString: #TypeString
 #CarrierBool:   #TypeBool
 
 #Position: [number & >=-180 & <=180, number & >=-90 & <=90, ...number]
-#Ring: list.MinItems(4) & [...#Position]
-#Line: list.MinItems(2) & [...#Position]
+#Ring:     list.MinItems(4) & [...#Position]
+#Line:     list.MinItems(2) & [...#Position]
 
 #Geometry: {type!: "Point", coordinates!: #Position, ...} |
 	{type!: "MultiPoint", coordinates!: list.MinItems(1) & [...#Position], ...} |
@@ -148,20 +148,20 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 // leaves the seed row's optional fields incomplete instead of absent, and an
 // entity whose seed omits an optional type column then fails to export.
 #TypeConstraint: {
-	string: {#types.string, valid: #TypeString & !~#types.string.refuse}
-	bool: {#types.bool, valid: #TypeBool}
-	int32: {#types.int32, valid: (int & >=#types.int32.min & <=#types.int32.max)}
-	int64: {#types.int64, valid: #TypeString & =~#types.int64.pattern}
-	double: {#types.double, valid: number}
-	bytes: {#types.bytes, valid: #TypeString & =~#types.bytes.pattern}
-	uuid: {#types.uuid, valid: #TypeString & =~#types.uuid.pattern}
+	string:    {#types.string, valid: #TypeString & !~#types.string.refuse}
+	bool:      {#types.bool, valid: #TypeBool}
+	int32:     {#types.int32, valid: (int & >=#types.int32.min & <=#types.int32.max)}
+	int64:     {#types.int64, valid: #TypeString & =~#types.int64.pattern}
+	double:    {#types.double, valid: number}
+	bytes:     {#types.bytes, valid: #TypeString & =~#types.bytes.pattern}
+	uuid:      {#types.uuid, valid: #TypeString & =~#types.uuid.pattern}
 	timestamp: {#types.timestamp, valid: #TypeString & =~#types.timestamp.pattern}
-	duration: {#types.duration, valid: #TypeString & =~#types.duration.pattern}
-	decimal: {#types.decimal, valid: #TypeString & =~#types.decimal.pattern}
-	date: {#types.date, valid: #TypeString & =~#types.date.pattern}
-	time: {#types.time, valid: #TypeString & =~#types.time.pattern}
-	timezone: {#types.timezone, valid: #TypeString & =~#types.timezone.pattern}
-	json: {#types.json, valid: _}
-	geojson: {#types.geojson, valid: #GeoJSON}
+	duration:  {#types.duration, valid: #TypeString & =~#types.duration.pattern}
+	decimal:   {#types.decimal, valid: #TypeString & =~#types.decimal.pattern}
+	date:      {#types.date, valid: #TypeString & =~#types.date.pattern}
+	time:      {#types.time, valid: #TypeString & =~#types.time.pattern}
+	timezone:  {#types.timezone, valid: #TypeString & =~#types.timezone.pattern}
+	json:      {#types.json, valid: _}
+	geojson:   {#types.geojson, valid: #GeoJSON}
 }
 #Carrier: #TypeConstraint

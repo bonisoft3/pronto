@@ -85,8 +85,8 @@ in it has an appearance:
 - A rung whose value carries a colour is an error.
 - Elevation is decomposed. Open Props' `--shadow-color` and
   `--shadow-strength` are no `<color>` that `light-dark()` can twin, so the
-  strengths are pre-composed into seven ink roles (`#shadowInks`), which every
-  preset declares in both halves, and the shadow rungs reference them.
+  strengths are pre-composed into seven ink roles (`#shadowInks`), which
+  `#Design` defaults in both halves, and the shadow rungs reference them.
 - Every `var()` either emitted block writes names a token one of the two blocks
   declares, so a dangling reference is an error rather than a declaration that
   silently fails to apply.
@@ -182,7 +182,7 @@ plugin's CI filter, so a change there would never trigger it.
 
 **Layout is what a vocabulary cannot constrain.** A defect spelled in tokens
 passes this lint. The two escapes cheapest to reach for, `overflow: hidden` and
-`opacity: 0`, are measured by [visual lint](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/visual-lint.md)'s
+`opacity: 0`, are measured by [visual lint](https://github.com/bonisoft3/omnishell/blob/v0.25.0/docs/visual-lint.md)'s
 `clipped-content` and `focusable-but-invisible`; the answer is that spacing
 between children belongs to the parent.
 

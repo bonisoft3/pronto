@@ -8,8 +8,9 @@ import (
 	"github.com/bonisoft3/pronto/distribution"
 )
 
-#Generate: G={
-	_after: *[] | [...]
+#Generate: {
+	let G = self
+	_after:  *[] | [...]
 	project: distribution.#Project
 	// Once a program exists write.ts owns .say.yaml: it unifies these rules
 	// with the program's and the layout's sources. Written here too, the file
@@ -27,7 +28,8 @@ import (
 
 // The host roster's text: what generate writes as .mise.host.toml, and what
 // apps/platform_pins.nu holds every host app's copy to.
-#Roster: R={
+#Roster: {
+	let R = self
 	project: distribution.#Project
 	out:     toml.Marshal(R.project.miseHost)
 }

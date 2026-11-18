@@ -105,20 +105,22 @@ Built for the rules' guards and actions; lifting `data-reads` is unbuilt.
 the chart uses (`libraries/mecha/machine.cue`):
 
 ```cue
-guards: mayPlay: reads: ["actor", "now", "payload.slot"]
-actions: play: {reads: ["now", "payload.slot", "payload.covered"], writes: ["plays", "turn", "deadline"]}
+guards: holdsCard: {reads: ["_origin", "slot"], reason: "card_already_played"}
+actions: play: {reads: ["_time", "slot", "covered"], writes: ["plays", "turn", "deadline"]}
 ```
 
-`reads` are the step's inputs beside the context — `actor`, `now`, `entropy`
-and the event's `payload.<field>`; `writes` are the context fields an action
-may change. A guard implemented in the database keeps its `sql` form and
-states its rules guard's reads beside it; an action implemented there stays a
+`reads` are the event's fields a rule reads beside the context: its payload's
+own, and `_origin`, `_time` and `_entropy`, which the runtime states
+([[2026-11-13-drive-roles-and-event-origin#A rule is XState's one argument|the event's shape]]);
+`writes` are the context fields an action may change; a guard's `reason` is
+what a refusal by it is called. A guard implemented in the database keeps its `sql` form and
+names the rules' guards it runs after; an action implemented there stays a
 list of relational effects. The two forms are told apart by shape.
 
 The runtime (`mecha-runtime.js`, in the database and in the browser alike)
-enforces it without translating the rules. A rule is handed only the inputs it
-reads; every other input is a getter that refuses the step, and is not
-enumerable, so the `{...context}` idiom passes over it rather than reading it.
+enforces it without translating the rules. A rule is handed only the event
+fields it reads; every other is a getter that refuses the step, and is not
+enumerable, so the `{...event}` idiom passes over it rather than reading it.
 An action that changes a field outside `writes` refuses the step. Generation
 (`contracted` in `mecha-contracts.ts`) refuses a rule with no contract and a
 write to a field the context does not hold: the runtime could not enforce
@@ -155,9 +157,9 @@ chart or a comparison of declared domains:
 - a rule reads only inputs every event reaching it carries (`carries` in
   `mecha-contracts.ts`). The rules an event reaches are the transition's guard
   and action and those of every `always` arrow reachable from where it lands; a
-  machine-tier event carries no `actor`. Truco's timeout ran the envido refusal
-  with the wake's context and logged a null seat; its contract reads no
-  `actor`, so that read is refused at the step, and a contract claiming it is
+  machine-tier event carries no `_origin`. Truco's timeout ran the envido refusal
+  with the wake's event and logged a null seat; its contract reads no
+  `_origin`, so that read is refused at the step, and a contract claiming it is
   a finding here;
 - every non-final state the chart reaches has a transition to another, and
   every phase the ticker wakes takes the wake's event, whose delivery would

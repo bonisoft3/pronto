@@ -140,6 +140,12 @@ import (
 		// CloudNativePG's instances: one primary and instances-1 standbys, for which the operator
 		// keeps a PodDisruptionBudget itself. A preview runs as many.
 		instances: int & >=1 | *1
+		// Seconds a stopping instance waits for its sessions to end (CloudNativePG's
+		// smartShutdownTimeout) before it shuts down fast. With standbys none: a fast shutdown still
+		// checkpoints and ships every WAL record to the standbys, and while the old primary waits no
+		// standby is promoted (PRONTO-715). Alone, 15 s, as before: there is no one to fail over to.
+		// Below the Cluster's stopDelay (120, k8s.cue): CloudNativePG reads one at or past it as 0.
+		smartShutdown: int & >=0 & <120 | *[if instances > 1 {0}, 15][0]
 		// With standbys (instances over one), CloudNativePG's quorum-based synchronous replication:
 		// a commit waits for `number` standbys (`method` any of them, or the first in order), and a
 		// primary that has lost them keeps accepting writes under `dataDurability` "preferred"
@@ -200,6 +206,13 @@ import (
 		// Where the app's tables and the floor's functions are (the same file; the release fills it).
 		schemas: {app: *"public" | #SchemaName, floor: *"public" | #SchemaName, mecha: *"mecha" | #SchemaName}
 	}
+
+	// Set where the release trusts an issuer's keys (TRUSTED_JWKS): their
+	// digest, which rolls crud when they change; crud then verifies by the
+	// key set the release composed into <name>-trusted-keys.
+	trustedKeysDigest: *"" | =~"^[0-9a-f]{64}$"
+	// crud's audience, TRUSTED_AUDIENCE; empty, the origin's /crud.
+	trustedAudience: *"" | string
 
 	// The container hatches caddy's door routes to, by app id (the app's
 	// .pronto/cluster.json; the release fills it). Their own workloads are not

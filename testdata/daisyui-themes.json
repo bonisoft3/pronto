@@ -16,7 +16,7 @@
       "bucket": "colors",
       "maps_to": "colors/neutral",
       "stance": "maps",
-      "why": "the page ground under another word: `#Design.shell.bg` already resolves to `neutral`. The reading is a rename, and the value carries verbatim — press's own inks are `hsl()`, so the bucket was never hex-shaped."
+      "why": "the page ground under another word: `#Design.shell.bg` already resolves to `neutral`. The reading is a rename, and the value carries verbatim — `#Design`'s own shadow inks are `hsl()`, so the bucket was never hex-shaped."
     },
     {
       "token": "--color-base-200",
@@ -24,7 +24,7 @@
       "bucket": "colors",
       "maps_to": "colors/surface",
       "stance": "maps",
-      "why": "press's `surface` is the raised card and is LIGHTER than `neutral`; daisyUI's base-200 is a step DARKER than base-100. A second surface has a name; the elevation direction does not."
+      "why": "`#Design`'s `surface` is the raised card and is typically LIGHTER than `neutral`; daisyUI's base-200 is a step DARKER than base-100. A second surface has a name; the elevation direction does not."
     },
     {
       "token": "--color-base-300",
@@ -40,7 +40,7 @@
       "bucket": "colors",
       "maps_to": "colors/primary",
       "stance": "maps",
-      "why": "press's `primary` IS the ink and `#Design.shell.fg` resolves to it, so the role lands — but the name says brand where daisyUI says foreground-on-base, and a theme wanting ink and a brand hue has one slot for two."
+      "why": "`#Design`'s `primary` IS the ink and `#Design.shell.fg` resolves to it, so the role lands — but the name says brand where daisyUI says foreground-on-base, and a theme wanting ink and a brand hue has one slot for two."
     },
     {
       "token": "--color-primary",
@@ -48,7 +48,7 @@
       "bucket": "colors",
       "maps_to": "colors/accent",
       "stance": "maps",
-      "why": "`accent` is press's only brand hue. daisyUI publishes three — primary, secondary, accent — so the first fits and the other two have nowhere published to go."
+      "why": "`accent` is `#colorRoles`'s only brand hue. daisyUI publishes three — primary, secondary, accent — so the first fits and the other two have nowhere published to go."
     },
     {
       "token": "--color-primary-content",
@@ -56,7 +56,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-secondary",
@@ -64,7 +64,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "the second brand hue. press's `secondary` is muted grey INK (#6B7076), not a brand colour, and the one brand slot is already spent on daisyUI's primary. The name is not refused — it is TAKEN, and writing daisyUI's value into it rebinds press's ink silently, which is why `maps_to` may not be derived from a shared word."
+      "why": "the second brand hue. `#colorRoles`'s `secondary` is muted ink, not a brand colour, and the one brand slot is already spent on daisyUI's primary. The name is not refused — it is TAKEN, and writing daisyUI's value into it rebinds `secondary` ink silently, which is why `maps_to` may not be derived from a shared word."
     },
     {
       "token": "--color-secondary-content",
@@ -72,7 +72,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-accent",
@@ -80,7 +80,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "the third brand hue, and the same collision as `--color-secondary`: press publishes `accent` and this reading has already spent it on daisyUI's primary."
+      "why": "the third brand hue, and the same collision as `--color-secondary`: `#colorRoles` publishes `accent` and this reading has already spent it on daisyUI's primary."
     },
     {
       "token": "--color-accent-content",
@@ -88,7 +88,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-neutral",
@@ -96,7 +96,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "a published name with the opposite meaning: daisyUI's `neutral` is a dark unsaturated UI colour, press's `neutral` is the page ground. cue accepts the write and inverts the theme without complaint, which is the collision this reading exists to keep apart."
+      "why": "a published name with the opposite meaning: daisyUI's `neutral` is a dark unsaturated UI colour, `#Design`'s `neutral` is the page ground. cue accepts the write and inverts the theme without complaint, which is the collision this reading exists to keep apart."
     },
     {
       "token": "--color-neutral-content",
@@ -104,7 +104,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-info",
@@ -112,7 +112,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "press publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to press costs a light value and a dark one."
+      "why": "`#colorRoles` publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to `#colorRoles` costs a light value and a dark one."
     },
     {
       "token": "--color-info-content",
@@ -120,7 +120,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-success",
@@ -128,7 +128,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "press publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to press costs a light value and a dark one."
+      "why": "`#colorRoles` publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to `#colorRoles` costs a light value and a dark one."
     },
     {
       "token": "--color-success-content",
@@ -136,7 +136,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-warning",
@@ -144,7 +144,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "press publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to press costs a light value and a dark one."
+      "why": "`#colorRoles` publishes `danger` and no other status colour. `#Design.colors` admits `{}` with a twin, so the schema refuses nothing; what is missing is a published name, which is what a shared component set can bind to. Adding it to `#colorRoles` costs a light value and a dark one."
     },
     {
       "token": "--color-warning-content",
@@ -152,7 +152,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--color-error",
@@ -168,7 +168,7 @@
       "bucket": "colors",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that the PRESET names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — it reads under press, whose accent is a dark green, and is unreadable under `acid`, whose accent is a near-white lime."
+      "why": "pronto publishes no on-colour role at all. `#Design.colors` admits one the moment someone writes it — cue accepts `{}` and the closed twin then demands a dark half, so the cost is two declarations rather than a refusal. The cost that bites is that `#Design` names none: every app would coin its own spelling, and a component set binds to a published name or to nothing. Concretely, a screen writing `background: var(--accent)` has no theme-safe foreground — white reads on a dark green accent and is unreadable under `acid`, whose accent is a near-white lime."
     },
     {
       "token": "--radius-selector",
@@ -176,7 +176,7 @@
       "bucket": "rounded",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "a third radius role. `#Design.rounded` is an open map and takes `selector` with no twin at all, so this one costs a single line — but press does not publish it, `--r-full` is a 999px pill rather than a selector radius, and abyss, caramellatte, lofi, nord and silk set selector ABOVE box, which a sm/md/full ladder cannot state whatever it is called."
+      "why": "a third radius role. `#Design.rounded` is an open map and takes `selector` with no twin at all, so this one costs a single line — but `#Design` does not publish it, `--r-full` is a 999px pill rather than a selector radius, and abyss, caramellatte, lofi, nord and silk set selector ABOVE box, which a sm/md/full ladder cannot state whatever it is called."
     },
     {
       "token": "--radius-field",
@@ -184,7 +184,7 @@
       "bucket": "rounded",
       "maps_to": "rounded/sm",
       "stance": "maps",
-      "why": "press names radii by SIZE — sm/md/full — and daisyUI by ROLE. The value lands, but nothing in press says which elements read `--r-sm`, and in cupcake, forest, pastel and valentine `--radius-field` (2rem) EXCEEDS `--radius-box` (1rem), which an ordered ladder cannot state."
+      "why": "`#Design` names radii by SIZE — sm/md/full — and daisyUI by ROLE. The value lands, but nothing in `#Design` says which elements read `--r-sm`, and in cupcake, forest, pastel and valentine `--radius-field` (2rem) EXCEEDS `--radius-box` (1rem), which an ordered ladder cannot state."
     },
     {
       "token": "--radius-box",
@@ -192,7 +192,7 @@
       "bucket": "rounded",
       "maps_to": "rounded/md",
       "stance": "maps",
-      "why": "the value lands on the larger of press's two named radii, but the binding is by size and not by element class, so a theme cannot move boxes without moving every other use of `--r-md`."
+      "why": "the value lands on the larger of `#Design`'s two named corner radii, but the binding is by size and not by element class, so a theme cannot move boxes without moving every other use of `--r-md`."
     },
     {
       "token": "--size-selector",
@@ -200,7 +200,7 @@
       "bucket": "control",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "no published control geometry for checkboxes, toggles and badges: press's `control` bucket names field heights only. The bucket is open and takes the key untwinned, so this is a vocabulary gap and not a schema one."
+      "why": "no published control geometry for checkboxes, toggles and badges: `#Design`'s `control` bucket names field heights only. The bucket is open and takes the key untwinned, so this is a vocabulary gap and not a schema one."
     },
     {
       "token": "--size-field",
@@ -208,7 +208,7 @@
       "bucket": "control",
       "maps_to": "control/h",
       "stance": "maps",
-      "why": "daisyUI publishes ONE base unit and derives five field heights as `calc(var(--size-field) * N)`; press declares four independent heights. The unit has somewhere to land, but a theme that rescales every control with one number has no single press field to set."
+      "why": "daisyUI publishes ONE base unit and derives five field heights as `calc(var(--size-field) * N)`; `#Design` declares four independent heights. The unit has somewhere to land, but a theme that rescales every control with one number has no single `#Design` field to set."
     },
     {
       "token": "--border",
@@ -216,7 +216,7 @@
       "bucket": "control",
       "maps_to": "",
       "stance": "unnamed",
-      "why": "`--border-size-1..5` publishes 1px and 2px as RUNGS, and a rung is not a switch: daisyUI's `--border` changes every component at once where press makes each stylesheet pick a rung. A role holding the switch is admitted by `#Design.control`; nothing publishes one. cupcake, pastel, caramellatte and silk set 2px."
+      "why": "`--border-size-1..5` publishes 1px and 2px as RUNGS, and a rung is not a switch: daisyUI's `--border` changes every component at once where pronto makes each stylesheet pick a rung. A role holding the switch is admitted by `#Design.control`; nothing publishes one. cupcake, pastel, caramellatte and silk set 2px."
     },
     {
       "token": "--depth",
@@ -242,7 +242,7 @@
     },
     {
       "role": "colors/secondary",
-      "why": "muted grey ink. daisyUI's `secondary` is a brand hue, so the word matches and the meaning does not; binding them would put a brand colour where press puts a caption."
+      "why": "muted ink. daisyUI's `secondary` is a brand hue, so the word matches and the meaning does not; binding them would put a brand colour where `#colorRoles` puts a caption."
     },
     {
       "role": "colors/shadow-ink-10",
@@ -346,7 +346,7 @@
     },
     {
       "role": "type/display",
-      "why": "a named type purpose. daisyUI's themes tokenize no type at all — sizes and leadings are Tailwind's utilities, outside the theme — so no published token reaches press's typescale."
+      "why": "a named type purpose. daisyUI's themes tokenize no type at all — sizes and leadings are Tailwind's utilities, outside the theme — so no published token reaches `#Design`'s typescale."
     },
     {
       "role": "type/label",

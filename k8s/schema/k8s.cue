@@ -243,12 +243,16 @@ import (
 				if release.database.instances > 1 || !release.database.enablePDB {
 					enablePDB: release.database.enablePDB
 				}
-				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
-				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
-				// walsender holds a fast shutdown open, so every restart of the primary stalled a
-				// release for half an hour. Killed, the next start replays the WAL it wrote. The
-				// release waits for the primary (release.nu) longer than this stop.
-				smartShutdownTimeout: 15
+				// A stop is bounded: a smart shutdown waits for sessions (release.database.smartShutdown
+				// seconds), then a fast one, and at 120 s the pod is killed. CloudNativePG's default waits
+				// 1800 s, and Electric's walsender holds a fast shutdown open, so every restart of the
+				// primary stalled a release for half an hour. Killed, the next start replays the WAL it
+				// wrote. The release waits for the primary (release.nu) longer than this stop. With
+				// standbys the smart wait is none: the operator elects a new primary only once the old
+				// one's WAL receivers are down, so every second of it is a second with no primary
+				// (PRONTO-715: 17 of a 28.7 s failover). The instance manager reads it from the Cluster
+				// when the stop comes, so a change restarts no pod.
+				smartShutdownTimeout: release.database.smartShutdown
 				stopDelay:            120
 				// prontoMonitoringObj's queries; the operator adds its default ones beside them.
 				monitoring: customQueriesConfigMap: [{name: prontoMonitoringName, key: "queries"}]
@@ -460,6 +464,32 @@ import (
 			}
 		}
 	}
+	// The token roles the program declares, beside the schema's own: a release may name one that an
+	// older database lacks. Made before the replays, as 001_roles.sql makes them (emit.cue's #tokenRole,
+	// the same refusal of one that stands with more than a token role holds): idempotent, quoted.
+	let declaredRoles = [for r in release.database.tokenRoles if !list.Contains(["anon", "app_user", "service"], r) {r}]
+	let declaredRolesSql = strings.Join([for r in declaredRoles {
+		"""
+			DO $role$ BEGIN
+			  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+			    CREATE ROLE "\(r)" NOLOGIN;
+			  ELSIF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = '\(r)' AND (r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))) THEN
+			    RAISE EXCEPTION 'role \(r) stands with more than a token role holds, which a token naming it would act with';
+			  END IF;
+			END $role$;
+			"""
+	}], "\n")
+	// The built-in roles (anon, app_user, service, electric, authenticator) are no declared roles, and
+	// a database built without auth, schedules, timed machines or effects lacks some of them: its first
+	// effect's GRANT, or a membership, would then fail. The image's 001_roles.sql, as initdb ran it on a
+	// fresh volume, is run again before the replays. It is written to be re-run: a role is made only where
+	// missing, an attribute set only where short, and each of electric's grants only where absent. A
+	// missing file fails the job.
+	let builtinRolesStep = "  # The built-in roles initdb makes, restated (001_roles.sql is written to be re-run): a database built without\n  # auth, schedules or effects lacks the ones its first effect's grant names.\n  echo \"initdb: restating 001_roles.sql\"\n  psql -v ON_ERROR_STOP=1 -Xq -f /docker-entrypoint-initdb.d/001_roles.sql"
+	let declaredRolesStep = strings.Join([builtinRolesStep, if len(declaredRoles) > 0 {
+		"  # A token role the program declared after this database was built is made now, before the\n  # replays below, which may grant it something.\n  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'\n\(declaredRolesSql)\nSQL"
+	}], "\n")
+
 	let schemaJobObj = [
 		if release.type == "pronto" {
 			(schemaJob & {
@@ -511,6 +541,7 @@ import (
 					END
 					$repoint$;
 					SQL
+					\(declaredRolesStep)
 					  # Graphile Worker's schema, where the app declares an effect, reaches a database
 					  # built before its first one: once, when it is not there, since its step is no
 					  # replay (it inserts its first migration and creates its tables bare) and Graphile
@@ -531,6 +562,20 @@ import (
 					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
 					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
 					  # the step is run again, up to three times.
+					  # The airlock's job key (mecha's job_key.sql, a step of its own that initdb
+					  # places only on a fresh volume) reaches a database built before it, ahead of
+					  # the replays: the machines' interpreters (010) and an app's own migrations
+					  # enqueue effect jobs through airlock.job_key, and the next effect-state write
+					  # would fail without it. Idempotent, and run again right after the airlock's step
+					  # below (in the loop) has made its schema, for a database that had none.
+					  jobkey() {
+					    for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock_job_key.sql 2>/dev/null || true); do
+					      echo "initdb: applying $f"
+					      psql -v ON_ERROR_STOP=1 -Xq -f "/docker-entrypoint-initdb.d/$f"
+					    done
+					  }
+					  has_airlock=$(psql -XtAc "SELECT to_regnamespace('airlock') IS NOT NULL")
+					  if [ "$has_airlock" = t ]; then jobkey; fi
 					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null) $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
 					    f=/docker-entrypoint-initdb.d/$step
 					    if [ -f "$f" ]; then echo "initdb: replaying $step"
@@ -543,6 +588,9 @@ import (
 					        if [ "$try" = 3 ]; then exit 1; fi
 					        echo "initdb: $step failed, again in 10s"; sleep 10
 					      done
+					      # A database with no airlock schema has just had it made: its job key follows at
+					      # once, before the machines' code and the app's migrations that enqueue through it.
+					      case "$step" in *_airlock.sql) jobkey ;; esac
 					    fi
 					  done
 					  exit 0
@@ -827,6 +875,9 @@ import (
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
 						annotations: (#daprSidecar & {id: "crud", port: "3000"}).out
+						if release.trustedKeysDigest != "" {
+							annotations: "pronto.dev/trusted-keys-digest": release.trustedKeysDigest
+						}
 					}
 					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
 					spec: enableServiceLinks: false
@@ -859,12 +910,25 @@ import (
 							{name: "PGRST_DB_PRE_REQUEST", value: "\(release.database.schemas.floor).app_pre_request"},
 							// As mecha's cluster states them (meta.schema).
 							if release.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: "\(release.database.schemas.floor),public"}},
-							{
+							// With a trusted issuer, the key set the release composed from
+							// this secret and the issuer's public keys, and crud's audience.
+							if release.trustedKeysDigest == "" {
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
 									name: "\(release.id)-auth-secrets"
 									key:  "PGRST_JWT_SECRET"
 								}
+							},
+							if release.trustedKeysDigest != "" {
+								name: "PGRST_JWT_SECRET"
+								valueFrom: secretKeyRef: {
+									name: "\(release.id)-trusted-keys"
+									key:  "PGRST_JWKS"
+								}
+							},
+							if release.trustedKeysDigest != "" {
+								name:  "PGRST_JWT_AUD"
+								value: [if release.trustedAudience != "" {release.trustedAudience}, "\(originValue)/crud"][0]
 							},
 							{name: "PGRST_SERVER_HOST", value: "*"},
 							{name: "PGRST_SERVER_PORT", value: "3000"},

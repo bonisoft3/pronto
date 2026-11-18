@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, paymentProgram } from "./effects-fixtures.ts";
 
-const DATABASE = "bonitao/mecha-database:0.8.0@sha256:ccb59fdc18217eb679456c62b0f5aa05d79138bcc8c431087984a6ff1e2b552b";
+const DATABASE = "bonitao/mecha-database:0.25.0@sha256:d8eb2aa35230b1835ef1da15e45b342d0e49312db85667e69f26e4b0d5d285fb";
 async function run(args: string[], input?: string) {
   const child = new Deno.Command("docker", { args, stdin: input === undefined ? "null" : "piped", stdout: "piped", stderr: "piped" }).spawn();
   if (input !== undefined) {
@@ -25,7 +25,7 @@ app: state: mecha: rows: PaymentRules: {
     edges: [{table: "parent", key: "id", from: "parent_id"}]
     module: {
       statements: ""
-      completion: "(state, event) => { if (event.row.total === 20) throw new Error('guard read before RLS'); if (event.row.total === 99) return null; return event.row.total > 0 && event.row.doubled === event.row.total * 2 && state.items.length === (event.type === 'insert' ? 0 : 1) && state.rows.parent.every(p => p.allowed) && (event.type !== 'delete' || event.row.total > 1); }"
+      completion: "({ context, event }) => { if (event.row.total === 20) throw new Error('guard read before RLS'); if (event.row.total === 99) return null; return event.row.total > 0 && event.row.doubled === event.row.total * 2 && context.items.length === (event.type === 'insert' ? 0 : 1) && context.rows.parent.every(p => p.allowed) && (event.type !== 'delete' || event.row.total > 1); }"
     }
   }
   on: {
@@ -102,6 +102,66 @@ app: state: mecha: rows: PaymentRules: {
       assertEquals(rpc.ok, false);
       assertStringIncludes(rpc.err, "permission denied");
     });
+  } finally {
+    const removed = await run(["rm", "-f", container]);
+    if (!removed.ok) throw new Error(removed.err);
+  }
+} });
+
+// Who sent a write is the event's `_origin`, the session's subject and never a
+// column the writer fills, and an edge from it reads the origin's own rows of
+// the membership list.
+Deno.test({ name: "a lifecycle guard reads the write's origin and its memberships", sanitizeOps: false, sanitizeResources: false, fn: async () => {
+  const program = paymentProgram({ machine: "pending: {}" })
+    .replace(/\n    effects: charge: \{[\s\S]*?\n    }\n/, "\n") + `
+app: state: mecha: rows: PaymentRules: {
+  entity: "Payment"
+  guards: payer: {
+    src: "shell/validations/payer.js"
+    note: "a payer sends its own payments; the service sends any"
+    edges: [{table: "member", key: "user_id", from: "$origin"}]
+    module: {
+      statements: ""
+      completion: "({ context, event }) => event._origin === undefined ? context.rows.member.length === 0 : event._origin === 'user:' + event.row.sent_by && context.rows.member.some(m => m.group_id === 'payers')"
+    }
+  }
+  on: insert: guard: "payer"
+}
+`;
+  const emitted = await cue(["export", "-", "-e", '{predicates: out["services/database/migrations/009_validations.sql"].text, machines: out["services/database/migrations/010_machines.sql"].text}', "--out", "json"], program);
+  if (!emitted.success) throw new Error(emitted.stderr);
+  const { predicates, machines } = JSON.parse(emitted.stdout);
+  const container = `pronto-origin-${crypto.randomUUID().slice(0, 8)}`;
+  const started = await run(["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", DATABASE]);
+  if (!started.ok) throw new Error(started.err);
+  const psql = (sql: string) => run(["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
+  const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
+  const sent = (n: number, by: string | null, as?: string, role = "app_user") =>
+    psql(`${as === undefined ? "" : `SELECT set_config('request.jwt.claims', '{"sub":"${as}","role":"${role}"}', false);`}
+      INSERT INTO payment (id, total, sent_by) VALUES ('${id(n)}', 1, ${by === null ? "NULL" : `'${by}'`});`);
+  try {
+    for (let i = 0; !(await run(["exec", container, "pg_isready", "-h", "127.0.0.1", "-qU", "postgres"])).ok; i++) {
+      if (i > 60) throw new Error("postgres did not start");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const made = await psql(`CREATE EXTENSION IF NOT EXISTS plv8;
+      CREATE TABLE member (group_id text NOT NULL, user_id uuid NOT NULL);
+      INSERT INTO member VALUES ('payers', '${id(1)}'), ('readers', '${id(2)}');
+      CREATE TABLE payment (id uuid PRIMARY KEY, status text DEFAULT 'pending', total numeric NOT NULL, failure text, sent_by uuid);
+      ${predicates}
+      ${machines}`);
+    if (!made.ok) throw new Error(made.err);
+    assertEquals((await sent(1, id(1), id(1))).ok, true, "a payer sends its own payment");
+    const stranger = await sent(2, id(2), id(2));
+    assertEquals(stranger.ok, false);
+    assertStringIncludes(stranger.err, "validation payment.payer");
+    const forged = await sent(3, id(2), id(1));
+    assertEquals(forged.ok, false, "the origin is the session's subject, whatever the row says");
+    assertEquals((await sent(4, null)).ok, true, "a write with no subject carries no origin");
+    // The service's token names a subject too, and not always a person's id.
+    assertEquals((await sent(5, null, id(0), "service")).ok, true, "a write the service makes carries no origin");
+    const named = await sent(6, null, "compute", "service");
+    assertEquals(named.ok, true, named.err);
   } finally {
     const removed = await run(["rm", "-f", container]);
     if (!removed.ok) throw new Error(removed.err);

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1.0.11";
-import { main } from "./verify.ts";
+import { airlockTarget, main } from "./verify.ts";
 
 Deno.test("verify CLI fails when target cannot be resolved", async () => {
   const originalAppUrl = Deno.env.get("APP_URL");
@@ -172,5 +172,21 @@ Deno.test("verify CLI respects SAY_VERIFY_ARGS_TIER from environment", async () 
     } else {
       Deno.env.delete("SAY_VERIFY_ARGS_TIER");
     }
+  }
+});
+
+// Regression: the airlock was the last build's or `<app>-airlock`, so verifying
+// production after a staging build asked staging's Worker for the secrets.
+Deno.test("verify asks the named deployment's airlock for its secrets", () => {
+  const config = "dist/cloudflare/airlock/wrangler.jsonc";
+  assertEquals(airlockTarget("app", config, undefined), ["--name", "app-airlock"]);
+  assertEquals(airlockTarget("app", config, "app-staging-airlock"), ["--name", "app-airlock"]);
+  assertEquals(airlockTarget("app-staging", config, "app-staging-airlock"), ["--config", config]);
+  assertEquals(airlockTarget("app", config, "app-database-airlock"), ["--config", config]);
+});
+
+Deno.test("verify refuses a Worker name given empty or malformed before asking anything", async () => {
+  for (const name of ["", "Snap", "-x", "a".repeat(64)]) {
+    await assertRejects(() => main([".", "--target=https://app.example.com", `--name=${name}`]), Error, "is no Worker name");
   }
 });

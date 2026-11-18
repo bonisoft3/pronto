@@ -9,7 +9,7 @@
 module: "github.com/bonisoft3/pronto@v1"
 
 language: {
-	version: "v0.16.1"
+	version: "v0.18.0"
 }
 
 source: {
@@ -26,19 +26,19 @@ source: {
 // fails when one of these versions falls behind.
 deps: {
 	"github.com/bonisoft3/bayt@v0": {
-		v:       "v0.71.0"
+		v:       "v0.72.4"
 		default: true
 	}
 	"github.com/bonisoft3/mecha@v0": {
-		v:       "v0.22.0"
+		v:       "v0.25.1"
 		default: true
 	}
 	"github.com/bonisoft3/omnishell@v0": {
-		v:       "v0.23.0"
+		v:       "v0.25.0"
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {
-		v:       "v0.48.0"
+		v:       "v0.49.1"
 		default: true
 	}
 }

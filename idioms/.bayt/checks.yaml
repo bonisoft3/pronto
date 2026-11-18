@@ -93,7 +93,7 @@ say:
         - do: "if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag }"
         platform: pages
   self:
-    version: v0.48.0
+    version: v0.49.1
   doctor:
     do: >-
       use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno
@@ -125,8 +125,8 @@ say:
       auto-bayt:
         priority: 2
         cmds:
-        - use: ./auto-bayt.nu
-          do: auto-bayt
+        - do: auto-bayt
+          use: ./auto-bayt.nu
   setup:
     rulemap:
       builtin:
@@ -148,12 +148,12 @@ say:
       unit:
         cmds:
         - do: deno test --allow-read tests/handlers.test.ts
-      machines:
-        cmds:
-        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check machines .
       i18n:
         cmds:
         - do: use tools.nu [run-mise]; run-mise exec -- omnishell check i18n .
+      machines:
+        cmds:
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check machines .
       battery:
         cmds:
         - do: use tools.nu [run-mise]; run-mise exec -- omnishell check battery .
@@ -166,9 +166,10 @@ say:
             use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
             str trim); run-mise exec -- deno run -A --config ($pronto | path join deno.json)
             ($pronto | path join verify verify.ts) . --platform pages ...(if
-            ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target',
-            $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier',
-            $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { []
-            } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if
-            ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session',
-            $env.SAY_VERIFY_ARGS_SESSION] })
+            ('SAY_VERIFY_ARGS_DOMAIN' in $env) { [$'--default-domain=($env.SAY_VERIFY_ARGS_DOMAIN)'] } else
+            { [] }) ...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else {
+            ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty)
+            { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if
+            ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless',
+            $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else {
+            ['--session', $env.SAY_VERIFY_ARGS_SESSION] })

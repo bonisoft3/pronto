@@ -1,4 +1,4 @@
-import { basename, dirname, resolve } from "node:path";
+import { basename, delimiter, dirname, resolve } from "node:path";
 import { exists, ifMissing } from "./missing.ts";
 import { type LiveStatic, prepareLiveTree } from "./live-tree.ts";
 
@@ -122,7 +122,7 @@ export function developmentCompose(
   if (render !== undefined) {
     render.environment = {
       ...render.environment,
-      ENTRY: "/render/shell/index.html",
+      ENTRY: "/render/.pronto/development/index.html",
       PRONTO_PRESENTATION_WATCH: "1",
     };
     render.develop = develop("render");
@@ -138,6 +138,9 @@ async function launch(args: string[]): Promise<void> {
   }).output();
   if (!where.success) throw new Error("cannot resolve sayt");
   const sayt = new TextDecoder().decode(where.stdout).trim();
+  // The stubs' lock sits beside sayt's .mise.toml; mise reads it only from a
+  // trusted config.
+  const trusted = [sayt, Deno.env.get("MISE_TRUSTED_CONFIG_PATHS")].filter(Boolean).join(delimiter);
   if (!args.includes("--watch")) {
     const run = await new Deno.Command("mise", {
       args: [
@@ -148,7 +151,7 @@ async function launch(args: string[]): Promise<void> {
         "-c",
         "use launch.nu; launch ...($env.PRONTO_LAUNCH_ARGS | from json)",
       ],
-      env: { MISE_LOCKED: "0", PRONTO_LAUNCH_ARGS: JSON.stringify(args) },
+      env: { MISE_TRUSTED_CONFIG_PATHS: trusted, PRONTO_LAUNCH_ARGS: JSON.stringify(args) },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -160,7 +163,7 @@ async function launch(args: string[]): Promise<void> {
       args: ["tool-stub", `${sayt}/compose.toml`, ...more],
       signal,
       env: {
-        MISE_LOCKED: "0",
+        MISE_TRUSTED_CONFIG_PATHS: trusted,
         COMPOSE_BAKE: "true",
         BUILDX_NO_DEFAULT_ATTESTATIONS: "1",
       },

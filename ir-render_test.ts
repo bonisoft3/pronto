@@ -232,6 +232,9 @@ Deno.test("delivery follows the sink: the card's chip and the machine's panel sa
   assertStringIncludes(await cardHtml("Game", idempotent.state.entities.Game, ctx(idempotent)), "<b>delivery</b> exactly-once");
   // A machine below the pivot takes its level's word: Team's replicated machine-less row is exactly-once.
   assertStringIncludes(await cardHtml("Team", program.state.entities.Team, { ...ctx(program), readMode: new Map([["Team", "lazy"]]) }), "<b>delivery</b> exactly-once");
+  // Regression: a named origin printed as [object Object].
+  const named = withEffect({ ...base, reentry: "reconcile", sink: { ...base.sink, origin: { secret: "ACQUIRER_ORIGIN" } } });
+  assertStringIncludes(await cardHtml("Game", named.state.entities.Game, ctx(named)), "</span> → the origin in ACQUIRER_ORIGIN · ");
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {

@@ -3,7 +3,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets } from './edge-assets.ts'
 import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
-import { extensionless, originAssets, prepareEdgeTemplate } from './edge-templates.ts'
+import { extensionless, originAssets, prepareEdgeTemplate, subdomainRealmsOf } from './edge-templates.ts'
 
 const declaration = '{{- $o := placeholder "http.vars.origin" -}}'
 
@@ -88,4 +88,13 @@ Deno.test('a realm document is served at its own address, where assets would red
   assert.equal(extensionless('shell/units/map/index.html'), 'shell/units/map')
   assert.equal(extensionless('shell/units/map/frame.html'), 'shell/units/map/frame')
   assert.equal(extensionless('shell/units/map/lib.js'), 'shell/units/map/lib.js')
+
+  const subRealms = subdomainRealmsOf({ units: { pay: { isolation: 'realm', subdomain: 'payments', src: 'shell/units/pay/index.html', files: ['shell/units/pay/index.html'] } } })
+  const subAssets = originAssets({
+    fetch: () => Promise.resolve(new Response('pay', { headers: { 'content-type': 'text/html', 'content-security-policy': "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'" } })),
+  }, ['/shell/units/pay/index.html'], subRealms)
+  const onMain = await subAssets.fetch(new Request('https://app.example/shell/units/pay/index.html'))
+  assert.equal(onMain.headers.get('content-security-policy'), "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'")
+  const onSub = await subAssets.fetch(new Request('https://payments.app.example/shell/units/pay/index.html'))
+  assert.equal(onSub.headers.get('content-security-policy'), "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' https://app.example")
 })

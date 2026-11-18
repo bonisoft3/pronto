@@ -14,9 +14,10 @@ import (
 	"strings"
 )
 
-// Every let in this file has a name of its own: CUE 0.16.1 confuses two lets
-// of one name in sibling comprehensions, and reads one's value as the other's.
-#App: A={
+// Every let in this file has a distinct name across sibling comprehensions.
+#App: {
+	let A = self
+
 	// The tables the terminal registers a collection for, each with its
 	// entity: what a screen's markup reads and writes, what a form writes, and
 	// each fold's private pair, which no region names and the terminal reads
@@ -51,37 +52,46 @@ import (
 		for _, e in A.state.entities if e.access != _|_ {
 			if e.access.scope == "folder" {(A.state.entities[e.access.parent].table): e.access.parent}
 			if e.access.scope == "private" if e.access.shared != _|_ {(e.access.shared.via): A._entityByTable[e.access.shared.via]}
+			if e.access.scope == "private" if e.access.groups != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
+			if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
 		}
+		// A guard that walks from the write's origin reads the membership list,
+		// which no markup and perhaps no grant names.
+		for _, e in A.state.entities for _, v in e.validations for x in v.via if x == "_origin" for m, y in A.state.entities if y.access != _|_ if y.access.scope == "group" {(y.table): m}
 	}
 
 	// Each server entity's mode, and the reason for it: the first reason it
 	// is eager, or why it can be lazy. pronto's derive writes these rows into
 	// the fact store as `read_mode`.
-	#read: {for n, e in A.state.entities if e.server {(n): {
-		table: e.table
-		// Every field is stated whatever the answer: one a condition added
-		// would arrive after the entity's `read` had looked the row up, which
-		// CUE refuses.
-		let why = list.Concat([[for w in _readEager if w.entity == n {w.why}], [if _readRead[n] == _|_ {"no screen reads it"}]])
-		mode: [if len(why) > 0 {"eager"}, "lazy"][0]
-		reason: [for w in why {w}, "each active query demands its own subset or complete snapshot"][0]
-	}}}
+	#read: {for n, e in A.state.entities if e.server {
+		(n): {
+			table: e.table
+			// Every field is stated whatever the answer: one a condition added
+			// would arrive after the entity's `read` had looked the row up, which
+			// CUE refuses.
+			let why = list.Concat([[for w in _readEager if w.entity == n {w.why}], [if _readRead[n] == _|_ {"no screen reads it"}]])
+			mode:   [if len(why) > 0 {"eager"}, "lazy"][0]
+			reason: [for w in why {w}, "each active query demands its own subset or complete snapshot"][0]
+		}
+	}}
 
 	// A pattern, not a comprehension over the entities: the rule reads the
 	// entities, so a field set it added to would be one it had already read.
 	// A browser tier has no mode, and no field to hold one (#Entity).
-	state: entities: [N=string]: {read?: A.#read[N].mode}
+	state: entities: [string]~(N,_): {read?: A.#read[N].mode}
 
 	_readKey: {for n, e in A.state.entities {(n): [for f in e.fields if f.pk {f.name}][0]}}
 	// Per entity, the columns of each kind, a set so a test is one lookup. The
 	// platform's txid is an int64. A column no field types keeps the engine's
 	// own comparison and is in none of them.
-	_readTypes: {for n, e in A.state.entities {(n): {
-		for f in e.fields let t = [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0] if #types[t] != _|_ {(f.name): #types[t]}
-		txid: #types.int64
-	}}}
+	_readTypes: {for n, e in A.state.entities {
+		(n): {
+			for f in e.fields let t = [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0] if #types[t] != _|_ {(f.name): #types[t]}
+			txid: #types.int64
+		}
+	}}
 	// Electric compares it (types.cue `subset`).
-	_readCompares: {for n, cols in _readTypes {(n): {for c, t in cols if t.subset {(c): true}}}}
+	_readCompares:   {for n, cols in _readTypes {(n): {for c, t in cols if t.subset {(c): true}}}}
 	_readRestricted: {for n, e in A.state.entities if e.access != _|_ if e.access.scope != "public" {(n): e.access.scope}}
 
 	_readRead: {
@@ -100,13 +110,16 @@ import (
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: p.from, why: "the fold \(pn) projects the reader's own contribution from it"}],
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: A._entityByTable[p.fold.pair.table], why: "the fold \(pn) reads the reader's pair from it"}],
 		[for n, e in A.state.entities for vn, _ in e.validations {entity: n, why: "validation \(vn) finds the row a write changes in it"}],
-		// A validation walks forward along a ref field, or back along
-		// "<Entity>.<field>" (validations.ts resolveEdges).
+		// A validation walks forward along a ref field, back along
+		// "<Entity>.<field>", or from the write's origin to the membership
+		// list (validations.ts resolveEdges).
 		[for n, e in A.state.entities for vn, v in e.validations for x in v.via {
-			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {A._entityByTable[f.ref]}][0]
-			why: "validation \(n).\(vn) walks to it"
+			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {A._entityByTable[f.ref]}, if x == "_origin" for m, y in A.state.entities if y.access != _|_ if y.access.scope == "group" {m}][0]
+			why:    "validation \(n).\(vn) walks to it"
 		}],
 		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ {entity: A._entityByTable[e.access.shared.via], why: "\(n)'s visibility is decided by its grants"}],
+		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {entity: m, why: "\(n)'s visibility is decided by its groups' members"}],
+		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {entity: m, why: "\(n)'s grants name groups, read against their members"}],
 		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "folder" {entity: e.access.parent, why: "\(n)'s visibility is decided by its parent"}],
 		[if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
 			entity: A._entityByTable[A.capabilities.auth.self.name.table]
@@ -119,32 +132,34 @@ import (
 
 	])
 
-	#developmentRead: {for n, e in A.state.entities if e.server {(n): [
-		if len([for r in _readInvariant if r.entity == n {r}]) > 0 || _readCompares[n][_readKey[n]] == _|_ {"eager"},
-		"lazy",
-	][0]}}
+	#developmentRead: {for n, e in A.state.entities if e.server {
+		(n): [
+			if len([for r in _readInvariant if r.entity == n {r}]) > 0 || _readCompares[n][_readKey[n]] == _|_ {"eager"},
+			"lazy",
+		][0]
+	}}
 
 	_readEager: list.Concat([_readInvariant,
 		// An opaque keyed effect may name a row no view holds. Whole-table
 		// mutations demand their snapshot at runtime; keyed effects still need
 		// a key Electric can compare to load that row.
 		[if len(_readReducing) > 0 for n, e in A.state.entities if e.server
-			if _readCompares[n][_readKey[n]] == _|_ {
-				entity: n
-				why:    "\(_readReducing[0]).html writes from a reduce, and Electric cannot compare \(n)'s key to load a row it targets"
-			}],
+		if _readCompares[n][_readKey[n]] == _|_ {
+			entity: n
+			why:    "\(_readReducing[0]).html writes from a reduce, and Electric cannot compare \(n)'s key to load a row it targets"
+		}],
 
 		// The writes that find their row in the collection. One by key loads
 		// a row no view loaded as a view of its key (data-sync.js `holding`),
 		// whatever the screen shows: the key a form or an effect carries is
 		// bound from anywhere.
 		[for sn, s in A.surface.screens for w in s.writes
-			let at = "\(sn).html"
-			let wn = A._entityByTable[w.table]
-			let pk = _readKey[wn]
-			let refused = [
-				if (w.op == "update" || w.op == "delete") && _readCompares[wn][pk] == _|_ {"\(at) \(w.op)s a row of it by \(pk), which Electric cannot compare to load the row"},
-			]
-			if len(refused) > 0 {entity: wn, why: refused[0]}],
+		let at = "\(sn).html"
+		let wn = A._entityByTable[w.table]
+		let pk = _readKey[wn]
+		let refused = [
+			if (w.op == "update" || w.op == "delete") && _readCompares[wn][pk] == _|_ {"\(at) \(w.op)s a row of it by \(pk), which Electric cannot compare to load the row"},
+		]
+		if len(refused) > 0 {entity: wn, why: refused[0]}],
 	])
 }

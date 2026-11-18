@@ -87,7 +87,14 @@ with `data-text-format="money"` in the reader's locale, so no row stores a
 formatted amount ([localization](localization.md)). Some fields carry physical labels (`text`,
 `int`, `bigint`, `timestamptz`, `tsvector`), which `#typeAlias` maps to their
 types; `tsvector` is an index, not a value anyone states
-([pending](../PENDING.md#types-and-identity)).
+([pending](../PENDING.md#types-and-identity)). A generated column searches
+without accents through `immutable_unaccent(text)`, so `Reuniao` finds
+`Reunião`: `generated: "to_tsvector('simple', immutable_unaccent(coalesce(title, '')))"`.
+`unaccent()` itself is only STABLE, which a generated column refuses. An
+entity whose generated column calls it brings the extension and the wrapper
+in the step that creates its table (`000_extensions.sql` for a baseline
+entity, its own migration for a later one), in every database a release
+runs: PostgreSQL, a page's PGlite and the edge's.
 
 ## The type table
 
@@ -243,7 +250,7 @@ validations alone ([the lattice](lattice.md#the-validation-ladder)):
 | `invariant` on an entity | rows that may not exist | a SQL `CHECK` at the cluster rungs; nothing at `tab` or `device` |
 | `unique`, `uniques` | rows that may not coexist | a unique index at the cluster rungs, and `reconcile()` when a browser collection loads |
 | a validation | rows inconsistent with those they reference | the store at every rung, and a plv8 trigger at the cluster rungs ([Jessie in the database](decisions/2026-11-05-database-jessie.md#validations)) |
-| a machine | transitions a field may not make | the terminal, for a `tab` or `device` row only ([machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#the-chart)) |
+| a machine | transitions a field may not make | the terminal, for a `tab` or `device` row only ([machines](https://github.com/bonisoft3/omnishell/blob/v0.25.0/docs/machines.md#the-chart)) |
 | `access` | readers a row may not reach | RLS policies at the cluster rungs ([access](access.md)) |
 
 The reviewer's question with a right answer is *could this have been said one

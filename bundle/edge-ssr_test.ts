@@ -13,6 +13,42 @@ async function securityHeaders(out: string) {
 
 type Config = { durable_objects: { bindings: { name: string; script_name?: string }[] } }
 
+Deno.test('snapshot completion drains an already-started read', async () => {
+  const path = new URL('../../../libraries/mecha/packages/mecha-edge/src/public-snapshot.ts', import.meta.url)
+  const source = (await Deno.readTextFile(path)).replace(
+    "import { clearMetadataCache, metadataCache, readRest, readRestBatch, type ReadSchema } from '@mecha/postgrest-js'",
+    `type ReadSchema = unknown
+     const { clearMetadataCache, metadataCache, readRest, readRestBatch } = (globalThis as any).__snapshotDrainTest`,
+  )
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  let closed = false
+  ;(globalThis as any).__snapshotDrainTest = {
+    clearMetadataCache() {}, metadataCache() { return {} },
+    async readRest() { started.resolve(); await release.promise; return Response.json([]) },
+    readRestBatch() { throw new Error('unexpected batch') },
+  }
+  try {
+    const { publicSnapshot } = await import(`data:application/typescript,${encodeURIComponent(source)}`)
+    const db = { async transaction(fn: (tx: unknown) => Promise<unknown>) {
+      try { return await fn({ exec: async () => [null, { rows: [{ revision: 'revision' }] }] }) }
+      finally { closed = true }
+    } }
+    let escaped: { read(path: string): Promise<unknown[]> } | undefined
+    const done = publicSnapshot(db, 'directory', async (snapshot: typeof escaped) => {
+      escaped = snapshot
+      void snapshot!.read('/item')
+      await started.promise
+    })
+    await started.promise
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(closed, false)
+    assert.throws(() => escaped!.read('/late'), /snapshot is closed/)
+    release.resolve()
+    await done
+    assert.equal(closed, true)
+  } finally { delete (globalThis as any).__snapshotDrainTest }
+})
+
 Deno.test('SSR keeps the private compute service binding on the database Worker in both modes', async () => {
   const out = await Deno.makeTempDir()
   const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
@@ -93,7 +129,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   try {
     const bundle = path.join(tmp, 'pronto/bundle'), runtime = path.join(tmp, 'selected runtime'), out = path.join(tmp, 'release')
     for (const dir of [bundle, path.join(runtime, 'server'), path.join(runtime, 'interpreter'), path.join(out, 'src'), path.join(out, 'public/shell')]) await Deno.mkdir(dir, { recursive: true })
-    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts', 'edge-templates.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
+    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts', 'edge-templates.ts', 'cloudflare-runtime.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
     await Deno.copyFile(new URL('../../omnishell/server/prepare-worker.ts', import.meta.url), path.join(runtime, 'server/prepare-worker.ts'))
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
@@ -274,6 +310,43 @@ Deno.test('generated Cluster holds the snapshot through rendering without waitin
   } finally {
     await Deno.remove(out, { recursive: true })
   }
+})
+
+Deno.test('generated Cluster assigns background renders to the low lane', async () => {
+  const out = await Deno.makeTempDir()
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+    await writeEdgeSsr(out, fileURLToPath(new URL('../../omnishell/', import.meta.url)), fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url)), 'app', 'https://app.example', [])
+    const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+    const setup = source.slice(source.indexOf('class SnapshotReader'), source.indexOf('const Base = edgeObject('))
+    const declaration = source.slice(source.indexOf('export class Cluster'), source.indexOf('export default')).replace('export class', 'class')
+    const priorities: string[] = []
+    const waited: Promise<unknown>[] = []
+    class Authority {
+      ctx = { waitUntil: (p: Promise<unknown>) => { waited.push(p) } }
+      readPublic<T>(use: (snapshot: { revision: string }) => Promise<T>, priority: string) {
+        priorities.push(priority)
+        return use({ revision: 'revision' })
+      }
+    }
+    class RpcTarget {}
+    class Loading extends Error {}
+    class Capacity extends Error {}
+    const Cluster = new Function('RpcTarget', 'Base', 'DataDirectoryLoading', 'PublicSnapshotCapacity', setup + declaration + '\nreturn Cluster')(RpcTarget, Authority, Loading, Capacity)
+    const cluster = new Cluster()
+    const renderer = { render(_request: Request, _revision: string, reader: { finish(): void }) { reader.finish(); return Promise.resolve(new Response('rendered')) } }
+    const requests: Record<string, string>[] = [{ 'user-agent': 'Mozilla/5.0' }, { 'user-agent': 'Mozilla/5.0 (compatible; ExaSearchBot/1.0)' }, { 'x-pronto-speculative': '1' }]
+    for (const headers of requests) {
+      const response = await cluster.render(new Request('https://app.example/', { headers }), renderer)
+      assert.equal(await response.text(), 'rendered')
+    }
+    await Promise.all(waited)
+    assert.deepEqual(priorities, ['high', 'low', 'low'])
+  } finally { await Deno.remove(out, { recursive: true }) }
 })
 
 Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and strips pronto-reads on stale hits while revalidating', async () => {

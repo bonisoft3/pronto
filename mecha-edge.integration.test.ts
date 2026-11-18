@@ -12,6 +12,7 @@ import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } 
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";
 import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.ts";
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from "./bundle/cloudflare-runtime.ts";
 
 const root = new URL(ROOT).pathname;
 const mecha = `${root}libraries/mecha`;
@@ -19,14 +20,14 @@ const mecha = `${root}libraries/mecha`;
 Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
   const { spec, rules, compiled } = await fixture();
-  const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+  const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"), terminal);
   const schema = "hybrid_proof_turn";
   const tmp = await Deno.makeTempDir({ prefix: "pronto-mecha-edge-" });
 
   // The app's rules, where the release reads them.
   await Deno.mkdir(`${tmp}/app/machines`, { recursive: true });
   await Deno.copyFile(`${root}plugins/pronto/testdata/mecha/turn.js`, `${tmp}/app/machines/turn.js`);
-  await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"));
+  await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"));
 
   // The data directory, as pgdata.ts builds one: PostgreSQL's roles and
   // tenancy floor, the ticker's tables a timed machine shares, the surface,
@@ -101,7 +102,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
   await Deno.writeTextFile(`${tmp}/worker/wrangler.jsonc`, JSON.stringify({
     name: "pronto-mecha-edge-test",
     main: "worker.ts",
-    compatibility_date: "2026-09-01",
+    compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
     durable_objects: { bindings: [{ name: "CLUSTER", class_name: "Cluster" }] },
     migrations: [{ tag: "v1", new_sqlite_classes: ["Cluster"] }],
     version_metadata: { binding: "CF_VERSION_METADATA" },
@@ -170,6 +171,10 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       const first = await answer(call(10, 1, 100));
       assertEquals(first.kind, "accepted");
       assertEquals(first.revision, "1");
+      // The request set its claims LOCAL; the session reads the service's
+      // afterwards, never the '' a LOCAL setting leaves, which ''::json would
+      // refuse in the airlock's own moves.
+      assertEquals(await one("SELECT current_setting('request.jwt.claims', true)::json->>'role';"), "service");
       const actual = await snapshot(10);
       const now = Number(await one(`SELECT now FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}' AND command_id = '${uuid(100)}';`));
       const context = { actor: "a", tier: "omnishell", now };

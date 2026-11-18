@@ -230,9 +230,12 @@ Deno.test("the door advertises h3 on its published host port over both TCP and U
 // holds fill its empty lists once the shell takes it over and push down what
 // follows them: golaberto's /campeonatos measured a layout shift of 0.12 so.
 Deno.test("a route prerendered over rows the server holds is refused, naming them", async () => {
+  // Asked of the terminal's documents, where the refusal is raised: through #ssgCase's
+  // `_emit` (which has the Caddyfile and _redirects share one #emit), cue reports a
+  // refusal nested in a list.SortStrings call as "error in call", without its text.
   const reads = [note(", nested: true"), "_view"] as const;
   const results = await Promise.all(
-    reads.map(async (read) => [read, await exported(`(#ssgCase & {reads: [${read}]}).caddyfile`, true)] as const),
+    reads.map(async (read) => [read, await exported(`(#ssgCase & {reads: [${read}]})._terminal.surface.documents`, false)] as const),
   );
   for (const [read, { ok, out }] of results) {
     if (ok) throw new Error(`prerendered over ${read}`);

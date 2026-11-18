@@ -54,6 +54,25 @@ jobs:
       - name: Compiler roster agrees with released dependencies
         run: cue vet -c=false ./builders:bayt ./clusters:mecha ./terminals:omnishell ./distribution ./bootstrap
 
+      - name: Bootstrap locks cover the roster resolved from released dependencies
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, tomllib
+          for field, lock_path in [("mise", "bootstrap/mise.lock"), ("miseHost", "bootstrap/mise.host.lock")]:
+              expr = f'(distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain).{field}.tools'
+              cue_src = f'package check\nimport (\n\t"github.com/bonisoft3/pronto/distribution"\n\tterminal "github.com/bonisoft3/pronto/terminals:omnishell"\n\t"github.com/bonisoft3/pronto/clusters:mecha"\n\t"github.com/bonisoft3/pronto/builders:bayt"\n)\nout: {expr}\n'
+              tools = json.loads(subprocess.check_output(["cue", "export", "-", "-e", "out", "--out", "json"], input=cue_src.encode()))
+              locked = tomllib.loads(open(lock_path).read()).get("tools", {})
+              bare = lambda v: v.removeprefix("v")
+              for tool, pin in tools.items():
+                  want = bare(pin if isinstance(pin, str) else pin["version"])
+                  entries = locked.get(tool, [])
+                  if isinstance(entries, dict):
+                      entries = [entries]
+                  if not any(bare(e["version"]) == want for e in entries):
+                      raise SystemExit(f"{lock_path} has no entry for {tool}@{want}")
+          PY
+
       - name: Type table exports with released dependencies
         run: |
           cue export . -e '{types: #types, aliases: #typeAlias}' > /dev/null

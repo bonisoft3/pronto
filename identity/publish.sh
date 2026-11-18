@@ -31,7 +31,7 @@ application its own subject for them. Published from bonisoft3/pronto
 identity/ at $rev; its source, tests and docs live there.
 
 - \`$IMAGE:$V\`: the front, for an app's docker launch.
-- \`hydra/local.sh hydra|front\`: the broker as two of an app's launch@local
+- \`hydra/local.sh hydra|front\`: the broker as two of an app's launch@host
   processes, run from this image's /app.
 EOF
 

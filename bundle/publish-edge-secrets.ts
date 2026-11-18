@@ -18,3 +18,16 @@ export async function keptJwtSecrets(
   // Pinned Wrangler retains unspecified secret bindings in the deployed version.
   return { IMPORT_TOKEN: importToken }
 }
+
+/** The key groups the selected routes read, for the AI settings this publish
+ * carries. A setting held on the dispatcher alone is unreadable here, so its
+ * route's key is the call's to refuse (mecha's resolveCallSpec).
+ * The value is never echoed. */
+export function selectedRouteKeys(routes: Record<string, Record<string, string[][]>>, carried: (name: string) => string | undefined): string[][] {
+  return Object.entries(routes).flatMap(([setting, byRoute]) => {
+    const value = carried(setting)
+    if (!value) return []
+    if (!Object.hasOwn(byRoute, value)) throw new Error(`${setting} is not one of ${Object.keys(byRoute).join(', ')}`)
+    return byRoute[value]
+  })
+}

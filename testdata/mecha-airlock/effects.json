@@ -39,6 +39,28 @@
         "Crypto",
         "TextEncoder"
       ]
+    },
+    "pinned": {
+      "table": "airlock_smoke_pin",
+      "field": "status",
+      "state": "charging",
+      "onDone": "settled",
+      "onError": "failed",
+      "row": [
+        "id"
+      ],
+      "key": [
+        "id"
+      ],
+      "idempotent": true,
+      "attempts": 5,
+      "handler": "effects/pinned.js",
+      "secrets": [
+        "PIX_KEY"
+      ],
+      "secretFields": [
+        "pin"
+      ]
     }
   }
 }

@@ -1,6 +1,6 @@
 // cdc-types.blobl, run by the transform image the cluster pins, over the bus
 // spellings conduit was measured to produce: Postgres text for a domain column
-// (v0.14.0, 2026-09-22, ponto, realworld and thenote stacks), and native JSON
+// (v0.14.0, 2026-09-22, domain-typed stacks), and native JSON
 // for a base-typed one (v0.14.0, 2026-10-03, a logrepl pipeline over int4,
 // bool, float8, uuid, date and text columns). v0.20.4 spells both the same
 // (2026-10-16, a text and an int domain beside the base columns), and a NULL

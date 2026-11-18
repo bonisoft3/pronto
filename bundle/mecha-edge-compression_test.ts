@@ -42,7 +42,7 @@ const Base=edgeObject({clock:'disabled',assets:{pgliteWasm,initdbWasm,pgliteData
 export class Cluster extends Base {
  async fetch(req){
   const path=new URL(req.url).pathname;
-  if(path.startsWith('/test/raw/'))return new DataDirectory(this.ctx.storage,{version:1,blockSize:8192,codec:'raw'}).importing(path.slice('/test/raw/'.length),req);
+  if(path.startsWith('/test/raw/'))return new DataDirectory(this.ctx.storage,{version:1,blockSize:8192,codec:'raw'},error=>{this.ctx.abort(String(error));throw error}).importing(path.slice('/test/raw/'.length),req);
   if(path==='/test/claim')return Response.json(await this.computeClaim());
   if(path==='/test/wake-at')return Response.json(await this.computeWakeAt());
   if(path==='/test/public')try{return await this.readPublic(async snapshot=>Response.json(await snapshot.read('/board?select=title')))}catch(error){if(!(error instanceof DataDirectoryLoading))throw error;return Response.json({loading:true},{status:503})}

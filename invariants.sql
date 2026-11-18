@@ -258,8 +258,8 @@ UNION ALL
 -- Elevation is the one dimension where matching by value is the wrong test: a
 -- shadow list is not a length, so its geometry is not joined. Its INK is, and
 -- the seven twinned shadow-ink roles exist precisely so that no stylesheet
--- writes a black by hand. A colour reached through a token — realworld's and
--- thenote's color-mix() focus rings — never reaches this table.
+-- writes a black by hand. A colour reached through a token, including a
+-- color-mix() focus ring, never reaches this table.
 SELECT DISTINCT 'warning',
        l.path,
        l.prop || ' inks ' || l.value || ' by hand; the shadow-ink roles carry both appearances'
@@ -608,6 +608,17 @@ SELECT 'error',
          || 'an arrow function (handler), a parenthesised object literal (adapter), or the name holding one'
 FROM handler h
 WHERE h.completion = 'other'
+
+UNION ALL
+
+-- A handler and a validation are handed XState's one argument. One that
+-- names its first parameter is the earlier (state, event, params), and
+-- would read undefined from the object.
+SELECT 'error',
+       h.path,
+       'a ' || h.role || ' is ({context, event}, params) => ..., XState''s one argument; this one names its first parameter, the earlier (state, event, params)'
+FROM handler h
+WHERE h.completion = 'positional'
 
 UNION ALL
 

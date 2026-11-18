@@ -1,26 +1,32 @@
 // Renders an edge release's src/effects.js: the app's external effects from
 // services/airlock/effects.json, each bound to its handler module and target
-// (tsbifrost, declared HTTPS origin, or a bridge's container) for mecha-edge's
-// airlock.ts.
+// (tsbifrost, declared HTTPS origin or the dispatcher's secret naming one, or a
+// bridge's container) for mecha-edge's airlock.ts.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { bridgeNames, CLOUDFLARE, clusterBridges, onCloudflare } from './edge-bridges.ts'
+import { bridgeBinding, CLOUDFLARE, type ClusterBridge, clusterBridges, onCloudflare } from './edge-bridges.ts'
 
 export type EffectTarget =
-  | { kind: 'tsbifrost' | 'origin'; url?: string }
+  | { kind: 'tsbifrost'; url?: string }
+  | { kind: 'origin'; url: string }
+  | { kind: 'origin'; secret: string }
   | { kind: 'bridge'; bridge: string }
   | { kind: 'container'; bridge: string; binding: string }
+  | { kind: 'isolate'; bridge: string; binding: string }
 
 // A bridge on cloudflare is the dispatcher's own container, reached by its
-// binding (edge-bridges.ts) on the port its class holds; any other is an
-// internal address the edge never dials, and the object settles its effect
-// failed (mecha-edge's airlock.ts).
-function bridgeTarget(name: string, bridge: { name: string; targets: string[] }, containers: Set<string>): EffectTarget {
-  const container = containers.has(bridge.name)
-  if (bridge.targets.includes(CLOUDFLARE) !== container) {
+// binding (edge-bridges.ts) on the port its class holds, or an isolate's
+// Worker, reached by its service binding; any other is an internal address
+// the edge never dials, and the object settles its effect failed (mecha-edge's
+// airlock.ts).
+function bridgeTarget(name: string, bridge: { name: string; targets: string[] }, onEdge: Map<string, ClusterBridge>): EffectTarget {
+  const deployed = onEdge.get(bridge.name)
+  if (bridge.targets.includes(CLOUDFLARE) !== (deployed !== undefined)) {
     throw new Error(`effect ${name}: effects.json and .pronto/cluster.json disagree on whether the bridge ${bridge.name} is on cloudflare: regenerate the app`)
   }
-  return container ? { kind: 'container', bridge: bridge.name, binding: bridgeNames(bridge.name).binding } : { kind: 'bridge', bridge: bridge.name }
+  if (deployed === undefined) return { kind: 'bridge', bridge: bridge.name }
+  const binding = bridgeBinding(bridge.name)
+  return deployed.isolate ? { kind: 'isolate', bridge: bridge.name, binding } : { kind: 'container', bridge: bridge.name, binding }
 }
 
 /** The release's effects twice over: `effects`, each declaration and target
@@ -43,7 +49,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
       secrets?: string[]
       credential?: { header: string; scheme?: string; secret: string }
       endowments?: string[]
-      edgeOrigin?: string
+      edgeOrigin?: string | { secret: string }
       bridge?: { name: string; targets: string[]; simulated: boolean }
     }>
   }
@@ -53,7 +59,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
   const imports: string[] = []
   const entries: string[] = []
   const declared: string[] = []
-  const containers = new Set(onCloudflare(await clusterBridges(appDir)).map(b => b.name))
+  const onEdge = new Map(onCloudflare(await clusterBridges(appDir)).map(b => [b.name, b]))
   const srcDir = path.join(outDir, 'src')
   const fromSrc = (p: string) => {
     const rel = path.relative(srcDir, p).replaceAll('\\', '/')
@@ -68,7 +74,13 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     // A handler is named from the manifest's directory, where derive writes its bundle.
     const handlerPath = path.join(appDir, 'services/airlock', decl.handler)
     await Deno.stat(handlerPath)
-    const target: EffectTarget = decl.bridge !== undefined ? bridgeTarget(name, decl.bridge, containers) : decl.edgeOrigin ? { kind: 'origin', url: decl.edgeOrigin } : { kind: 'tsbifrost' }
+    const target: EffectTarget = decl.bridge !== undefined
+      ? bridgeTarget(name, decl.bridge, onEdge)
+      : typeof decl.edgeOrigin === 'string'
+      ? { kind: 'origin', url: decl.edgeOrigin }
+      : decl.edgeOrigin
+      ? { kind: 'origin', secret: decl.edgeOrigin.secret }
+      : { kind: 'tsbifrost' }
     const ident = `handler_${i}`
     imports.push(`import * as ${ident} from ${JSON.stringify(fromSrc(handlerPath))}`)
     entries.push(
@@ -77,10 +89,15 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     declared.push(`  ${JSON.stringify(name)}: { declaration: ${JSON.stringify(decl)}, target: ${JSON.stringify(target)} },`)
   }
   // A handler here runs in the Worker's own realm, so the endowments it declares
-  // past the platform's globals are defined for it: Pdf, mecha's one frozen call.
-  if (names.some((n) => effects[n].endowments?.includes('Pdf'))) {
-    imports.push(`import { Pdf } from ${JSON.stringify(fromSrc(path.join(mecha, 'services/airlock/pdf.ts')))}`)
-    imports.push(`Object.defineProperty(globalThis, 'Pdf', { value: Object.freeze(Pdf) })`)
+  // past the platform's globals are defined for it: Pdf and Xlsx, each one
+  // frozen call of mecha's.
+  for (const [endowment, file] of [['Pdf', 'pdf.ts'], ['Xlsx', 'xlsx.ts']]) {
+    if (!names.some((n) => effects[n].endowments?.includes(endowment))) continue
+    imports.push(`import { ${endowment} } from ${JSON.stringify(fromSrc(path.join(mecha, 'services/airlock', file)))}`)
+    // Its calls are frozen with it, or one handler's write to a call would
+    // outlive the invocation in the isolate the next one shares.
+    imports.push(`Object.values(${endowment}).forEach(Object.freeze)`)
+    imports.push(`Object.defineProperty(globalThis, '${endowment}', { value: Object.freeze(${endowment}) })`)
   }
 
   const harden = `const harden = (value, seen = new WeakSet()) => {

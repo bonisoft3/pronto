@@ -24,6 +24,11 @@ export function signInVars(signIn: Record<string, Record<string, string>>, env: 
   return vars
 }
 
+/** The issuer and cluster address of an app's local broker (identity/signin.cue's #LocalPort: a
+ * loopback port of the app's own, not a fixed one), which a release replaces with its releaseIssuer. */
+export const isLocalBroker = (issuer: string | undefined): boolean => /^http:\/\/localhost:\d+$/.test(issuer ?? '')
+export const isLocalBrokerInternal = (internal: string | undefined): boolean => /^http:\/\/identity:\d+\/$/.test(internal ?? '')
+
 /** The secrets a publish puts beside the vars: each provider's client secret
  * from the environment. Google's own issuer redeems a code only with one. */
 export function signInSecrets(vars: Record<string, string>, env: (name: string) => string | undefined): Record<string, string> {

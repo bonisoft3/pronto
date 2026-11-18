@@ -1,7 +1,23 @@
 // The broker's isolation rules: a tenant is an https origin, its redirect is
 // its own origin's one callback, a person's subject differs per tenant, and a
 // code is redeemed once, by the tenant and redirect it was issued to.
-import { callbackOf, Codes, type Grant, idTokenClaims, pairwiseKey, pairwiseSubject, parseAuthorize, pkceMatches, redeem, tenantOf } from "./core.ts";
+import {
+  callbackOf,
+  Codes,
+  type Grant,
+  idTokenClaims,
+  pairwiseKey,
+  pairwiseSubject,
+  parseAuthorize,
+  pkceMatches,
+  profileClaims,
+  redeem,
+  tenantOf,
+  tenantTrustKey,
+  tenantTxtHost,
+  tenantTxtMatches,
+  tenantTxtValue,
+} from "./core.ts";
 import { randomToken, Refused, sha256url, signEs256, verifyIdToken } from "../oidc.ts";
 
 function assertEquals(a: unknown, b: unknown, m = "") {
@@ -120,4 +136,42 @@ Deno.test("the ID token is the tenant's alone: another tenant refuses it", async
   let refused = "";
   try { await check("https://app-b.example"); } catch (e) { refused = e instanceof Refused ? e.message : String(e); }
   assertEquals(refused, "id token audience");
+});
+
+Deno.test("DNS TXT tenant proof binds issuer, tenant and broker secret", async () => {
+  const key = await tenantTrustKey("x".repeat(32));
+  const otherKey = await tenantTrustKey("y".repeat(32));
+  assertEquals(tenantTxtHost("https://iris.cleaning"), "_pronto-identity.iris.cleaning");
+  assertEquals(tenantTxtHost("https://localhost:28102"), "_pronto-identity.localhost");
+  const txt = await tenantTxtValue(key, "https://id.bonisoft3.com", "https://iris.cleaning");
+  assertEquals(await tenantTxtMatches(key, "https://id.bonisoft3.com", "https://iris.cleaning", ["v=spf1 -all", txt]), true);
+  assertEquals(await tenantTxtMatches(key, "https://id.bonisoft3.com/", "https://iris.cleaning", [`  ${txt}  `]), true);
+  // Replay on another domain, wrong issuer, wrong secret, or malformed TXT never passes.
+  assertEquals(await tenantTxtMatches(key, "https://id.bonisoft3.com", "https://evil.example", [txt]), false);
+  assertEquals(await tenantTxtMatches(key, "https://id.other.example", "https://iris.cleaning", [txt]), false);
+  assertEquals(await tenantTxtMatches(otherKey, "https://id.bonisoft3.com", "https://iris.cleaning", [txt]), false);
+  assertEquals(await tenantTxtMatches(key, "https://id.bonisoft3.com", "https://iris.cleaning", ["pronto-identity=not-a-valid-hmac", ""]), false);
+});
+
+Deno.test("optional profile and email claims require requested scopes and verified email", async () => {
+  const parsed = parseAuthorize(await authorizeQuery({ scope: "openid email profile unknown" }), providers);
+  assertEquals(parsed.ok && parsed.request.scopes, ["profile", "email"]);
+
+  const raw = { name: "  Alice Example  ", picture: "https://lh3.googleusercontent.com/a/alice", email: "  Alice@Example.test ", email_verified: true };
+  assertEquals(profileClaims(raw, []), {});
+  assertEquals(profileClaims(raw, ["profile", "email"]), {
+    name: "Alice Example",
+    picture: "https://lh3.googleusercontent.com/a/alice",
+    email: "alice@example.test",
+    email_verified: true,
+  });
+  assertEquals(profileClaims({ ...raw, picture: "http://insecure.example/p.png", email_verified: false }, ["profile", "email"]), {
+    name: "Alice Example",
+  });
+  const claims = idTokenClaims({
+    issuer: "https://id.example",
+    grant: grant({ name: "Alice Example", email: "alice@example.test", email_verified: true }),
+    now: 1_800_000_000,
+  });
+  assertEquals([claims.name, claims.email, claims.email_verified], ["Alice Example", "alice@example.test", true]);
 });

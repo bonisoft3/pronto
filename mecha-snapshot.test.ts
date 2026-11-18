@@ -321,6 +321,18 @@ Deno.test('relational captures export bounded immutable chunks without source co
   assertEquals(manifest.tables.source.columns.map(c => c.name), ['id', 'amount', 'payload', 'happened', 'sequence', 'c0']);
   assertEquals((await f.db.query('SELECT snapshot FROM compute_snapshot_private.captures')).rows, [{ snapshot: null }]);
   await f.write(`DELETE FROM source; INSERT INTO source(id,amount) VALUES ('replacement',8)`);
+  const bounded = await coordinator.chunk(identity, 'source');
+  assertEquals(bounded.rows.length > 128 && bounded.rows.length < 301, true);
+  assertEquals(new TextEncoder().encode(JSON.stringify(bounded.rows)).length <= 256 * 1024, true);
+  assertEquals(await coordinator.chunk(identity, 'source'), bounded);
+  const pages = [];
+  for (const maxRows of [128, 1024]) {
+    let after = 0, count = 0;
+    do { const page = await coordinator.chunk(identity, 'source', after, { maxRows }); after = page.next; count++; } while (after < 301);
+    pages.push(count);
+  }
+  assertEquals(pages, [3, 2]);
+
   const first = await coordinator.chunk(identity, 'source', 0, { maxBytes: 3000, maxRows: 3 });
   assertEquals(await coordinator.chunk(identity, 'source', 0, { maxBytes: 3000, maxRows: 3 }), first);
   const rows = [];
@@ -340,7 +352,7 @@ Deno.test('relational captures export bounded immutable chunks without source co
   assertEquals(rows.some(row => row.id === 'replacement'), false);
   assertEquals((await coordinator.chunk(identity, 'source', 301)).rows, []);
   await assertRejects(() => coordinator.chunk(identity, 'source', 302), Error, 'cursor exceeds');
-  await assertRejects(() => coordinator.chunk(identity, 'source', 0, { maxRows: 129 }), Error, 'chunk bounds');
+  await assertRejects(() => coordinator.chunk(identity, 'source', 0, { maxRows: 1025 }), Error, 'chunk bounds');
   await assertRejects(() => coordinator.chunk(identity, 'source', 0, { maxBytes: 262145 }), Error, 'chunk bounds');
   await assertRejects(() => coordinator.chunk(identity, 'sink'), Error, 'has no table');
   await assertRejects(() => coordinator.manifest({ ...identity, name: 'other' }), Error, 'no longer available');
@@ -647,8 +659,8 @@ Deno.test('chunk sizing reads only the requested indexed page despite its numeri
     f.tick(10);
     const identity = (await coordinator.claim())!;
     const page = await coordinator.chunk(identity, 'source', 0);
-    assertEquals(page.rows.length, 128);
-    assertEquals(page.next, 128);
+    assertEquals(page.rows.length, 1024);
+    assertEquals(page.next, 1024);
     assertEquals(page.done, false);
     if (!sizing) throw new Error('chunk sizing query was not observed');
     const plan = await f.db.query<{ 'QUERY PLAN': { Plan: unknown }[] }>(`EXPLAIN (ANALYZE,FORMAT JSON) ${sizing.sql}`, sizing.params);
@@ -661,9 +673,17 @@ Deno.test('chunk sizing reads only the requested indexed page despite its numeri
     };
     visit(plan.rows[0]['QUERY PLAN'][0].Plan);
     assertEquals(scans.length > 0, true);
-    assertEquals(scans.every(scan => scan['Actual Rows'] <= 128), true);
+    assertEquals(scans.every(scan => scan['Actual Rows'] <= 1024), true);
     assertEquals(await coordinator.chunk(identity, 'source', 0), page);
-    assertEquals((await coordinator.chunk(identity, 'source', page.next)).next, 256);
+    assertEquals((await coordinator.chunk(identity, 'source', page.next)).next, 2048);
+    const counts = [];
+    for (const maxRows of [128, 1024]) {
+      let after = 0, count = 0;
+      do { const part = await coordinator.chunk(identity, 'source', after, { maxRows }); after = part.next; count++; } while (after < 4097);
+      counts.push(count);
+    }
+    assertEquals(counts, [33, 5]);
+
   } finally { await coordinator.stop(); await f.db.close(); }
 });
 
@@ -712,4 +732,81 @@ Deno.test('statement notifications replace legacy triggers and are removed with 
   coordinator = await createSnapshotCoordinator({ ...f.config, computations: [] });
   assertEquals((await installed()).rows, []);
   await coordinator.stop(); await f.db.close();
+});
+
+for (const staged of [false, true]) Deno.test(`${staged ? 'staged' : 'direct'} foreign-key failure supersedes only when a newer source revision exists`, async () => {
+  const f = await fixture();
+  try {
+    await f.write(`ALTER TABLE sink ADD CONSTRAINT sink_source_fk FOREIGN KEY(id) REFERENCES source(id) ON DELETE CASCADE;
+      INSERT INTO source(id,amount) VALUES('two',2); INSERT INTO sink(id,amount) VALUES('one',1); INSERT INTO second VALUES('one',1); DELETE FROM audit;`);
+    const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0, to: ['second', 'sink'] }] });
+    const first = (await coordinator.claim())!;
+    const output = { second: [{ id: 'one', amount: '8' }], sink: [{ id: 'one', amount: '7' }, { id: 'two', amount: '2' }] };
+    if (staged) {
+      await coordinator.outputChunk(first, 'attempt', 'second', 0, output.second);
+      await coordinator.outputChunk(first, 'attempt', 'sink', 0, output.sink);
+      await coordinator.sealOutput(first, 'attempt', { second: { chunks: 1, rows: 1 }, sink: { chunks: 1, rows: 2 } });
+    }
+    await f.write("DELETE FROM source WHERE id='two'");
+    if (staged) await coordinator.publishStaged(first, 'attempt');
+    else await coordinator.publish(first, output);
+    assertEquals(await coordinator.publication(first), 'obsolete');
+    assertEquals((await f.db.query('SELECT id,amount::text FROM sink')).rows, [{ id: 'one', amount: '1.0000' }]);
+    assertEquals((await f.db.query('SELECT id,amount::text FROM second')).rows, [{ id: 'one', amount: '1.0000' }]);
+    assertEquals((await f.db.query('SELECT * FROM audit')).rows, []);
+    assertEquals((await f.db.query('SELECT * FROM compute_snapshot_private.receipts')).rows, []);
+    const next = (await coordinator.claim())!;
+    assertEquals(next.revision > first.revision, true);
+    await coordinator.publish(next, { second: [{ id: 'one', amount: '3' }], sink: [{ id: 'one', amount: '3' }] });
+    assertEquals(await coordinator.publication(next), 'published');
+    await coordinator.stop();
+  } finally { await f.db.close(); }
+});
+
+for (const staged of [false, true]) Deno.test(`${staged ? 'staged' : 'direct'} foreign-key failure without newer input remains a failed publication`, async () => {
+  const f = await fixture();
+  try {
+    await f.write('ALTER TABLE sink ADD CONSTRAINT sink_source_fk FOREIGN KEY(id) REFERENCES source(id)');
+    const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0 }] });
+    const capture = (await coordinator.claim())!;
+    const output = { sink: [{ id: 'missing', amount: '1' }] };
+    if (staged) {
+      await coordinator.outputChunk(capture, 'attempt', 'sink', 0, output.sink);
+      await coordinator.sealOutput(capture, 'attempt', { sink: { chunks: 1, rows: 1 } });
+    }
+    await assertRejects(() => staged ? coordinator.publishStaged(capture, 'attempt') : coordinator.publish(capture, output), Error, 'foreign key');
+    assertEquals(await coordinator.publication(capture), 'pending');
+    assertEquals((await f.db.query('SELECT * FROM compute_snapshot_private.receipts')).rows, []);
+    await coordinator.stop();
+  } finally { await f.db.close(); }
+});
+
+Deno.test('newer input does not hide a different publication error', async () => {
+  const f = await fixture();
+  try {
+    const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0, to: ['second'] }] });
+    const capture = (await coordinator.claim())!;
+    await f.write('UPDATE source SET amount=4');
+    await assertRejects(() => coordinator.publish(capture, { second: [{ id: 'one', amount: '-1' }] }), Error, 'check constraint');
+    assertEquals(await coordinator.publication(capture), 'pending');
+    assertEquals((await f.db.query('SELECT * FROM compute_snapshot_private.receipts')).rows, []);
+    await coordinator.stop();
+  } finally { await f.db.close(); }
+});
+
+Deno.test('successful staged publication retains a newer requested revision', async () => {
+  const f = await fixture();
+  try {
+    const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0 }] });
+    const first = (await coordinator.claim())!;
+    await coordinator.outputChunk(first, 'attempt', 'sink', 0, [{ id: 'one', amount: '1' }]);
+    await coordinator.sealOutput(first, 'attempt', { sink: { chunks: 1, rows: 1 } });
+    await f.write('UPDATE source SET amount=2');
+    await coordinator.publishStaged(first, 'attempt');
+    assertEquals(await coordinator.publication(first), 'published');
+    assertEquals((await f.db.query('SELECT amount::text FROM sink')).rows, [{ amount: '1.0000' }]);
+    const next = (await coordinator.claim())!;
+    assertEquals(next.revision > first.revision, true);
+    await coordinator.stop();
+  } finally { await f.db.close(); }
 });

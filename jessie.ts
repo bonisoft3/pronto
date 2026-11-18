@@ -40,6 +40,7 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
     "Crypto",
     "Cheerio",
     "Pdf",
+    "Xlsx",
     "TextEncoder",
     "TextDecoder",
     "URL",
@@ -71,7 +72,7 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
  * mecha's #CageEndowment spell the same two lists, and endowments_test.ts
  * holds all four together. An adapter is granted Intl without asking. */
 const TERMINAL = ["Intl", "TextEncoder", "TextDecoder", "URL", "URLSearchParams", "Statechart"] as const;
-const MECHA = ["Crypto", "Cheerio", "Pdf", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
+const MECHA = ["Crypto", "Cheerio", "Pdf", "Xlsx", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
 export const ENDOWABLE: Record<string, readonly string[]> = {
   handler: TERMINAL,
   adapter: TERMINAL,
@@ -239,6 +240,27 @@ function lastStatement(stripped: string): string {
 // named or namespace bindings, or none, from an emptied string.
 const STATIC_IMPORT = /(^|[;}\n])\s*import\s*(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[A-Za-z_$][\w$]*)?\s*(?:from\s*)?(["'])\2/g;
 
+// A handler and a validation are XState's one argument, `({context, event},
+// params)`. A leaf whose first parameter is a name, or takes apart anything
+// but `context` and `event`, is the earlier `(state, event, params)`, which
+// would read undefined from the object it is now handed, so it is told apart
+// here and refused by name.
+const ONE_ARGUMENT_ROLES = new Set(["handler", "validation"]);
+const ONE_ARGUMENT_HEAD = "\\(\\s*(?:\\)|\\{\\s*(?:\\}|(?:context|event)\\b))";
+const ONE_ARGUMENT = new RegExp(`^${ONE_ARGUMENT_HEAD}`);
+function positional(stripped: string, last: string, shape: string): boolean {
+  if (shape === "arrow") return !ONE_ARGUMENT.test(last);
+  if (shape !== "name") return false;
+  // The completion's name, followed through `const a = b;` to what it names.
+  let name = /[A-Za-z_$][\w$]*$/.exec(last)![0].replace(/\$/g, "\\$");
+  for (let hops = 0; hops < 8; hops++) {
+    const alias = new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*;`).exec(stripped);
+    if (alias === null) break;
+    name = alias[1].replace(/\$/g, "\\$");
+  }
+  return new RegExp(`(?:(?:const|let|var)\\s+${name}\\s*=\\s*|function\\s+${name}\\s*)(?!${ONE_ARGUMENT_HEAD})(?:\\(|[A-Za-z_$][\\w$]*\\s*=>)`).test(stripped);
+}
+
 /** The denied names a module reaches for, and which completion shape it ends
  * in — `other` where it is none. */
 export function jessieFacts(source: string, role: string, grantedEndowments: string[] = []): { references: string[]; completion: string } {
@@ -269,7 +291,8 @@ export function jessieFacts(source: string, role: string, grantedEndowments: str
   ])];
   const last = lastStatement(stripped);
   // An engine is a module: what it completes in is its exports.
-  const completion = role === "engine" ? "exports" : ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : NAME.test(last) ? "name" : "other";
+  const shape = role === "engine" ? "exports" : ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : NAME.test(last) ? "name" : "other";
+  const completion = ONE_ARGUMENT_ROLES.has(role) && positional(stripped, last, shape) ? "positional" : shape;
   return { references, completion };
 }
 
@@ -278,31 +301,31 @@ export function jessieSelfTest(): string[] {
   const good = `const renumber = (items) => items.map((it, i) => ({ id: it.id, position: (i + 1) * 10 }));
 // "window" and Date in this comment and the string below must not trip it
 const label = "a Date for the window";
-(state, event) => ({ updates: renumber(state.items) });
+({ context, event }) => ({ updates: renumber(context.items) });
 `;
   // `shape` is the completion a case must end in; without it only `other` is reported.
   const cases: { name: string; source: string; role?: string; granted?: string[]; shape?: string; expect: string[] }[] = [
     { name: "clean handler passes", source: good, expect: [] },
     {
       name: "fetch is denylisted",
-      source: `(state, event) => fetch("/x");\n`,
+      source: `({ context, event }) => fetch("/x");\n`,
       expect: ["fetch"],
     },
     {
       // Neither of these is a direct call, so SES lets both through to a
       // working evaluator; the scan is the only thing that sees them.
       name: "eval reached indirectly is denylisted",
-      source: `(state, event) => ({ a: (0, eval)("1+1"), b: (() => { const e = eval; return e("1+1"); })() });\n`,
+      source: `({ context, event }) => ({ a: (0, eval)("1+1"), b: (() => { const e = eval; return e("1+1"); })() });\n`,
       expect: ["eval"],
     },
     {
       name: "Math.random is denylisted",
-      source: `(state, event) => ({ n: Math.random() });\n`,
+      source: `({ context, event }) => ({ n: Math.random() });\n`,
       expect: ["Math.random"],
     },
     {
       name: "Date is denylisted",
-      source: `(state, event) => ({ at: Date.now() });\n`,
+      source: `({ context, event }) => ({ at: Date.now() });\n`,
       expect: ["Date"],
     },
     {
@@ -319,7 +342,7 @@ const label = "a Date for the window";
     },
     {
       name: "a static import is a reach in every role but an engine's",
-      source: `import { step } from "./step.js";\n(state, event) => step(state, event);\n`,
+      source: `import { step } from "./step.js";\n({ context, event }) => step({ context, event });\n`,
       expect: ["import"],
     },
     {
@@ -331,53 +354,53 @@ const label = "a Date for the window";
     },
     {
       name: "a completion naming the binding that holds the value passes",
-      source: `const reduce = (state, event) => state;\nreduce;\n`,
+      source: `const reduce = ({ context, event }) => context;\nreduce;\n`,
       shape: "name",
       expect: [],
     },
     {
       name: "a regex literal holding a backtick or a bracket is one atom",
-      source: "const fence = /^ {0,3}```/;\nconst open = (s) => /[(]/.test(s) ? s / 2 : s;\n(state, event) => ({ f: fence.test(event.s), o: open(event.s) });\n",
+      source: "const fence = /^ {0,3}```/;\nconst open = (s) => /[(]/.test(s) ? s / 2 : s;\n({ context, event }) => ({ f: fence.test(event.s), o: open(event.s) });\n",
       expect: [],
     },
     {
       name: "a division after a keyword-named member hides nothing",
-      source: `(s, e) => ({ r: e.in / fetch(e.u) / 2, o: e.of / eval(e.v) / 2 });\n`,
+      source: `({ event: e }) => ({ r: e.in / fetch(e.u) / 2, o: e.of / eval(e.v) / 2 });\n`,
       expect: ["fetch", "eval"],
     },
     {
       name: "a division after an ambiguous token hides nothing",
-      source: `let i = 0; const of = 4;\n(s, e) => ({ a: i++ / fetch(e.u) / 2, b: of / fetch(e.u) / 2, c: {} / eval(e.u) / 2 });\n`,
+      source: `let i = 0; const of = 4;\n({ event: e }) => ({ a: i++ / fetch(e.u) / 2, b: of / fetch(e.u) / 2, c: {} / eval(e.u) / 2 });\n`,
       expect: ["fetch", "eval"],
     },
     {
       name: "a guessed regex never closes on a comment's opener",
-      source: `const cap = (row) => row.in / 2 /* the row's cap */;\nconst leak = () => plv8.execute("x"); // it's\n(state, row) => cap(row) > 0 || leak();\n`,
+      source: `const cap = (row) => row.in / 2 /* the row's cap */;\nconst leak = () => plv8.execute("x"); // it's\n({ event: row }) => cap(row) > 0 || leak();\n`,
       role: "validation",
       expect: ["plv8"],
     },
     {
       name: "a spread is not a member access",
-      source: `(row) => ({...globalThis}).plv8.execute("x") || ({...this}).y;\n`,
+      source: `({ event }) => ({...globalThis}).plv8.execute("x") || ({...this}).y;\n`,
       role: "validation",
       expect: ["globalThis", "this"],
     },
     {
       name: "a regex literal holding a denied word is no reach",
-      source: `const isDate = (s) => /Date|window/.test(s);\n(state, event) => isDate(event.s);\n`,
+      source: `const isDate = (s) => /Date|window/.test(s);\n({ context, event }) => isDate(event.s);\n`,
       shape: "arrow",
       expect: [],
     },
     {
       name: "a template's substitution is code",
-      source: "(state, event) => `${plv8.execute('x')} and ${`${fetch(event.u)}`}`.length > 0;\n",
+      source: "({ context, event }) => `${plv8.execute('x')} and ${`${fetch(event.u)}`}`.length > 0;\n",
       role: "validation",
       shape: "arrow",
       expect: ["fetch", "plv8"],
     },
     {
       name: "a template's text is not",
-      source: "(state, event) => `window ${event.a} {fetch} $ {eval}`;\n",
+      source: "({ context, event }) => `window ${event.a} {fetch} $ {eval}`;\n",
       shape: "arrow",
       expect: [],
     },
@@ -388,64 +411,73 @@ const label = "a Date for the window";
     },
     {
       name: "a name after the declarations before it passes",
-      source: `function reduce(state, event) { return state; }\nreduce;\n`,
+      source: `function reduce({ context, event }) { return context; }\nreduce;\n`,
       shape: "name",
       expect: [],
     },
     {
       name: "missing trailing arrow fails",
-      source: `const reduce = (state, event) => state;\n`,
+      source: `const reduce = ({ context, event }) => context;\n`,
       expect: ["completion:other"],
     },
     {
       name: "semicolons inside the arrow body do not cut it",
-      source: `(state, event) => { const a = 1; return { updates: [] }; }\n`,
+      source: `({ context, event }) => { const a = 1; return { updates: [] }; }\n`,
       expect: [],
     },
-    { name: "plv8 is denylisted", source: `(state, event) => plv8.execute("select 1");\n`, expect: ["plv8"] },
-    { name: "this is denylisted", source: `(state, event) => this.rows;\n`, expect: ["this"] },
+    { name: "a leaf that names its first parameter is the earlier form", source: `(state, event) => ({ updates: [] });\n`, expect: ["completion:positional"] },
+    { name: "a named leaf that names its first parameter is the earlier form", source: `const reduce = (state, event) => ({ updates: [] });\nreduce;\n`, expect: ["completion:positional"] },
+    { name: "a validation that names its first parameter is the earlier form", role: "validation", source: `function test(state, event) { return true; }\ntest;\n`, expect: ["completion:positional"] },
+    { name: "a leaf that takes the earlier state apart is the earlier form", source: `({ items }, event) => ({ updates: items });\n`, expect: ["completion:positional"] },
+    { name: "a named leaf that takes the earlier state apart is the earlier form", source: `const reduce = ({ items }, event) => ({ updates: items });\nreduce;\n`, expect: ["completion:positional"] },
+    { name: "a leaf named through an alias is followed to its definition", source: `const reduce = (state, event) => ({ updates: [] });\nconst handler = reduce;\nhandler;\n`, expect: ["completion:positional"] },
+    { name: "an alias of a one-argument leaf passes", source: `const reduce = ({ context }) => ({ updates: context.items });\nconst handler = reduce;\nhandler;\n`, expect: [] },
+    { name: "a leaf that reads neither takes no parameter", source: `() => ({ updates: [] });\n`, expect: [] },
+    { name: "a renderer's parameter is a name", role: "renderer", source: `(value) => value;\n`, expect: [] },
+    { name: "plv8 is denylisted", source: `({ context, event }) => plv8.execute("select 1");\n`, expect: ["plv8"] },
+    { name: "this is denylisted", source: `({ context, event }) => this.rows;\n`, expect: ["this"] },
     {
       name: "safe platform endowments without opt-in are denylisted",
-      source: `(state, event) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
+      source: `({ context, event }) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
       expect: ["Intl", "TextEncoder", "URL"],
     },
     {
       name: "safe platform endowments with opt-in pass",
-      source: `(state, event) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
+      source: `({ context, event }) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
       granted: ["Intl", "URL", "TextEncoder"],
       expect: [],
     },
     {
       name: "a member is the object's, not the global",
-      source: `(state, event) => ({ r: event.sink.fetch("/x"), w: event . window, d: event.$document });\n`,
+      source: `({ context, event }) => ({ r: event.sink.fetch("/x"), w: event . window, d: event.$document });\n`,
       expect: [],
     },
     {
       name: "a global reached as itself is still denied",
-      source: `(state, event) => fetch(event.url).then(() => (0, window).document);\n`,
+      source: `({ context, event }) => fetch(event.url).then(() => (0, window).document);\n`,
       expect: ["window", "fetch"],
     },
     {
       name: "Crypto is reached only by opt-in",
-      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      source: `({ context, event }) => Crypto.digest("SHA-256", event.bytes);\n`,
       expect: ["Crypto"],
     },
     {
       name: "a grant is judged against the role's cage",
-      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      source: `({ context, event }) => Crypto.digest("SHA-256", event.bytes);\n`,
       granted: ["Crypto"],
       expect: ["Crypto"],
     },
     {
       name: "the same grant passes in mecha's cage",
-      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      source: `({ context, event }) => Crypto.digest("SHA-256", event.bytes);\n`,
       role: "computation",
       granted: ["Crypto"],
       expect: [],
     },
     {
       name: "unpermitted endowment opt-in is denylisted",
-      source: `(state, event) => 1;\n`,
+      source: `({ context, event }) => 1;\n`,
       granted: ["fetch"],
       expect: ["fetch"],
     },
@@ -457,7 +489,7 @@ const label = "a Date for the window";
     const f = jessieFacts(t.source, t.role ?? "handler", t.granted ?? []);
     const got = [
       ...f.references,
-      ...(f.completion === "other" || t.shape !== undefined && f.completion !== t.shape ? [`completion:${f.completion}`] : []),
+      ...(f.completion === "other" || f.completion === "positional" || t.shape !== undefined && f.completion !== t.shape ? [`completion:${f.completion}`] : []),
     ];
     const ok = got.length === t.expect.length && t.expect.every((want, i) => got[i] === want);
     if (!ok) failures.push(`jessie ${t.name}: got ${JSON.stringify(got)}`);
@@ -465,13 +497,13 @@ const label = "a Date for the window";
   const splits: { name: string; source: string; want: { statements: string; completion: string } | null }[] = [
     {
       name: "statements end where the arrow's segment starts",
-      source: `const a = 1;\n(state, event) => a;\n`,
-      want: { statements: "const a = 1;\n", completion: "(state, event) => a" },
+      source: `const a = 1;\n({ context, event }) => a;\n`,
+      want: { statements: "const a = 1;\n", completion: "({ context, event }) => a" },
     },
     {
       name: "a comment before the arrow is not part of the completion",
-      source: `const a = 1; // one\n// the predicate\n(state, event) => a;\n`,
-      want: { statements: "const a = 1; // one\n// the predicate\n", completion: "(state, event) => a" },
+      source: `const a = 1; // one\n// the predicate\n({ context, event }) => a;\n`,
+      want: { statements: "const a = 1; // one\n// the predicate\n", completion: "({ context, event }) => a" },
     },
     {
       name: "a semicolon or brace inside a string does not cut a segment",
@@ -480,8 +512,8 @@ const label = "a Date for the window";
     },
     {
       name: "no trailing semicolon",
-      source: `(state, event) => state`,
-      want: { statements: "", completion: "(state, event) => state" },
+      source: `({ context, event }) => context`,
+      want: { statements: "", completion: "({ context, event }) => context" },
     },
     {
       name: "a trailing comment after the semicolon is dropped",
@@ -490,8 +522,8 @@ const label = "a Date for the window";
     },
     {
       name: "a block comment holding a semicolon and a brace does not cut a segment",
-      source: `const a = 1; /* ; { */\n(state, event) => a;\n`,
-      want: { statements: "const a = 1; /* ; { */\n", completion: "(state, event) => a" },
+      source: `const a = 1; /* ; { */\n({ context, event }) => a;\n`,
+      want: { statements: "const a = 1; /* ; { */\n", completion: "({ context, event }) => a" },
     },
     {
       name: "an escaped quote does not end a string",

@@ -10,17 +10,15 @@ return {
     const cards = [...state.a, ...state.b, ...state.plays.map(p => p.card)];
     return cards.length === 6 && new Set(cards).size === 6;
   },
-  mayPlay: (state, event, context) => {
-    if (context.now >= state.deadline) return "expired";
-    if (context.actor !== state.turn) return "not_your_turn";
-    if (!state[context.actor].includes(event.payload.card)) return "not_your_card";
-    return true;
-  },
-  play: (state, event, context) => putCard(state, event.payload.card, context.now),
-  isDue: (state, _event, context) => context.now < state.deadline ? "not_due" : state[state.turn].length > 0 ? true : "no_cards",
-  timeout: (state, _event, context) => putCard(state, Math.min(...state[state.turn]), context.now),
-  isComplete: state => state.a.length + state.b.length === 0 ? true : "cards_remain",
-  finish: state => ({ ...state }),
+  inTime: ({context: state, event}) => event._time < state.deadline,
+  yourTurn: ({context: state, event}) => event._origin === state.turn,
+  holdsCard: ({context: state, event}) => state[event._origin].includes(event.card),
+  play: ({context: state, event}) => putCard(state, event.card, event._time),
+  isDue: ({context: state, event}) => event._time >= state.deadline,
+  hasCards: ({context: state}) => state[state.turn].length > 0,
+  timeout: ({context: state, event}) => putCard(state, Math.min(...state[state.turn]), event._time),
+  isComplete: ({context: state}) => state.a.length + state.b.length === 0,
+  finish: ({context: state}) => ({ ...state }),
   project: (state, viewer) => ({
     phase: state.phase,
     turn: state.turn,

@@ -161,7 +161,15 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 	}
 }
 
-#Project: {tools: toolchain.#Tools, hostTools: #HostTools, hostToolAliases: #HostToolAliases, ...}
+#Version: "0.25.1"
+
+#Tools: {
+	...
+	for k, v in toolchain.#Tools if k != "github:bonisoft3/mecha" {(k): v}
+	"github:bonisoft3/mecha": #Version
+}
+
+#Project: {tools: #Tools, hostTools: #HostTools, hostToolAliases: #HostToolAliases, ...}
 
 #Cluster: impl.#Cluster
 #Runtime: impl.#Runtime
@@ -169,12 +177,16 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 
 // The dev service token, which crud's dev secret verifies.
 #DevServiceJwt: impl.#DevServiceJwt
+// The development seal key, the local stack's alone: a release refuses it.
+#DevSealKey: impl.#DevSealKey
+#TenancySql:    impl.#TenancySql
 
 // What a sink's origin may be: the airlock's daprd dials it.
 #Origin: impl.#Origin
 
 // What a computation's or an effect's module may be endowed with.
 #CageEndowment: impl.#CageEndowment
+
 #ComputationField: impl.#ComputationField
 
 // A bridge role.
@@ -183,6 +195,8 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AppliancePorts: impl.#AppliancePorts
 #DuckdbExtensionsMarker: impl.#DuckdbExtensionsMarker
 #AppliancePostgres: impl.#AppliancePostgres
+#AppliancePgdg: impl.#AppliancePgdg
+#PostgresArgs: impl.#PostgresArgs
 
 // Mecha's AI gateway (services/airlock/tsbifrost.ts) and the tiered AI model schema.
 #TsBifrostPort:   impl.#TsBifrostPort
@@ -193,10 +207,13 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AiProvider:      impl.#AiProvider
 #AiModelSpec:     impl.#AiModelSpec
 #AiTierOverrides: impl.#AiTierOverrides
+#AiRouted:        impl.#AiRouted
+#AiEdgeOverrides: impl.#AiEdgeOverrides
 #AiCapability:    impl.#AiCapability
 
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
+#UnaccentSql:      impl.#UnaccentSql
 
 // The tenancy floor for a database's schemas, and the step it takes.
 #Tenancy:          impl.#Tenancy
@@ -219,14 +236,20 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #Images:  impl.#Images
 
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.22.0@sha256:8b711e8ac228f49e6f0e8871cc45b7e8bd3cacbf99ab30ca224a3fa4416e3ecf"
-	auth:     "ghcr.io/bsoneca/mecha-auth:0.22.0-host.17@sha256:97ab5f5cac0cb4ecdb3bc10a4d422f44c2f93d31b4667c044cc9d1fabad56838"
-	clock:    "bonitao/mecha-clock:0.22.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
-	compute:  "bonitao/mecha-compute:0.22.0@sha256:58f8cd581d5928feccd655a2f4d20e8ca25200cfa7438c06f1146a8427098cd7"
-	conduit:  "bonitao/mecha-conduit:0.22.0@sha256:66ff44e36bbc9e18858a56ee17c17b9a1746960c1817fec38fbf11d4c3d2eef1"
-	database: "bonitao/mecha-database:0.22.0@sha256:ed58b6be6cd69658fbb4e6daff1f91b8923b333f364905c4dacdec2974a05d82"
-	mesh:     "bonitao/mecha-mesh:0.22.0@sha256:8d39aa3543560232c52330152ba70a4d2c973b76d0ac97899d677704bc0e09a4"
-	ticker:   "bonitao/mecha-ticker:0.22.0@sha256:7a1967fd2b02cfc05b0bd728569431f7e57ecd236676313f18f04e52c9eef2a4"
+	activepieces: "bonitao/mecha-activepieces:0.25.1@sha256:c4f7b6843de315eff48e8b5a139bcc74baa6dc23ec3fb49a7976b48b0d8a9205"
+	airlock:      "ghcr.io/bsoneca/mecha-airlock:0.25.1-host.1@sha256:d4cb0347800acc7dc7247e3ae4f231a67f1ba5689b03c69c039e916efbf213ed"
+	auth:         "ghcr.io/bsoneca/mecha-auth:0.25.1-host.1@sha256:8346b0358939f480eafbb5e5fc28fbd447a014959d508f36d8e12f58a3a807f9"
+	clock:        "bonitao/mecha-clock:0.25.1@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
+	compute:      "bonitao/mecha-compute:0.25.1@sha256:1727778ae5ac5599cf0ffb955a8ec8f379af4a9940ae67d7a8bf98c498cf03f5"
+	conduit:      "bonitao/mecha-conduit:0.25.1@sha256:54cfa510cffbc751549baf94a800ad692926dcde8d9077552978dfd94d9277c9"
+	database:     "bonitao/mecha-database:0.25.1@sha256:0b136a4d23661852800194879ee4dc0dc1580269c2f186dd531db97f03ab931f"
+	extensions:   "bonitao/mecha-extensions:0.25.1@sha256:d3fe4b3869ded07a410579c2928f951bb42c3bdc14ada1122b5cf0a7d7c11c9f"
+	mesh:         "bonitao/mecha-mesh:0.25.1@sha256:8d39aa3543560232c52330152ba70a4d2c973b76d0ac97899d677704bc0e09a4"
+	ticker:       "bonitao/mecha-ticker:0.25.1@sha256:985cf2317859c2d2124e52b8bc9c7116731f50dadc4891e972ae8d45222309d1"
 }
 
 #ActivepiecesContainer: impl.#ActivepiecesContainer
+#IsolateContainer:      impl.#IsolateContainer
+#IsolateDeadlineMs:     impl.#IsolateDeadlineMs
+#IsolateBuild:          impl.#IsolateBuild
+#BridgePort:            impl.#BridgePort

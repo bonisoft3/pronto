@@ -7,7 +7,7 @@ import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 const mecha = new URL("../../libraries/mecha/", import.meta.url);
-const placed = paymentProgram() + `\napp: state: steps: {machines: "062", graphile: "060", airlock: "061", note: "no payment row is written below 060"}\n`;
+const placed = paymentProgram() + `\napp: state: steps: {machines: "062", graphile: "060", airlock: "061", jobKey: "063", note: "no payment row is written below 060"}\n`;
 
 async function run(cmd: string, args: string[], stdin?: string) {
   const child = new Deno.Command(cmd, { args, stdin: stdin === undefined ? "null" : "piped", stdout: "piped", stderr: "piped" }).spawn();
@@ -31,9 +31,10 @@ Deno.test({ name: "placed steps build a database whose invoking state claims and
     "060_graphile_worker.sql": await Deno.readTextFile(new URL("services/durex/graphile.sql", mecha)),
     "061_airlock.sql": `${await Deno.readTextFile(new URL("services/ticker/schedule.sql", mecha))}\n${await Deno.readTextFile(new URL("services/airlock/airlock.sql", mecha))}`,
     "062_machines.sql": files["services/database/migrations/062_machines.sql"].text,
+    "063_airlock_job_key.sql": await Deno.readTextFile(new URL("services/airlock/job_key.sql", mecha)),
   };
   const order = [...staged, "062_machines.sql"].sort();
-  assertEquals(order, ["060_graphile_worker.sql", "061_airlock.sql", "062_machines.sql"]);
+  assertEquals(order, ["060_graphile_worker.sql", "061_airlock.sql", "062_machines.sql", "063_airlock_job_key.sql"]);
 
   const container = `pronto-placement-${crypto.randomUUID().slice(0, 8)}`;
   const started = await run("docker", ["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);

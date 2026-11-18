@@ -46,6 +46,8 @@ use release.nu [
 	airlock-peers
 	airlock-peer-secrets
 	airlock-secrets
+	airlock-dev-seal-key
+	seal-key-bytes
 	airlock-stand-ins
 	airlock-shared-secrets
 	airlock-build-refusals
@@ -93,6 +95,7 @@ def run-tests [] {
 	test_release_plan
 	test_airlock_runtime
 	test_airlock_compose_reads
+	test_airlock_seal_key
 	test_airlock_in_cluster_sinks
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
@@ -103,6 +106,7 @@ def run-tests [] {
 	test_crane_pinned
 	test_auth_providers
 	test_auth_provider_secrets
+	test_trusted_keys
 	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
@@ -341,6 +345,12 @@ def test_auth_provider_secrets [] {
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))
 	assert equal $public_client.oidcSecrets []
 	assert equal $public_client.oidcSecretDigest ""
+	let with_release_broker = (auth-provider-environment {
+		OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin"
+		OIDC_GOOGLE_ISSUER: "http://localhost:24681", OIDC_GOOGLE_INTERNAL: "http://identity:24681/"
+	} {google: {releaseIssuer: "https://id.example.com"}})
+	assert equal $with_release_broker.oidc.OIDC_GOOGLE_ISSUER "https://id.example.com"
+	assert equal $with_release_broker.oidc.OIDC_GOOGLE_INTERNAL "https://id.example.com"
 	{App: {auth: {oidc: {OIDC_GOOGLE_CLIENT_SECRET: "must-be-refused"}}}} | to json | save -f $data
 	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch {|err|
 		assert ($err.msg | str contains "field not allowed")
@@ -363,6 +373,32 @@ def test_app_schemas [] {
 	assert ($yaml | str contains "name: PGRST_DB_EXTRA_SEARCH_PATH\n              value: lists,public")
 	let plain = (render-manifests $app.cue_path "kind")
 	assert not ($plain | str contains "PGRST_DB_EXTRA_SEARCH_PATH")
+}
+
+def test_trusted_keys [] {
+	print "test a trusted issuer's keys stay outside the manifests, and crud verifies them for its audience..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let plain = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template)
+	assert equal ($plain.spec.containers.0.env | where name == "PGRST_JWT_SECRET" | first | get valueFrom.secretKeyRef) {name: "sample-auth-secrets", key: "PGRST_JWT_SECRET"}
+	assert ($plain.spec.containers.0.env | where name == "PGRST_JWT_AUD" | is-empty)
+	let digest = ("{\"keys\":[]}" | hash sha256)
+	let data = (mktemp --suffix .json)
+	{App: {trustedKeysDigest: $digest, trustedAudience: ""}} | to json | save -f $data
+	let yaml = (render-manifests $app.cue_path "kind" --data $data)
+	rm $data
+	let pod = ($yaml | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template)
+	let crud = $pod.spec.containers.0.env
+	assert equal ($crud | where name == "PGRST_JWT_SECRET" | length) 1
+	assert equal ($crud | where name == "PGRST_JWT_SECRET" | first | get valueFrom.secretKeyRef) {name: "sample-trusted-keys", key: "PGRST_JWKS"}
+	assert (($crud | where name == "PGRST_JWT_AUD" | first | get value) ends-with "/crud")
+	assert equal ($pod.metadata.annotations | get "pronto.dev/trusted-keys-digest") $digest
+	# The key set is a Secret the release applies through stdin, never a manifest.
+	assert not ($yaml | str contains "PGRST_JWKS:")
+	let named = (mktemp --suffix .json)
+	{App: {trustedKeysDigest: $digest, trustedAudience: "https://api.example/crud"}} | to json | save -f $named
+	let aud = (render-manifests $app.cue_path "kind" --data $named | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers.0.env | where name == "PGRST_JWT_AUD" | first | get value)
+	rm $named
+	assert equal $aud "https://api.example/crud"
 }
 
 # PostgREST serves public alone unless the app's compose gives crud more (PRONTO-320): a node's
@@ -561,7 +597,7 @@ def test_render_manifests_kind [] {
 	assert ($yaml | str contains "kind: Cluster")
 	let db = ($yaml | from yaml | where kind == "Cluster" | first)
 	assert equal $db.spec.stopDelay 120 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
-	assert equal $db.spec.smartShutdownTimeout 15
+	assert equal $db.spec.smartShutdownTimeout 15 "one instance waits 15 s for its sessions (test_database_ha has the rest)"
 	assert ("primaryUpdateMethod" not-in ($db.spec | columns)) "one instance has no standby to switch over to"
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
@@ -2038,6 +2074,68 @@ esac
 	rm -r $bin
 }
 
+def test_airlock_seal_key [] {
+	print "test the airlock's seal keys: Secrets in the release, the development key refused, none without secret fields..."
+	let dev = "REVWLUtFWS1GT1ItVEVTVFM"
+	let dir = ($fixtures_dir | path join effects-seal)
+	rm -rf $dir
+	cp -r ($fixtures_dir | path join effects) $dir
+	let compose = ($dir | path join compose.yaml)
+	let with_seal = (open --raw $compose | str replace "      MAIL_KEY: ${MAIL_KEY:-simulator}\n" $"      MAIL_KEY: ${MAIL_KEY:-simulator}\n      AIRLOCK_SEAL_DEV: local\n      AIRLOCK_SEAL_KEY: ${AIRLOCK_SEAL_KEY:-($dev)}\n      AIRLOCK_SEAL_KEY_PREVIOUS: ${AIRLOCK_SEAL_KEY_PREVIOUS:-}\n")
+	assert ($with_seal | str contains "AIRLOCK_SEAL_KEY_PREVIOUS") "the fixture takes the seal variables"
+	let plain = (open --raw $compose)
+	$with_seal | save -f $compose
+	let raw = (compose-raw $dir)
+	assert equal (airlock-secrets $raw | sort) [AIRLOCK_SEAL_KEY AIRLOCK_SEAL_KEY_PREVIOUS MAIL_KEY PAGER_KEY SINK_TOKEN]
+	assert equal (airlock-dev-seal-key $raw) $dev
+	let all = {SINK_TOKEN: "effects-sinks", MAIL_KEY: "effects-mail", PAGER_KEY: "effects-pager", AIRLOCK_SEAL_KEY: "effects-seal"}
+	let data = (mktemp -t seal.XXXXXX.json | str trim)
+	let render = {|secrets|
+		{App: {airlock: {secrets: $secrets}, networkPolicy: {internet: "airlock"}}} | to json | save -f $data
+		with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { render-manifests ($dir | path join release.cue) gke --data $data | from yaml }
+	}
+	let airlock_env = {|objs| $objs | where kind == "Deployment" and metadata.name == "effects-airlock" | first | get spec.template.spec.containers.0.env }
+	# The current key from its Secret; the previous one, a rotation's, only where the release names it.
+	let vars = (do $airlock_env (do $render $all))
+	let key = ($vars | where name == AIRLOCK_SEAL_KEY | first)
+	assert ($key.value? == null) "the seal key has no value of its own"
+	assert equal $key.valueFrom.secretKeyRef {name: effects-seal, key: AIRLOCK_SEAL_KEY}
+	assert equal ($vars | where name in [AIRLOCK_SEAL_KEY_PREVIOUS AIRLOCK_SEAL_DEV] | length) 0 "no previous key unnamed, and no AIRLOCK_SEAL_DEV"
+	let rotated = (do $airlock_env (do $render ($all | insert AIRLOCK_SEAL_KEY_PREVIOUS "effects-seal-old")))
+	assert equal ($rotated | where name == AIRLOCK_SEAL_KEY_PREVIOUS | first | get valueFrom.secretKeyRef) {name: effects-seal-old, key: AIRLOCK_SEAL_KEY_PREVIOUS}
+	assert equal ($rotated | where name == AIRLOCK_SEAL_DEV | length) 0
+	let unplaced = (try { do $render ($all | reject AIRLOCK_SEAL_KEY); "" } catch {|e| $e.msg })
+	assert ($unplaced | str contains "AIRLOCK_SEAL_KEY") $"an unplaced seal key fails the release: ($unplaced)"
+	rm $data
+	# No secret field, no seal variables: the airlock's secrets are the effects' alone.
+	$plain | save -f $compose
+	assert equal (airlock-secrets (compose-raw $dir) | sort) [MAIL_KEY PAGER_KEY SINK_TOKEN]
+	assert equal (airlock-dev-seal-key (compose-raw $dir)) ""
+	rm -rf $dir
+	# The development key is refused in any spelling; another key, an unset previous one and an
+	# unnamed Secret all pass the check, which reads the key's value and prints none.
+	assert equal (seal-key-bytes $dev) (seal-key-bytes "REVWLUtFWS1GT1ItVEVTVFM=")
+	assert equal (seal-key-bytes "-_-_") (seal-key-bytes "+/+/")
+	let bin = (mktemp -d)
+	"#!/bin/sh
+case \"$*\" in
+  *secret?dev?*jsonpath*) printf %s \"$DEV_B64\" ;;
+  *jsonpath*) printf %s \"$OWN_B64\" ;;
+  *) printf 'AIRLOCK_SEAL_KEY\\n' ;;
+esac
+" | save -f ($bin | path join kubectl)
+	chmod +x ($bin | path join kubectl)
+	let deployment = {|name| [{kind: Deployment, spec: {template: {metadata: {labels: {"app.kubernetes.io/component": airlock}}, spec: {containers: [{env: [
+		{name: AIRLOCK_SEAL_KEY, valueFrom: {secretKeyRef: {name: $name, key: AIRLOCK_SEAL_KEY}}}
+	]}]}}}}] }
+	let run = {|name| with-env {PATH: ($env.PATH | prepend $bin), DEV_B64: ("REVWLUtFWS1GT1ItVEVTVFM=" | encode base64), OWN_B64: ("b3duLWtleS1vZi10aGUtZGVwbG95bWVudA==" | encode base64)} { try { check-airlock-secrets (do $deployment $name) effects --dev-key $dev; "" } catch {|e| $e.msg } } }
+	assert equal (do $run own) ""
+	let refused = (do $run dev)
+	assert ($refused | str contains "development key") $refused
+	assert not ($refused | str contains "REVWLUtFWS1GT1ItVEVTVFM") "the refusal prints no key"
+	rm -r $bin
+}
+
 def test_replicas_budget_spread [] {
 	print "test a workload's replicas, its preview's count, a budget of all but one and spread over the nodes..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
@@ -2109,6 +2207,9 @@ def test_database_ha [] {
 	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
 	assert equal $three.enablePDB true
 	assert equal [$three.primaryUpdateMethod $three.primaryUpdateStrategy] ["switchover" "unsupervised"] "a primary change promotes a standby first"
+	assert equal $one.smartShutdownTimeout 15 "alone, a stop waits 15 s for its sessions: there is no one to fail over to"
+	assert equal $three.smartShutdownTimeout 0 "with standbys a stop is fast at once: while the old primary waits, none is promoted (PRONTO-715)"
+	assert equal (do $cluster {database: {instances: 3, smartShutdown: 5}} | get smartShutdownTimeout) 5 "an app may name its own wait"
 	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
 	assert ("resources" not-in ($one | columns)) "no postgres resources unless the release names them"
 	let sized = (do $cluster {containerResources: {postgres: {requests: {cpu: "100m"}, limits: {cpu: "1"}}}})

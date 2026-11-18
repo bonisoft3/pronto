@@ -26,22 +26,23 @@ import { readEdgeHatches, applyHatchAttributes } from './edge-hatches.ts'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
-import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, realmSubdomains, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { databaseScript, writeEdgeSsr } from './edge-ssr.ts'
-import { realmDocumentsOf } from './edge-templates.ts'
+import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
 import { type Reducers, renderMachines } from './edge-machines.ts'
 import { computationPackages } from './compute.ts'
 import { writeEdgeCompute } from './edge-compute.ts'
 import { writeEdgeReader } from './edge-reader.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
 import { buildPglite } from './edge-pglite.ts'
-import { signInVars } from './edge-signin.ts'
+import { isLocalBroker, isLocalBrokerInternal, signInVars } from './edge-signin.ts'
 import { renderEffects } from './edge-effects.ts'
 import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
-import { clusterDrains, clusterSteps, hasEffects, releaseScripts } from './edge-scripts.ts'
+import { clusterDrains, clusterSteps, EDGE_CAPABILITIES_CUE, EDGE_STATE_CUE, hasEffects, releaseScripts } from './edge-scripts.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -69,6 +70,14 @@ const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names t
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 let out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
+if ('--domain' in flags && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) fail(`--domain ${JSON.stringify(domain)} is no host name`)
+const WORKER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/
+const workerNameRefusal = '--name must be lowercase letters, digits and hyphens, at most 63 characters'
+if ('--name' in flags && !WORKER_NAME.test(flags['--name'])) fail(`${workerNameRefusal}, not ${JSON.stringify(flags['--name'])}`)
+if ('--ssr-origin' in flags) {
+  const origin = URL.parse(flags['--ssr-origin'])
+  if (origin?.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
+}
 const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
 const addresses = await releaseAddresses(omnishell)
 // The target's, from distribution's #IceServers: the release rule names them.
@@ -87,26 +96,29 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   schema?: Record<string, { durability?: string }>
   migrations: string[]
   routes?: { files: { html: string } }[]
-  units?: Record<string, { role?: string; isolation?: string; src?: string }>
+  units?: Record<string, { role?: string; isolation?: string; subdomain?: string; src?: string }>
   presenter?: { policy: string; scripted: string[] }
 }
 const clustered = shell.migrations.length > 0
+// Asked before anything is cleared, as addressEdgeAssets would refuse it.
+const subdomains = realmSubdomains(shell.units)
+if (subdomains.length && !domain) fail(`realm subdomains ${subdomains.join(', ')} are hosts under the release's domain: --domain names it`)
 if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'])) fail('a release without a cluster cannot use --derived, --from, or --ssr-origin')
 // A unit's per-unit security headers ride in _headers (edge-addresses.ts): a
 // realm's document carries the seat's sandbox, a presenter's worker script its
 // own policy, with the refusal of its scripted fetches below; an agent is a
 // static file the seat starts from a blob: under the document's policy.
 const name = flags['--name'] ?? shell.app ?? path.basename(app)
-if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail('worker name must be lowercase letters, digits and hyphens, at most 63 characters')
+if (!WORKER_NAME.test(name)) fail(`the worker name ${JSON.stringify(name)} is refused: ${workerNameRefusal}`)
 const hatches = await readEdgeHatches(app)
 if (hatches.length && flags['--ssr-origin']) fail('edge hatches are not packaged for SSR releases')
 if (hatches.length && !clustered) fail('edge hatches run in the cluster, which an app with no migration does not have')
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{assets: *code.capabilities.seedAssets | null, seedBlobs: *code.capabilities.seedBlobs | null, blobs: *code.capabilities.blobs | false, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities failed')
-const { assets, seedBlobs, blobs, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null }
+const { assets, seedBlobs, blobs, images, signIn, providerRelease } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, Record<string, string>>; providerRelease: Record<string, { releaseIssuer?: string }> }
 const routeScreens: Record<string, string> = {}
 for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
 const imagePlan = imagePlanRefusal(routeScreens, images)
@@ -143,18 +155,9 @@ const statics = await new Deno.Command('cue', {
 }).output()
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
-const signIn = await new Deno.Command('cue', {
-  // A cluster with no provider sign-in has no signIn: no provider either.
-  args: ['export', '.', '-e', '*cluster.capabilities.signIn | {}', '--out', 'json'],
-  cwd: app, stdout: 'piped', stderr: 'inherit',
-}).output()
-if (!signIn.success) fail("cue export of the cluster's signIn failed")
-let vars: Record<string, string>
-try { vars = signInVars(JSON.parse(new TextDecoder().decode(signIn.stdout)), (name) => Deno.env.get(name)) }
-catch (e) { fail((e as Error).message) }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
 await applyHatchAttributes(publicDir, hatches)
-const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
+const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers, domain: domain || undefined })
 if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() => {})
 await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
@@ -164,6 +167,23 @@ const blobVars: Record<string, string> = blobs ? {
   BLOB_URL: images ? '/img/insecure/plain/s3://mecha-objects/' : '/blobs/mecha-objects/',
   ...(images?.sourceBucket ? { IMAGE_SOURCE_BUCKET: images.sourceBucket } : {}),
 } : {}
+// The providers a person signs in through (edge-signin.ts): a provider through
+// the local broker signs in, once released, through its releaseIssuer, which
+// the cluster also reaches it by, as gcp/release.nu and k8s/release.nu read it.
+const releasedSignIn = Object.fromEntries(Object.entries(signIn).map(([p, cfg]) => {
+  // The local broker's issuer: a loopback port, one per app (identity/signin.cue's #LocalPort).
+  const releaseIssuer = isLocalBroker(cfg.issuer) ? providerRelease[p]?.releaseIssuer : undefined
+  if (!releaseIssuer) return [p, cfg]
+  return [p, { ...cfg, issuer: releaseIssuer, ...(isLocalBrokerInternal(cfg.internal) ? { internal: releaseIssuer } : {}) }]
+}))
+let authVars: Record<string, string>
+try { authVars = signInVars(releasedSignIn, (name) => Deno.env.get(name)) }
+catch (e) { fail((e as Error).message) }
+const workerVars: Record<string, string> = {
+  ...blobVars,
+  ...authVars,
+  ...(domain ? { ORIGIN: `https://${domain}` } : {}),
+}
 const blobBindings = blobs ? {
   r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: `${name}-mecha-objects` }],
   vars: blobVars,
@@ -185,20 +205,23 @@ if (seedBlobs) {
 
 // A realm's document, served at its own address ([[edge-templates.ts]]).
 const realmDocuments = realmDocumentsOf(shell)
+const subdomainRealms = subdomainRealmsOf(shell)
+const subdomainArgs = Object.keys(subdomainRealms).length ? `, ${JSON.stringify(subdomainRealms)}` : ''
+const customDomains = domain ? [domain, ...subdomains.map((sub) => `${sub}.${domain}`)].map((pattern) => ({ pattern, custom_domain: true })) : undefined
 if (!clustered) {
   const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
   const staticWorker = worker.startsWith('.') ? worker : `./${worker}`
   const imageWorker = path.relative(path.join(out, 'src'), path.join(here, 'edge-images.ts')).replaceAll('\\', '/')
   const fragment = path.relative(path.join(out, 'src'), path.join(omnishell, 'interpreter/fragment.js')).replaceAll('\\', '/')
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), blobs
-    ? `import { staticWorker as serveStatic } from '${staticWorker}'\nconst staticWorker = serveStatic(${JSON.stringify(realmDocuments)})\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
-    : `import { staticWorker } from '${staticWorker}'\nexport default staticWorker(${JSON.stringify(realmDocuments)})\n`)
+    ? `import { staticWorker as serveStatic } from '${staticWorker}'\nconst staticWorker = serveStatic(${JSON.stringify(realmDocuments)}${subdomainArgs})\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
+    : `import { staticWorker } from '${staticWorker}'\nexport default staticWorker(${JSON.stringify(realmDocuments)}${subdomainArgs})\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
-    name, main: 'src/index.ts', compatibility_date: '2026-09-01',
+    name, main: 'src/index.ts', compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
     assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
     observability: { enabled: true },
     ...blobBindings,
-    ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
+    ...(customDomains ? { routes: customDomains } : { workers_dev: true }),
   }, null, 2) + '\n')
   console.error(`edge: ${out}`)
   Deno.exit(0)
@@ -240,7 +263,7 @@ await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify(relea
 // tick — its cron schedules, its reducers that arm a deadline; a plv8
 // machine's timers never run here — for the clock outside the object below.
 const stateOut = await new Deno.Command('cue', {
-  args: ['export', '.', '-e', '{reducers: *code.state.mecha.reducers | {}, functions: *code.state.functions | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
+  args: ['export', '.', '-e', EDGE_STATE_CUE, '--out', 'json'],
   cwd: app, stdout: 'piped', stderr: 'inherit',
 }).output()
 if (!stateOut.success) fail('cue export of the machines and schedules failed')
@@ -306,7 +329,7 @@ export const Cluster = edgeObject({
 export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
-    env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocuments)}) }
+    env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocuments)}${subdomainArgs}) }
     if (${JSON.stringify(hatches.map(h => h.edge.route))}.some(route => new URL(req.url).pathname === route || new URL(req.url).pathname.startsWith(route + '/'))) return env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).fetch(req)
 ${blobs ? '    const image = await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
@@ -367,6 +390,7 @@ ${shell.presenter ? `    // A presenter's module import of this origin is answer
     }
     const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
+        /^\\/(?:_immutable-|(?:shell|omnishell|messages|docs)\\/)/.test(url.pathname) ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response
     const result = new Response(response.body, response)
@@ -378,7 +402,7 @@ ${shell.presenter ? `    // A presenter's module import of this origin is answer
 await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
-  compatibility_date: '2026-09-01',
+  compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE,
   // The object's airlock runs Graphile Worker, which needs Node's built-ins.
   compatibility_flags: ['nodejs_compat'],
   ...(compute ? { services: compute.services } : {}),
@@ -394,10 +418,9 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   observability: { enabled: true },
   ...blobBindings,
   // A handler's sink.origin: the release's domain, never the host a request came by.
-  // The providers a person signs in through (edge-signin.ts) beside them.
-  ...(domain || Object.keys(vars).length ? { vars: { ...vars, ...(domain ? { ...blobVars, ORIGIN: `https://${domain}` } : {}) } } : {}),
+  ...(Object.keys(workerVars).length ? { vars: workerVars } : {}),
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
-  ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
+  ...(customDomains ? { routes: customDomains } : { workers_dev: true }),
   rules: [
     { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },
     { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false },
@@ -412,7 +435,6 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
 }, null, 2) + '\n')
 if (flags['--ssr-origin']) {
   const origin = new URL(flags['--ssr-origin'])
-  if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
   const mise = Deno.env.get('SAYT_MISE_BIN') ?? fail('SAYT_MISE_BIN is required to install the renderer with its pinned Node')
   await run(mise, ['exec', '--', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
   await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)

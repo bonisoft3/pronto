@@ -10,6 +10,7 @@ Deno.test('physical readers pin copied runtime, assets and definitions in an ind
     'mecha/packages/pglite-workerd/src/data-directory.ts': 'directory',
     'mecha/packages/compute-snapshot/src/index.ts': 'coordinator',
     'mecha/packages/mecha-edge/src/compute-reader.ts': 'reader',
+    'mecha/packages/incremental-views/runtime.ts': 'ivm-one',
   }
   try {
     for (const [file, body] of Object.entries(files)) {
@@ -35,5 +36,9 @@ Deno.test('physical readers pin copied runtime, assets and definitions in an ind
     assert.notEqual(third.script_name, second.script_name)
     const fourth = await writeEdgeReader(out, mecha, [{ ...definitions[0], version: 'v2' }], 'app')
     assert.notEqual(fourth.script_name, third.script_name)
+    assert.equal(await Deno.readTextFile(path.join(out, 'compute/reader/runtime/packages/incremental-views/runtime.ts')), 'ivm-one')
+    await Deno.writeTextFile(path.join(mecha, 'packages/incremental-views/runtime.ts'), 'ivm-two')
+    const fifth = await writeEdgeReader(out, mecha, [{ ...definitions[0], version: 'v2' }], 'app')
+    assert.notEqual(fifth.script_name, fourth.script_name)
   } finally { await Deno.remove(temporary, { recursive: true }) }
 })

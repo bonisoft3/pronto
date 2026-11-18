@@ -374,7 +374,7 @@ if (clustered) {
     assetFiles.set(name, bytes)
     return `${base}/${name}`
   }
-  assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive), ivm: await beside(path.join(denoDir, 'npm/registry.npmjs.org', ivm[1], ivm[2], 'dist/pg_ivm.tar.gz')) }
+  assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive), ivm: await beside(path.join(denoDir, 'npm/registry.npmjs.org', ivm[1], ivm[2], 'dist/pg_ivm.tar.gz')), unaccent: await beside(path.join(dist, 'unaccent.tar.gz')) }
 }
 // A file whose text another file already holds (an app's screens often share one
 // sheet) rides once: `same` names the file that holds it, and the page's shim

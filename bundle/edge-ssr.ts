@@ -1,8 +1,9 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { edgeRoutingRules } from './edge-addresses.ts'
-import { realmDocumentsOf } from './edge-templates.ts'
+import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
 import { clusterDrains } from './edge-scripts.ts'
+import { PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE } from './cloudflare-runtime.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
  * database object calls. */
@@ -79,9 +80,10 @@ ${compute ? `import { computeCoordinator } from '${fromSrc(path.join(edge, "comp
 ${compute ? "import computeMachines from './compute-machine.js'\n" : ''}
 class SnapshotReader extends RpcTarget {
   constructor(snapshot, done) { super(); this.snapshot = snapshot; this.done = done }
-  read(path) { return this.snapshot.read(path) }
-  readMany(paths) { return this.snapshot.readMany(paths) }
-  [Symbol.dispose]() { this.done() }
+  read(path) { if (!this.snapshot) throw new Error('snapshot is closed'); return this.snapshot.read(path) }
+  readMany(paths) { if (!this.snapshot) throw new Error('snapshot is closed'); return this.snapshot.readMany(paths) }
+  finish() { const done = this.done; this.done = null; this.snapshot = null; done?.() }
+  [Symbol.dispose]() { this.finish() }
 }
 const Base = edgeObject({
   clock: ${JSON.stringify(clock)},
@@ -95,7 +97,8 @@ const Base = edgeObject({
 export class Cluster extends Base {
   async render(request, renderer) {
     try {
-      const priority = request.headers.get('x-pronto-speculative') === '1' ? 'low' : 'high'
+      const background = request.headers.get('x-pronto-speculative') === '1' || /(?:bot\\b|crawler\\b|spider\\b)/i.test(request.headers.get('user-agent') ?? '')
+      const priority = background ? 'low' : 'high'
       let resolveResponse
       let rejectResponse
       let committed = false
@@ -106,16 +109,21 @@ export class Cluster extends Base {
       const snapshotDone = this.readPublic(async snapshot => {
         let readerDone
         const rendered = new Promise(resolve => { readerDone = resolve })
-        // The lane is the object's one connection: a renderer that never gives the snapshot back
-        // would hold every other read behind it.
-        const SNAPSHOT_LEASE_MS = 20_000
-        let expire
-        const lease = new Promise((_, reject) => { expire = setTimeout(() => reject(Object.assign(new Error(\`\${request.url} held its snapshot past \${SNAPSHOT_LEASE_MS} ms\`), { refused: true })), SNAPSHOT_LEASE_MS) })
-        try {
-          const response = await Promise.race([renderer.render(request, snapshot.revision, new SnapshotReader(snapshot, readerDone)), lease])
+        let expired = false
+        let timer
+        const reader = new SnapshotReader(snapshot, readerDone)
+        const revision = snapshot.revision
+        const deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => { expired = true; reject(new Error('render snapshot lease expired')) }, 30_000)
+        })
+        const operation = (async () => {
+          const response = await renderer.render(request, revision, reader)
+          if (expired) { await response.body?.cancel(); return }
           resolveResponse(response)
-          await Promise.race([rendered, lease])
-        } finally { clearTimeout(expire) }
+          await rendered
+        })()
+        try { await Promise.race([operation, deadline]) }
+        finally { clearTimeout(timer); reader.finish() }
       }, priority).catch(error => {
         if (!committed) {
           rejectResponse(error)
@@ -151,7 +159,7 @@ const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}
   async fetch(request, env, ctx) {
-    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocumentsOf(cfg))}) }
+    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocumentsOf(cfg))}${Object.keys(subdomainRealmsOf(cfg)).length ? `, ${JSON.stringify(subdomainRealmsOf(cfg))}` : ''}) }
 ${images ? '    const image = await edgeImage(request, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}    const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
@@ -331,7 +339,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
   },
 }
 `)
-  const common = { compatibility_date: '2026-09-01', compatibility_flags: ['nodejs_compat'], observability: { enabled: true } }
+  const common = { compatibility_date: PRONTO_RUNTIME_CLOUDFLARE_WORKER_COMPATIBILITY_DATE, compatibility_flags: ['nodejs_compat'], observability: { enabled: true } }
   await Deno.writeTextFile(path.join(out, 'renderer.jsonc'), JSON.stringify({
     ...common, name: renderer, main: 'src/render.ts', workers_dev: false,
     durable_objects: { bindings: [{ name: 'RENDERER', class_name: 'DocumentRenderer' }] },
@@ -358,6 +366,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, ...(compute ? [{ name: 'COMPUTE_COORDINATOR', class_name: 'ComputeCoordinator' }, compute.reader] : [])] },
     exports: { Cluster: { type: 'durable-object', storage: 'sqlite' }, ...(compute ? { ComputeCoordinator: { type: 'durable-object', storage: 'sqlite' } } : {}) },
     ...(config.ai ? { ai: config.ai } : {}),
+    ...(config.vars ? { vars: config.vars } : {}),
     rules: [
       { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },
       { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false },

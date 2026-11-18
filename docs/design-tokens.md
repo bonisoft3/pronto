@@ -21,15 +21,16 @@ retyped, and a hash over the vendored bytes plus the daisyUI meanings the
 reading quotes is pinned in the test file — not in the fixture — so editing the
 fixture cannot move the number it is checked against.
 
-The thing graded against is the **contract**: `schema.cue` and the `press`
-preset inside it, reached with real `cue`. It is deliberately not
+The thing graded against is the **contract**: `schema.cue` (`#Design` and
+`#colorRoles`), reached with real `cue`. It is deliberately not
 any app's emitted `design.css`: that file is generated, and grading it would
 let a hand edit grant the platform roles it does not publish.
 
 Three facts are derived rather than asserted:
 
-- **the role census** — `cue export -e '#Design'`, the schema's own default
-  field set, with each bucket's emitted prefix read out of `emit.cue`'s
+- **the role census** — `cue export` over `#Design` with `#colorRoles` and
+  `shell.nav` filled uniformly from `#colorRoles` (no hardcoded hexes or
+  presets), with each bucket's emitted prefix read out of `emit.cue`'s
   comprehensions;
 - **what the design layer refuses** — measured by unifying a real `#Design`
   with the name in question and reporting what `cue` does;
@@ -37,7 +38,7 @@ Three facts are derived rather than asserted:
   theme's values into a real `#Design` and comparing what exports back, byte
   for byte.
 
-The fixture holds only this platform's *reading*: which press role a daisyUI
+The fixture holds only this platform's *reading*: which `#Design` role a daisyUI
 token lands on, and why it departs. That reading is checked for injectivity —
 two published tokens may not collapse onto one role — and every role it names
 must be one the schema really publishes.
@@ -53,8 +54,8 @@ every role the design layer publishes is mapped or stated as pronto's own ... ok
 what the design layer refuses is measured, and it refuses only an untwinned colour ... ok (0ms)
 every published value is carried into the design layer byte for byte ... ok (0ms)
 the wide-gamut census is a fact about daisyUI's palette and not a loss here ... ok (2ms)
-a colour the preset does not publish costs a twin, and one it does publish is rebound silently ... ok (30ms)
-one preset, two appearances, no siblings: daisyUI's theme system has no seam here ... ok (38ms)
+a colour #Design does not require costs a twin, and one it does require is rebound silently ... ok (30ms)
+zero presets, explicit palette and nav, two appearances, no siblings: daisyUI's theme system has no seam here ... ok (38ms)
 every published theme is expressible: a published name for each token, and a value that carries ... FAILED (3ms)
 ```
 
@@ -98,24 +99,24 @@ name for each of the unpublished colours.
 So "pronto has no name for this token" is false, and the suite never says it.
 What it says instead is the cost it can demonstrate:
 
-- **the preset publishes no vocabulary for 19 of the 28 tokens.** An app can
+- **`#Design` publishes no vocabulary for 19 of the 28 tokens.** An app can
   invent a name for any of them, and that is the problem: two apps would invent
   two, and a shared component set binds to a published name or to nothing. This
   is what makes the naming axis the whole of the failure.
 - **a new colour costs a twin.** Fourteen of the nineteen are colours, and the
   closed twin means each one is two declarations — a light value and a dark
-  one — in every app that wants it, forever, unless the preset grows it.
+  one — in every app that wants it, forever, unless `#colorRoles` grows it.
 - **five sit in untwinned buckets and cost one line each.** They are cheap and
   still unpublished, which is the same vocabulary problem without the twin tax.
 
-Adding `info` to `#designPresets.press` moves the NAMES count from 9 to 10 and
+Adding `info` to `#colorRoles` moves the NAMES count from 9 to 10 and
 moves nothing else. That is the point of splitting the verdict onto two axes:
 the run is a progress meter rather than a constant.
 
 ## The values all carry
 
 `980 of 980`, wide-gamut `oklch()` included. A colour bucket holds an opaque
-string that the emitter interpolates into `light-dark()` unchanged — press's
+string that the emitter interpolates into `light-dark()` unchanged — `#Design`'s
 own shadow inks are `hsl(220 3% 15% / 3%)`, so the bucket was never
 hex-shaped — and nothing downstream parses a design-layer value as a colour.
 There is no storage constraint in the schema to derive a fidelity loss from,
@@ -132,29 +133,29 @@ verdict on pronto.
 
 ## The theme system, established by construction
 
-This is the gap that survives everything above, and it is four probes rather
-than an argument. Each asks the schema for the seam that would hold a second
-identity:
+This is the gap that survives everything above, and it is five probes rather
+than an argument. Each asks the schema for a preset or a second identity seam:
 
 | probe | what `cue` does |
 |---|---|
-| `#designPresets` | publishes exactly one identity, `press` |
-| `#Design & {preset: "dracula"}` | `undefined field: dracula` |
-| `#Design & {dim: {...}}` | `dim: field not allowed` — `dark` is the twin, and there is no third |
+| `#designPresets` | fails to export — zero named presets exist |
+| `#Base & {preset: "press"}` | `preset: field not allowed` |
+| `#Design` (unfilled) | fails to export — `#colorRoles` and `shell.nav` have no defaults |
+| `#Base & {dim: {...}}` | `dim: field not allowed` — `dark` is the twin, and there is no third |
 | `#App.surface & {design: {press: ..., dracula: ...}}` | `design.dracula: field not allowed` |
 
 daisyUI publishes 35 sibling identities, each pinning its own `color-scheme`,
 selected at runtime by `[data-theme]` on any element and with no JavaScript.
-`#Design` is one build-time preset with exactly two appearances, and the twin
-mirrors every colour key and no more. 35 identities would be 35 forks. That is
-why the theme probe in the carriage case has to write each theme's light half
-into `dark` as well: a single-appearance identity has no twin to give.
+`#Design` is one explicit build-time identity with exactly two appearances, and
+the twin mirrors every colour key and no more. 35 identities would be 35 forks.
+That is why the theme probe in the carriage case has to write each theme's light
+half into `dark` as well: a single-appearance identity has no twin to give.
 
 ## What each theme sets for itself
 
-The naming loss is uniform across all 35 — it is a property of the preset, not
-of any theme — so what varies is what a theme sets that press has no way to
-say at all. From the same run:
+The naming loss is uniform across all 35 — it is a property of `#Design`'s role
+vocabulary, not of any theme — so what varies is what a theme sets that
+`#Design`'s structural ladders have no way to say at all. From the same run:
 
 | theme | scheme | what this theme sets for itself |
 |---|---|---|
@@ -195,7 +196,7 @@ say at all. From the same run:
 | silk | light | `--border: 2px`; `--depth: 1`; selector `2rem` > box `1rem` |
 
 A radius ordering shown as `field > box` or `selector > box` is one an ordered
-`sm`/`md`/`full` ladder cannot state whatever it is filled with, because press
+`sm`/`md`/`full` ladder cannot state whatever it is filled with, because `#Design`
 orders radii by size and daisyUI orders them by element class.
 
 ## What catches a perturbation, and what does not
@@ -209,7 +210,7 @@ plus the coverage one. Each is caught by a named case:
 | replace a published value with a fabricated one in the vendored CSS | red — the quotation hash moves |
 | reword what daisyUI is quoted as publishing | red — the quotation hash moves |
 | hand-edit `apps/jsfb/shell/design.css` to declare `--info`/`--success`/`--warning`, then record those maps | red — `--color-info: maps to colors/info, which #Design does not publish`; the artifact is not consulted at all |
-| fake progress: map `--color-info` onto `colors/secondary`, a role press publishes that no daisyUI token reaches | red — `colors/secondary is both mapped and stated as pronto's own` |
+| fake progress: map `--color-info` onto `colors/secondary`, a role `#Design` publishes that no daisyUI token reaches | red — `colors/secondary is both mapped and stated as pronto's own` |
 | delete a published token's reading, leaving its 35 declarations undriven | red — `35 published declarations nothing graded: light/--noise, dark/--noise, …` |
 
 The last is the coverage property this suite exists to reproduce, and it is
@@ -228,7 +229,7 @@ probes, beside the `schema.cue` and `emit.cue` it reads), so a change that
 moves the reading fails until the pin moves with it, in a diff a reviewer sees;
 a reading that falls, or swaps one token for another, cannot pass in silence.
 
-The pin is exhausted when the press preset publishes a role for all 28 tokens.
+The pin is exhausted when `#Design` publishes a role for all 28 tokens.
 The values axis is already at `980 of 980`, asserted by its own cases.
 
 ## What this does not cover

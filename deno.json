@@ -12,6 +12,7 @@
     "@bonisoft3/omnishell/": "../omnishell/",
     "@bonisoft3/mecha/": "../../libraries/mecha/",
     "@mecha/compute/": "../../libraries/mecha/services/compute/",
+    "@e965/xlsx": "npm:@e965/xlsx@0.20.3",
     "@pdfme/pdf-lib": "npm:@pdfme/pdf-lib@6.2.8",
     "@david/dax": "jsr:@david/dax@0.50.0",
     "@electric-sql/pglite": "npm:@electric-sql/pglite@0.5.8",

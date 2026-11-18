@@ -628,3 +628,10 @@ Deno.test("verifyHttp fetches assets and negative probe at root origin without p
   // Document route IS mounted under /subapp
   assertEquals(fetchedUrls.includes("https://app.example.com/subapp/"), true);
 });
+
+Deno.test("parameterized routes keep optional entry values and literal path punctuation exact", () => {
+  const routes = [{ path: "/v1.0/:id/:view?", screen: "item", nav: { entries: [{ params: { view: "chart+table" } }] } }];
+  const links = new Set(["/v1x0/item/chartttable", "/v1.0/item/chart+table"]);
+  assertEquals(resolveParameterizedRoutes(routes, links).screenRoutes.get("item"), "/v1.0/item/chart+table");
+  assertEquals(resolveParameterizedRoutes(routes, new Set(["/v1.0/item"])).screenRoutes.get("item"), "/v1.0/item");
+});

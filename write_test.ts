@@ -71,7 +71,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
           "build",
         ],
         cwd: app,
-        env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+        env: { MISE_TRUSTED_CONFIG_PATHS: repo },
         stdout: "piped",
         stderr: "piped",
       }).output();
@@ -89,7 +89,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
         "use auto-bayt.nu; auto-bayt",
       ],
       cwd: app,
-      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -131,6 +131,12 @@ Deno.test("a settled build preserves outputs and still follows new template read
     assertEquals(await outputs(), before);
     assertEquals((await Deno.stat(screen)).mtime, mtime);
 
+    // Gitignored development outputs are absent on a fresh checkout and read by
+    // neither derive nor CUE, so recreating them still settles in one pass.
+    await Deno.remove(join(app, ".pronto/development"), { recursive: true });
+    assertStringIncludes(await build(), "(1 derivation)");
+    assert(await Deno.stat(join(app, ".pronto/development/shell.json")));
+
     const irPath = join(app, "ir.html");
     const ir = await Deno.readTextFile(irPath);
     const withoutCards = ir.replace(/<!-- pronto:card -->[\s\S]*?<!-- \/pronto:card -->/g, "<!-- pronto:card --><!-- /pronto:card -->");
@@ -140,6 +146,20 @@ Deno.test("a settled build preserves outputs and still follows new template read
     assertStringIncludes(redrawn, "(1 derivation)");
     assertStringIncludes(redrawn, '"phase":"ir-facts"');
     assertEquals(await Deno.readTextFile(irPath), ir);
+    assertEquals(await outputs(), before);
+
+    // Rewriting an @embed target invalidates the first export's drawing so ir
+    // re-exports against the newly written file rather than the stale read.
+    const probe = join(app, "embed_probe.cue");
+    await Deno.writeTextFile(
+      probe,
+      '@extern(embed)\npackage jsfb\nimport "strings"\n_r: string @embed(file=#"robots.txt"#, type=text)\nif !strings.Contains(_r, "User-agent:") { code: state: entities: Row: indexes: [{on: "ord"}] }\n',
+    );
+    await Deno.writeTextFile(join(app, "robots.txt"), "stale\n");
+    await build();
+    assertEquals(await Deno.readTextFile(irPath), ir);
+    await Deno.remove(probe);
+    await build();
     assertEquals(await outputs(), before);
 
     const { derive } = await import("./derive.ts");
@@ -309,7 +329,6 @@ Deno.test("Pronto check gates retain consumer rules and track test fixtures", as
       env: {
         ...commandEnv,
         MISE_TRUSTED_CONFIG_PATHS: repo,
-        MISE_LOCKED: "0",
       },
       stdout: "piped",
       stderr: "piped",
@@ -545,7 +564,7 @@ Deno.test("writer packages Activepieces assets and sweeps only stale generated c
     const result = await new Deno.Command(Deno.execPath(), {
       args: ["run", "--config", join(repo, "plugins/pronto/deno.json"), "--allow-all", writer, "."],
       cwd: app,
-      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped", stderr: "piped",
     }).output();
     assert(result.success, new TextDecoder().decode(result.stderr));

@@ -6,6 +6,7 @@ bundle/edge-images_test.ts
 bundle/edge-jwt_test.ts
 bundle/edge-pglite_test.ts
 bundle/edge-reader_test.ts
+bundle/edge-seal_test.ts
 bundle/edge-signin_test.ts
 bundle/edge-static_test.ts
 bundle/prose_test.ts
@@ -27,6 +28,7 @@ installed_test.ts
 integrate-local.test.ts
 ir-md_test.ts
 ir-render_test.ts
+k8s/schema-job_test.ts
 k8s/service-token_test.ts
 launch-watch.test.ts
 links_test.ts

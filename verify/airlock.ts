@@ -26,6 +26,8 @@ export interface AirlockSpec<T = unknown> {
   screen: string;
   /** Role under which the journey executes. */
   role?: string;
+  /** The journey stands in for the sweep's representative visit of its screen. */
+  replaces?: boolean;
   /** Forward journey execution in the browser. Returns state needed for compensation. */
   execute: (page: any, ctx?: AirlockContext<T>) => Promise<T>;
   /** Post-execution assertions. */

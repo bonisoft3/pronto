@@ -68,7 +68,17 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {
+      colors: {
+        primary: *"#111111" | string, secondary: *"#555555" | string, accent: *"#0055aa" | string, danger: *"#aa0000" | string,
+        neutral: *"#fafafa" | string, surface: *"#ffffff" | string, border: *"#dddddd" | string, "surface-muted": *"#efefef" | string
+      }
+      dark: {
+        primary: *"#f5f5f5" | string, secondary: *"#aaaaaa" | string, accent: *"#66aaff" | string, danger: *"#ff6666" | string,
+        neutral: *"#111111" | string, surface: *"#1a1a1a" | string, border: *"#333333" | string, "surface-muted": *"#242424" | string
+      }
+      shell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom"
+    }
     flows: {}
   }
 }
@@ -87,6 +97,38 @@ out: (pronto.#emit & {
 `;
 }
 
+// A read, around the same machine: its `pricing` state invokes `rate`, a GET
+// whose answer moves the row, counting its entries in `pricings`.
+const PRICING = `
+        pending: on: pay: "pricing"
+        pricing: invoke: {
+          src: "rate"
+          onDone: {target: "settled", actions: [{assign: {failure: {raw: "outcome->'data'->>'usd'"}}}]}
+          onError: {target: "failed", actions: [{assign: {failure: {raw: "outcome->>'kind'"}}}]}
+        }
+        settled: type: "final"
+        failed: on: retry: "pending"`;
+
+export const RATE = `rate: {
+      input: {currency: "NEW.failure", day: "2026-11-16"}
+      sink: {origin: "https://rates.example", credential: {scheme: "Bearer", secret: "RATES_KEY"}}
+      request: {method: "GET", path: "/rates/{currency}{?day}"}
+      count: "pricings"
+      incarnation: "lineage"
+      cacheControl: "max-age=3600"
+      got: {retry: {limit: 1}, timeout: {request: 3000}}
+    }`;
+
+/** The payment program with its write replaced by the read `rate`, the count
+ * column it names, and auth, which a read needs; `rate`, `count` and `auth`
+ * change them. */
+export function readProgram({ rate = RATE, count = `{name: "pricings", type: "int32"},\n          {name: "lineage", type: "uuid"},`, auth = true } = {}): string {
+  const program = paymentProgram({ machine: PRICING })
+    .replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          ${count}`)
+    .replace(/    effects: charge: \{[\s\S]*?\n    \}\n/, `    effects: {\n    ${rate}\n    }\n`);
+  return auth ? program.replace("capabilities: {hatches: {},", "capabilities: {auth: {required: false, service: \"/auth\"}, hatches: {},") : program;
+}
+
 export async function cue(args: string[], code: string): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const child = new Deno.Command("cue", { args, stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
   const writer = child.stdin.getWriter();
@@ -96,7 +138,7 @@ export async function cue(args: string[], code: string): Promise<{ success: bool
   return { success: res.success, stdout: new TextDecoder().decode(res.stdout), stderr: new TextDecoder().decode(res.stderr) };
 }
 
-export async function emitFiles(code: string): Promise<Record<string, { text: string }>> {
+export async function emitFiles(code: string): Promise<Record<string, { text: string; data?: any }>> {
   const res = await cue(["export", "-", "-e", "out", "--out", "json"], code);
   if (!res.success) throw new Error(res.stderr);
   return JSON.parse(res.stdout);

@@ -22,7 +22,7 @@ Stack: PostgreSQL holds rows, PostgREST serves them, Conduit and Dapr carry chan
 
 Split: pronto compiles brief → ir → program.cue; omnishell is the terminal (screens, handlers, machines in the browser); mecha is the cluster (Postgres, sync, pipelines, server machines); sayt is the loop (setup … release); bayt is the build graph.
 
-Machines: a statechart over one row's field. In omnishell (`data-machine`) it owns a `tab` or `device` row; in mecha it runs in a Postgres trigger and rolls back an illegal transition. Cortex composes mecha machines into browser sessions and commands.
+Machines: a statechart over one row's field. In omnishell (`data-machine`) it owns a `tab` or `device` row; in mecha it runs in a Postgres trigger and rolls back an illegal transition. Cortex composes mecha machines into browser sessions and commands. Prefer machines for lifecycle coordination with ordering, guards or deadlines, keeping pure algorithms in functions and each machine's state field under one writer. Assert behavior and effects as well as chart paths; don't add services just for coverage.
 
 Bootstrap: yours to run, first, in the app's directory, as [bootstrap](skills/pronto-turn/references/bootstrap.md) says; it installs into that directory and mise's cache, nothing global. Until it has run, no gate has.
 
