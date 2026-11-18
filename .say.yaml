@@ -114,7 +114,7 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue mecha-xstate.test.ts xstate-host.integration.test.ts"
-          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts reads.test.ts token-roles.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts reads.test.ts token-roles.test.ts access-model.test.ts"
           # The sealing the page does, through omnishell's bundled client, whose
           # debug module reads DEBUG as it loads.
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue --allow-env=DEBUG secret-seal.test.ts"
