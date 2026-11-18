@@ -4,7 +4,7 @@
 at build time, admits its exported computation, and writes one DuckDB query per
 selected output. The application executes generated SQL against a supplied
 snapshot. The same authored materialized views can run in the native RisingWave
-engine through [Mecha compute](https://github.com/bonisoft3/mecha/blob/v0.25.2/docs/compute.md);
+engine through [Mecha compute](https://github.com/bonisoft3/mecha/blob/v0.26.0/docs/compute.md);
 Pages and Cloudflare keep the snapshot adapter. Materialization of an output does not change
 its generated snapshot query.
 
