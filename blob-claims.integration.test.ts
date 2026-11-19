@@ -42,22 +42,13 @@ async function raw(port: string | undefined, head: string, body = ""): Promise<{
   return { status: Number(answer.split(" ")[1]), body: answer.slice(answer.indexOf("\r\n\r\n") + 4) };
 }
 
-async function doorRoutes(): Promise<string> {
-  const door = await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url));
-  const route = (name: string) => {
-    const found = door.match(new RegExp(`  handle /${name}/\\* \\{\\n[\\s\\S]*?\\n  \\}\\n`))?.[0];
-    if (!found) throw new Error(`the door has no ${name} route`);
-    return found;
-  };
-  return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n(bounded-blobs) {\n}\n:8080 {\n${route("blob-claim")}${route("blobs")}${route("crud")}\n}\n`;
-}
-
 Deno.test({ name: "a session writes only the keys it claimed, once, and reads back the same bytes", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
   const files = await emitFiles(paymentProgram({ vendored: "" }).replace("capabilities: {hatches: {},", "capabilities: {blobs: true, hatches: {},"));
   const tag = crypto.randomUUID().slice(0, 8);
   const network = `blobs-${tag}`, db = `blobs-pg-${tag}`, rest = `blobs-rest-${tag}`, store = `blobs-s3-${tag}`, door = `blobs-door-${tag}`;
   const dir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${dir}/Caddyfile`, await doorRoutes());
+  // The door the app is given, whole: its routes in the snippet every site block imports.
+  await Deno.writeTextFile(`${dir}/Caddyfile`, files["docker/Caddyfile"].text);
   const psql = (sql: string) => run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
   const must = async (r: Promise<{ ok: boolean; err: string }>) => {
     const done = await r;
@@ -78,7 +69,7 @@ Deno.test({ name: "a session writes only the keys it claimed, once, and reads ba
       "-e", "PGRST_DB_URI=postgres://postgres:pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", "-e", `PGRST_JWT_SECRET=${SECRET}`, pinned("postgrest/postgrest")]));
     await must(run("docker", ["run", "-d", "--rm", "--name", store, "--network", network, "--network-alias", "rclone-s3", "--entrypoint", "sh", pinned("rclone/rclone"),
       "-c", "mkdir -p /data/mecha-objects && exec rclone serve s3 --addr=0.0.0.0:3900 --vfs-cache-mode=off /data"]));
-    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
+    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-e", "ORIGIN=http://door.example", "-e", "ELECTRIC_SECRET=unused", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
       pinned("caddy"), "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]));
     const port = (await run("docker", ["port", door, "8080"])).out.split(":").pop();
     const at = (path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:${port}${path}`, init);

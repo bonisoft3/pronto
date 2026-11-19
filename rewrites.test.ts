@@ -58,10 +58,10 @@ Deno.test("a rewrite is the door asking crud for the destination, as /crud itsel
   // escaped. A key of letters alone and a value's named groups are placed as
   // the source's parameters are.
   assertStringIncludes(door, "    path_regexp rewrite_payment_export ^/exports/([A-Za-z0-9._~-]+)$\n    expression `path_regexp('rewrite_payment_export_path', r\"^/exports/([A-Za-z0-9._~-]+)$\") && !{http.regexp.rewrite_payment_export_path.1}.matches(");
-  assertStringIncludes(door, ") && vars_regexp('rewrite_payment_export_has0', '\\{http.request.uri.query.token}', r\"(?s)^(.+)$\") && {http.request.uri.query.token} != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)(?:t|%(?i:74))(?:o|%(?i:6f))(?:k|%(?i:6b))(?:e|%(?i:65))(?:n|%(?i:6e))(?:=[^&]*)?&(?:.*&)?(?:t|%(?i:74))(?:o|%(?i:6f))(?:k|%(?i:6b))(?:e|%(?i:65))(?:n|%(?i:6e))(?:[=&]|$)\") && ");
-  assertStringIncludes(door, " && vars_regexp('rewrite_payment_export_has1', '\\{http.request.uri.query.job.id}', r\"^(?:(?<job_id>[0-9a-f-]{36})(?:\\.(?<ext>pdf|xlsx))?)$\") && ");
+  assertStringIncludes(door, ") && vars_regexp('rewrite_payment_export_has0', '\\x7bhttp.request.uri.query.token}', r\"(?s)^(.+)$\") && {http.request.uri.query.token} != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)(?:t|%(?i:74))(?:o|%(?i:6f))(?:k|%(?i:6b))(?:e|%(?i:65))(?:n|%(?i:6e))(?:=[^&]*)?&(?:.*&)?(?:t|%(?i:74))(?:o|%(?i:6f))(?:k|%(?i:6b))(?:e|%(?i:65))(?:n|%(?i:6e))(?:[=&]|$)\") && ");
+  assertStringIncludes(door, " && vars_regexp('rewrite_payment_export_has1', '\\x7bhttp.request.uri.query.job.id}', r\"^(?:(?<job_id>[0-9a-f-]{36})(?:\\.(?<ext>pdf|xlsx))?)$\") && ");
   assertStringIncludes(door, "(?:j|%(?i:6a))(?:o|%(?i:6f))(?:b|%(?i:62))(?:\\.|%(?i:2e))(?:i|%(?i:69))(?:d|%(?i:64))(?:[=&]|$)\") && ");
-  assertStringIncludes(door, " && vars_regexp('rewrite_payment_export_has2', '\\{http.request.uri.query.v}', r\"^(?:2)$\") && ");
+  assertStringIncludes(door, " && vars_regexp('rewrite_payment_export_has2', '\\x7bhttp.request.uri.query.v}', r\"^(?:2)$\") && ");
   assertStringIncludes(door, "      rewrite * /rpc/payment_export?kind={re.rewrite_payment_export.1}&job_id={re.rewrite_payment_export_has1.job_id}&ext={re.rewrite_payment_export_has1.ext}&token={re.rewrite_payment_export_has0.1}\n");
   // What a function's destination places is no PostgREST operand, which would
   // filter what the function returns and leave it uncalled with the value: each
@@ -75,6 +75,8 @@ Deno.test("a rewrite is the door asking crud for the destination, as /crud itsel
   assertStringIncludes(door, "      rewrite * /payment_list?select={re.rewrite_payment_by_has0.1}&{query}\n");
   // A function that places no parameter, and a table or view, state no such condition.
   assertEquals(door.match(/    expression `/g)?.length, 3);
+  // No backslash stands before a brace in what is emitted: the import of the snippet would take it.
+  assertEquals(/\\[{}]/.test(door), false);
   // What the client asked is set on the upstream request, where neither its
   // own header nor its Connection reaches: the method it used and the target
   // as it sent it, as forward_auth states them.
@@ -114,6 +116,9 @@ Deno.test("what Next.js's rewrites allow and this subset does not is refused, no
     [`{list: {source: "/expense/payments", destination: "/crud/payment_list", has: [{type: "query", key: "x", value: "a(?=b)"}]}}`, "[]", "error parsing regexp: invalid or unsupported Perl syntax: `(?=`"],
     [`{list: {source: "/expense/payments", destination: "/crud/payment_list", has: [{type: "query", key: "x", value: "a\\"b"}]}}`, "[]", `invalid value "a\\"b" (out of bound`],
     [`{list: {source: "/expense/payments", destination: "/crud/payment_list", has: [{type: "query", key: "x", value: "a{host}"}]}}`, "[]", `invalid value "a{host}" (out of bound`],
+    // A brace escaped by a backslash loses it where the door's snippet is imported, and would count what it was to spell.
+    [`{list: {source: "/expense/payments", destination: "/crud/payment_list", has: [{type: "query", key: "x", value: "a\\\\{2\\\\}b"}]}}`, "[]", `(out of bound`],
+    [`{list: {source: "/expense/payments", destination: "/crud/payment_list", has: [{type: "query", key: "x", value: "a\\\\}"}]}}`, "[]", `(out of bound`],
     // A key's own parameter is Next.js's, the key's letters: the refusal says what the source and \`has\` give.
     [`{list: {source: "/exports/pdf", methods: ["GET"], has: [{type: "query", key: "job_id"}], destination: "/crud/rpc/download?job_id=:job_id"}}`, "[]", "rewrite list: the destination names :job_id, where the source and \`has\` give :jobid"],
     [`{list: {source: "/exports/:kind", methods: ["GET"], has: [{type: "query", key: "page2"}, {type: "query", key: "Token"}, {type: "query", key: "42"}, {type: "query", key: "v", value: "(?<major>[0-9]+)"}], destination: "/crud/rpc/download?page=:page2"}}`, "[]", "rewrite list: the destination names :page2, where the source and \`has\` give :kind, :page, :Token, :major"],
@@ -178,6 +183,8 @@ Deno.test("what Next.js's rewrites allow and this subset does not is refused, no
       a: {source: "/exports/:kind", methods: ["GET"], has: [{type: "query", key: "job_id"}, {type: "query", key: "dlToken"}, {type: "query", key: "page2"}, {type: "query", key: "Token"}, {type: "query", key: "42"}], destination: "/crud/rpc/download?job_id=:jobid&token=:dlToken&page=:page&t=:Token&kind=:kind"}
     }`)))["docker/Caddyfile"].text;
   assertStringIncludes(named, "      rewrite * /rpc/download?job_id={re.rewrite_a_has0.1}&token={re.rewrite_a_has1.1}&page={re.rewrite_a_has2.1}&t={re.rewrite_a_has3.1}&kind={re.rewrite_a.1}\n");
+  // A brace that counts, and one a class spells, are the expression's as written.
+  await emitFiles(rewritten(`{a: {source: "/exports/pdf", has: [{type: "query", key: "x", value: "[0-9a-f]{8}[{][}]\\\\x7B"}], destination: "/crud/payment_list"}}`));
   // The same path under methods that do not meet is two rewrites.
   await emitFiles(rewritten(`{a: {source: "/expense/:id", destination: "/crud/payment_list", methods: ["GET"]}, b: {source: "/expense/:id", destination: "/crud/payment", methods: ["PATCH", "DELETE"]}}`));
 });

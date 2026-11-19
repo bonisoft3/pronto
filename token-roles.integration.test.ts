@@ -62,14 +62,14 @@ async function hs256(claims: unknown, key = SECRET, header: Record<string, unkno
 
 Deno.test({ name: "a client calls the function its declared role alone may execute, with a token only the operator's registration names", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
   const files = await emitFiles(program);
+  // The door the app is given, whole: its rewrites in the snippet every site block imports.
   const door = files["docker/Caddyfile"].text;
-  const blocks = door.match(/  @rewrite_\w+ \{\n[\s\S]*?\n  \}\n  handle @rewrite_\w+ \{\n[\s\S]*?\n  \}\n/g);
-  if (blocks?.length !== 2) throw new Error("the door does not hold the two rewrites");
+  if (door.match(/  @rewrite_\w+ \{\n/g)?.length !== 2) throw new Error("the door does not hold the two rewrites");
 
   const tag = crypto.randomUUID().slice(0, 8);
   const network = `services-${tag}`, db = `services-pg-${tag}`, rest = `services-rest-${tag}`, gate = `services-door-${tag}`;
   const dir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${dir}/Caddyfile`, `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n:8080 {\n${blocks.join("")}  handle {\n    respond "no rewrite" 404\n  }\n}\n`);
+  await Deno.writeTextFile(`${dir}/Caddyfile`, door);
   const psql = (sql: string) => run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-h", "127.0.0.1"], sql);
   const must = async (r: Promise<{ ok: boolean; err: string }>) => {
     const done = await r;
@@ -196,7 +196,7 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
         "-e", `PGRST_JWT_SECRET=${keySet(SECRET, trusted)}`, "-e", `PGRST_JWT_AUD=${AUDIENCE}`, pinned("postgrest/postgrest")]));
     };
     await startCrud(declaredSetting);
-    await must(run("docker", ["run", "-d", "--rm", "--name", gate, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
+    await must(run("docker", ["run", "-d", "--rm", "--name", gate, "--network", network, "-p", "127.0.0.1::8080", "-e", "ORIGIN=http://door.example", "-e", "ELECTRIC_SECRET=unused", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
       pinned("caddy"), "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]));
     const port = (await run("docker", ["port", gate, "8080"])).out.split(":").pop();
     const residual = async (token?: string, id = "00000000-0000-0000-0000-000000000001") => {

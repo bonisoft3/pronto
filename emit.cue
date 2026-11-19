@@ -6146,7 +6146,14 @@ _pgrollDir: "services/database/pgroll"
 				// expression matches the path itself, since one condition does
 				// not see what another matcher of the set captured.
 				let guarded = [if strings.HasPrefix(r.destination, "/crud/rpc/") for i, p in params if list.Contains(tokens, p) {"!{http.regexp.\(matcher)_path.\(i+1)}.matches(r\"\(_rewriteOperand)\")"}]
-				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\\(h.value)', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if list.Contains(tokens, g.name) {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
+				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\x7b\(strings.TrimPrefix(h.value, "{"))', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if list.Contains(tokens, g.name) {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
+				// `vars_regexp` is told the placeholder to read as a string,
+				// which the expression must hold as written, where a
+				// placeholder anywhere else in it is replaced by its value.
+				// So its opening brace is spelled \x7b, CEL's own escape: the
+				// backslash before a brace that Caddy's expression takes for
+				// one is taken first by the import of the snippet this is
+				// written in, and the placeholder would be replaced after all.
 				// The terms are read in the order written, each match setting
 				// its captures before the next term reads them: what the
 				// door's Caddy does (cluster.cue pins it), not what CEL

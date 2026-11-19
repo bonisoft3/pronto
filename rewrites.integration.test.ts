@@ -47,17 +47,12 @@ const program = paymentProgram().replace("    effects: charge:", `    rewrites: 
     }
     effects: charge:`);
 
-/** The door's emitted rewrites and its own routes to PostgREST, over a stand-in for the snippet the release's Caddyfile imports. */
-async function doorRewrites(): Promise<string> {
+/** The door an app is given, whole: its rewrites inside the snippet every site block imports, as a release runs it. */
+async function doorFile(): Promise<string> {
   const door = (await emitFiles(program))["docker/Caddyfile"].text;
-  const own = ["crud", "signal", "blob-claim", "blobs"].map((name) => {
-    const found = door.match(new RegExp(`  handle /${name}/\\* \\{\\n[\\s\\S]*?\\n  \\}\\n`))?.[0];
-    if (!found) throw new Error(`the door does not answer /${name}`);
-    return found;
-  });
-  const rewrites = door.match(/  @rewrite_\w+ \{\n[\s\S]*?\n  \}\n  handle @rewrite_\w+ \{\n[\s\S]*?\n  \}\n/g);
-  if (rewrites?.length !== 16) throw new Error("the door does not hold the sixteen rewrites");
-  return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n(bounded-blobs) {\n}\n:8080 {\n${rewrites.join("")}${own.join("")}  handle {\n    respond "no rewrite" 404\n  }\n}\n`;
+  if (door.match(/  @rewrite_\w+ \{\n/g)?.length !== 16) throw new Error("the door does not hold the sixteen rewrites");
+  if (!/\n\(app\) \{\n[\s\S]*  @rewrite_\w+ \{\n[\s\S]*\n\}\n[\s\S]*\n  import app\n/.test(door)) throw new Error("the rewrites are not in the snippet the door's sites import");
+  return door;
 }
 
 /** A request written to the socket as given, for what fetch does not send: a Connection header naming others, an absolute-form or an unnormalized target. */
@@ -81,7 +76,7 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
   const tag = crypto.randomUUID().slice(0, 8);
   const network = `rewrites-${tag}`, db = `rewrites-pg-${tag}`, rest = `rewrites-rest-${tag}`, door = `rewrites-door-${tag}`;
   const dir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${dir}/Caddyfile`, await doorRewrites());
+  await Deno.writeTextFile(`${dir}/Caddyfile`, await doorFile());
   const psql = (sql: string) => run("docker", ["exec", "-i", db, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
   const must = async (r: Promise<{ ok: boolean; err: string }>) => {
     const done = await r;
@@ -138,7 +133,7 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       GRANT EXECUTE ON FUNCTION payment_rows(text), payment_export(text, text), payment_total(uuid), payment_approve(), payment_echo(), payment_echo(json), payment_search(), payment_told(), signal_in(json), claim_upload(), upload_allowed(text) TO anon, app_user;`));
     await must(run("docker", ["run", "-d", "--rm", "--name", rest, "--network", network, "--network-alias", "crud",
       "-e", "PGRST_DB_URI=postgres://postgres:pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", "-e", `PGRST_JWT_SECRET=${SECRET}`, pinned("postgrest/postgrest")]));
-    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
+    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-e", "ORIGIN=http://door.example", "-e", "ELECTRIC_SECRET=unused", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
       pinned("caddy"), "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]));
     const port = (await run("docker", ["port", door, "8080"])).out.split(":").pop();
     // A POST carries `{}` unless told otherwise; any other method carries a body only when given one.
@@ -152,6 +147,8 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       await new Promise((r) => setTimeout(r, 500));
     }
     const one = "00000000-0000-0000-0000-000000000001";
+    // What the door answers a request no rewrite and no route of its own takes: its bare 404, where PostgREST's holds a body.
+    const unanswered = { status: 404, body: "" };
 
     await t.step("a view is read, with the request's own query as PostgREST's", async () => {
       assertEquals((await ask("GET", "/expense/payments")).body.length, 2);
@@ -191,8 +188,8 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       assertEquals(await ask("DELETE", `/expense/payments/${one}`), deleted);
       assertEquals(await ask("DELETE", `/expense/payments/${one}`, { "content-type": "application/json" }), deleted);
       // `methods` is the client's method: the POST the function is called by is not one this rewrite names.
-      assertEquals(await ask("POST", `/expense/payments/${one}`), { status: 404, body: "no rewrite" });
-      assertEquals(await ask("DELETE", `/expense/payments/${one}/approve`), { status: 404, body: "no rewrite" });
+      assertEquals(await ask("POST", `/expense/payments/${one}`), unanswered);
+      assertEquals(await ask("DELETE", `/expense/payments/${one}/approve`), unanswered);
     });
     await t.step("the forwarded headers are the door's: what a client sends in them is replaced", async () => {
       const spoofed = { "x-forwarded-method": "GET", "x-forwarded-uri": "/expense/payments/another?admin=1" };
@@ -298,7 +295,7 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
         const direct = await get(`/crud/rpc/payment_rows?scope=${value}`);
         assertEquals(direct.status === 200 ? rows(direct).some((r: { asked: string }) => r.asked === sent) : false, false, sent);
         // so the rewrite is not this request's.
-        assertEquals(await get(`/exports/rows?scope=${value}`), { status: 404, body: "no rewrite" }, sent);
+        assertEquals(await get(`/exports/rows?scope=${value}`), unanswered, sent);
       }
       // Any other value is the argument, a dot in it or an operator's letters: at /crud and through the rewrite alike.
       for (const sent of ["own", "john.doe@x.com", "1.5", "v1.2", ".eq.own", "eq", "EQ.own", "Not.eq.own", "x.eq.own", "noteq.own", "island.own", "inside.(own)", "equal.own", "liked.own", "eq(some).own", "eq(any)own", "fts().own", "fts(a-b).own", " eq.own", "nota.eq.own"]) {
@@ -308,15 +305,15 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       }
       // A parameter of the path is held to the same, as the door matched it, whatever the client's spelling;
       for (const segment of ["eq.own", "not.eq.own", "is.null", "in.own", "like.own", "isdistinct.own", "fts.own", "neq.own", "not.own", "%65q.own", "eq%2Eown", "x/../eq.own"]) {
-        assertEquals(await get(`/exports/rows/${segment}`), { status: 404, body: "no rewrite" }, segment);
+        assertEquals(await get(`/exports/rows/${segment}`), unanswered, segment);
       }
-      assertEquals(await get("/expense/payments/eq.1/total"), { status: 404, body: "no rewrite" });
+      assertEquals(await get("/expense/payments/eq.1/total"), unanswered);
       // and a segment with a dot, or an operator's letters, is the argument as ever.
       for (const segment of ["own", "1.5", "v1.2", "john.doe", "eq", "EQ.own", "x.eq.own", "noteq.own", "island.own", "equal.own", ".eq.own"]) {
         assertEquals(rows(await get(`/exports/rows/${segment}`)), [{ scope: "own", asked: segment }, { scope: "all", asked: segment }], segment);
       }
       // A group of a value is held to the same, being what the destination places.
-      assertEquals(await get("/exports/pdf?job_id=eq.j1&token=t1"), { status: 404, body: "no rewrite" });
+      assertEquals(await get("/exports/pdf?job_id=eq.j1&token=t1"), unanswered);
 
       // The door holds the value, and the key is the destination's: one PostgREST keeps for itself, or
       // reads as more than a name, is no argument whatever its value, so no destination places a parameter
@@ -351,17 +348,17 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
         // A pair the door does not read, a `;` in it or an escape that is none, is no key.
         "/exports/pdf?job_id=j1&token=a;b", "/exports/pdf?job_id=j1&token=%zz", "/exports/pdf?job_id=j1;token=t1",
       ]) {
-        assertEquals(await raw(port, `GET ${target} HTTP/1.1\r\nHost: door\r\nConnection: close`), { status: 404, body: "no rewrite" }, target);
+        assertEquals(await raw(port, `GET ${target} HTTP/1.1\r\nHost: door\r\nConnection: close`), unanswered, target);
       }
       // The methods are the rewrite's as ever.
-      assertEquals(await ask("POST", "/exports/pdf?job_id=j1&token=t1"), { status: 404, body: "no rewrite" });
+      assertEquals(await ask("POST", "/exports/pdf?job_id=j1&token=t1"), unanswered);
       // A key that only begins or ends as the named one is another key.
       assertEquals((await ask("GET", "/exports/pdf?job_id=j1&token=t1&xtoken=b&token2=c&tokens")).body.token, "t1");
     });
     await t.step("`has` is a condition of a table or view's rewrite too, whose query the client's follows as ever", async () => {
       assertEquals(await ask("GET", "/expense/settled?select=status"), { status: 200, body: [{ status: "settled" }] });
-      assertEquals(await ask("GET", "/expense/settled?select=id"), { status: 404, body: "no rewrite" });
-      assertEquals(await ask("GET", "/expense/settled"), { status: 404, body: "no rewrite" });
+      assertEquals(await ask("GET", "/expense/settled?select=id"), unanswered);
+      assertEquals(await ask("GET", "/expense/settled"), unanswered);
     });
     await t.step("a function takes the destination's query alone and reads the client's from X-Forwarded-Uri", async () => {
       // A repeated key reaches the function whole, and binds to none of its arguments.
@@ -384,7 +381,7 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
     });
     await t.step("what no rewrite names is not a rewrite's to answer", async () => {
       for (const [method, path] of [["POST", "/expense/payments"], ["GET", `/expense/payments/${one}/approve`], ["GET", "/expense/payments/a%26select%3Dtotal"], ["GET", "/payment"], ["GET", `/expense/payments/${one}/total/more`]]) {
-        assertEquals(await ask(method, path), { status: 404, body: "no rewrite" }, `${method} ${path}`);
+        assertEquals(await ask(method, path), unanswered, `${method} ${path}`);
       }
     });
   } finally {

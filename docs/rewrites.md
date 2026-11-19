@@ -154,7 +154,8 @@ Three things are the door's and PostgREST's, not Next.js's:
   does a key with an empty value, nor one in a pair the door does not read, a `;`
   in it or an escape that is none (`%zz`);
 - `value` is Go's regular expression, which has no lookaround and no backreference,
-  and holds no quote, no backquote and no brace before a letter;
+  and holds no quote, no backquote, no brace before a letter and no backslash before
+  a brace: a brace that is itself matched is `[{]` or `\x7B`;
 - a value a function's destination places, a parameter of the path as much as one
   of `has`, is no rewrite's where it opens as one of PostgREST's operators (`eq.1`,
   `not.is.null`, `in.(a,b)`, `like(any).{a,b}`). PostgREST reads such a value as a

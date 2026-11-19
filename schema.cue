@@ -1349,11 +1349,13 @@ import (
 // would have the later replace, is refused, as is a key two items name.
 // The expression is the door's, Go's: what it does not take (a lookaround,
 // a backreference) is refused, as is what the door's file would read as
-// its own (a quote, a backquote, a brace before a letter).
+// its own (a quote, a backquote, a brace before a letter) or lose where its
+// snippet is imported (the backslash before a brace: a brace itself is
+// `[{]` or `\x7B`).
 #RewriteHas: {
 	type:   "query"
 	key:    =~"^[A-Za-z0-9_.-]+$"
-	value?: string & !="" & !~"[\"`\n\r]|\\{[A-Za-z$]"
+	value?: string & !="" & !~"[\"`\n\r]|\\{[A-Za-z$]|\\\\[{}]"
 	if value != _|_ {
 		_compiles: regexp.Match("^(?:\(value))$", "")
 	}

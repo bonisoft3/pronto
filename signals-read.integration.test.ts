@@ -30,15 +30,6 @@ async function run(cmd: string, args: string[], stdin?: string) {
   return { ok: res.success, out: new TextDecoder().decode(res.stdout).trim(), err: new TextDecoder().decode(res.stderr) };
 }
 
-/** The door's own route and its /crud, over a stand-in for the snippet the release's Caddyfile imports. */
-async function doorRoute(): Promise<string> {
-  const door = await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url));
-  const route = door.match(/  handle \/signal\/\* \{\n[\s\S]*?\n  \}\n/)?.[0];
-  const crud = door.match(/  handle \/crud\/\* \{\n[\s\S]*?\n  \}\n/)?.[0];
-  if (!route || !crud) throw new Error("the door has no signal route");
-  return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n:8080 {\n${route}${crud}\n}\n`;
-}
-
 /** The airlock's own read, run in a process of its own config: each job performed, answered as JSON in order. */
 const DRIVER = `
   import pg from "pg";
@@ -60,7 +51,8 @@ Deno.test({ name: "a signal moves a row into a read's state, whose answer is del
   const tag = crypto.randomUUID().slice(0, 8);
   const network = `signals-read-${tag}`, db = `signals-read-pg-${tag}`, rest = `signals-read-rest-${tag}`, door = `signals-read-door-${tag}`;
   const dir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${dir}/Caddyfile`, await doorRoute());
+  // The door the app is given, whole: its routes in the snippet every site block imports.
+  await Deno.writeTextFile(`${dir}/Caddyfile`, files["docker/Caddyfile"].text);
   await Deno.writeTextFile(`${dir}/driver.ts`, DRIVER);
   // The sink, standing where the airlock's daprd stands.
   const asked: string[] = [];
@@ -100,7 +92,7 @@ Deno.test({ name: "a signal moves a row into a read's state, whose answer is del
       INSERT INTO payment (id, status, total, failure) VALUES ('${one}', 'pending', 1, 'USD'), ('${two}', 'pending', 1, 'USD'), ('${three}', 'pending', 1, 'USD');`));
     await must(run("docker", ["run", "-d", "--rm", "--name", rest, "--network", network, "--network-alias", "crud",
       "-e", "PGRST_DB_URI=postgres://postgres:pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", pinned("postgrest/postgrest")]));
-    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
+    await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-e", "ORIGIN=http://door.example", "-e", "ELECTRIC_SECRET=unused", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
       pinned("caddy"), "caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]));
     const port = (await run("docker", ["port", door, "8080"])).out.split(":").pop();
     const pgPort = (await run("docker", ["port", db, "5432"])).out.split("\n")[0].split(":").pop();
