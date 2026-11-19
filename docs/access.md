@@ -161,12 +161,96 @@ CUE data. `001_roles.sql`, `002_grants.sql` and the grant in
 `008_publication.sql` render from this model in [[../emit.cue]]. It is derived
 from the program; it is not an operator-supplied access policy.
 
-The model is not a database-state audit or a complete provisioning contract.
-The SQL does not enforce every negative attribute on an existing built-in
-role, such as `superuser: false`. Membership options and grant ownership,
-function/column grants, the tenancy floor and token-role reconciliation are
-not fully represented. Inspecting this value therefore does not establish
-that an existing database conforms to Pronto's access requirements.
+Generated provisioning (the default) is not a database-state audit or a
+complete provisioning contract. The SQL does not enforce every negative
+attribute on an existing built-in role, such as `superuser: false`. Membership
+options and grant ownership, function/column grants, the tenancy floor and
+token-role reconciliation are not fully represented. Inspecting this value
+therefore does not establish that an existing database conforms to Pronto's
+access requirements; [checked provisioning](#generated-or-checked) does
+that for the parts below.
+
+### Generated or checked
+
+`state.provisioning` says who provisions the roles. Absent, or `"generated"`,
+it is pronto's migrations, as above. `"checked"` is the instance's owner: the
+database arrives with the model's roles, memberships, settings and schema
+grants already in place, and every release compares the database with the model
+before its migrations, and stops at any difference. It is an app knob, not a
+release one, since compose, k8s and gcp share one database image and its initdb
+directory. The program needs a server tier. Nothing about the emitted tables,
+policies or table grants changes.
+
+`001_roles.sql` holds the check, so a fresh database that was not provisioned is
+refused before any table exists, followed by the grants on objects the migrating
+login owns (electric's tables and default privileges). The cluster's
+`reconcile.roles` holds the same check ahead of the token roles' list, which
+mecha's migrate runs before the ledger on every release (`roles.sql`, before
+`pgroll init`), so a refused release has written no ledger row. In checked mode
+no emitted statement creates a role, sets an attribute or setting, grants
+membership, or grants on the schema.
+
+The check is one `DO` block, rendered from the same `#access` value as
+generated mode, and reads catalogs any login can read. On a difference it raises
+with every statement that fixes it in `DETAIL`, in an order the owner can run
+top to bottom, and a `HINT` that says so. Against an empty database, `DETAIL` is
+the owner's whole provisioning script, which is also emitted as
+`services/database/provision.sql`.
+
+| Phase | Compared | Fix |
+|---|---|---|
+| role | each model role exists with all seven attributes (`LOGIN`, `INHERIT`, `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `BYPASSRLS`, `REPLICATION`) | `CREATE ROLE` or `ALTER ROLE ... WITH` all seven |
+| owner | no model role owns the database | `ALTER DATABASE ... OWNER TO` the migrating login |
+| member | each `memberOf` edge exists | `GRANT` |
+| extra | a model role belongs to nothing beyond its `memberOf` | `REVOKE ... GRANTED BY` each grantor |
+| setting | each role-wide setting has the model's value | `ALTER ROLE ... SET` |
+| override | no database-level setting hides one | `ALTER ROLE ... IN DATABASE ... RESET` |
+| schema | each schema grant is held, and no model role, nor PUBLIC, holds `CREATE` on it | `GRANT`, `REVOKE CREATE` |
+| login | the migrating login has `public` first on its search path, `USAGE` and `CREATE` on it, and bypasses RLS | `ALTER ROLE`, `GRANT` |
+
+The migrating login need not own the roles: `NOSUPERUSER` and
+`NOCREATEROLE` suit it. Beyond what the check holds it needs `LOGIN`, `CREATE`
+on the database (mecha's tenancy floor, pgroll's own schema, and the schemas
+graphile_worker and airlock create), ownership of the app's tables, which it
+gets by creating them, and the extensions `000_extensions.sql` names, created
+beforehand by the owner: `CREATE EXTENSION IF NOT EXISTS` finds one that exists
+without asking for a privilege. It needs `BYPASSRLS` because validation
+migrations and machine writers run as it under forced row-level security.
+
+The check refuses any difference, not only a missing one. A setting that is the
+same duration spelled differently (`'5000'` for `'5s'`) differs, and is refused.
+Membership options (`inherit_option`, `set_option`), roles outside the model
+that are members of model roles, passwords (`pg_roles` hides them; they are the
+deployment's secrets) and request roles' `search_path` (PostgREST sets it per
+request) are not compared. A provider that names an attribute differently, such
+as RDS's `rds_replication` for `REPLICATION`, fails the role phase; that
+equivalence is a model change argued as a decision, not a loosening of the
+check.
+
+On k8s and gcp the "already built" branch of the initdb Job re-runs 005-008
+before migrate's check, so a role dropped since the last release fails 006's
+policies with PostgreSQL's own error before the check names the fix. The
+release still fails.
+
+Named follow-ups, none taken by the program that turns `checked` on:
+
+- *Local stack for a checked app.* mecha's database service runs initdb, whose
+  001 refuses an unprovisioned database, so a checked app has no local stack
+  until that service runs the owner's script.
+- *Role passwords.* mecha's `899_role_passwords.sh` runs `ALTER ROLE ... PASSWORD`
+  at initdb, which needs `CREATEROLE`; a checked database needs mecha to skip
+  it where the owner provisioned the roles.
+- *External `DATABASE_URL`.* A release target that takes the owner's database
+  instead of creating one; gcp creates its own Cloud SQL and its
+  `ALTER ROLE postgres BYPASSRLS` and token-role grants need `CREATEROLE`, so
+  gcp stays generated.
+- *A schema other than `public`.* The model fixes `schema: "public"` and mecha's
+  ledger names it, so `CREATE` on `public` is a requirement the login phase
+  states, not one it removes.
+- *Re-running 001 on the already-built branch.* Closing the gap above needs a
+  release-schema field naming the re-run list.
+- *Function and column grants, `mecha.token_role` rows and extensions.* The
+  check holds none of them.
 
 ## Declared token roles
 
