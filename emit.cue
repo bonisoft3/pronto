@@ -2241,7 +2241,7 @@ _sqlType: {
 		sql:   x.sql
 		key:   x.key
 		value: x.value
-		fix:   "ALTER ROLE \(x.sql) SET \(x.key) = '\(x.value)';"
+		fix:   "ALTER ROLE \(x.sql) SET \(x.key) = \((#sqlLit & {v: x.value}).out);"
 	}]
 	_grants: [for g in access.schemaGrants for p in g.privileges for t in g.to {
 		role:      t
