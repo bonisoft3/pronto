@@ -167,6 +167,18 @@ Deno.test("release files retain content validators by default", async () => {
   if (servers.length !== 2 || !/\(files-release\) \{\n\s*file_server \{\n\s*etag_file_extensions \.etag\n\s*hide \*\.etag\n/.test(caddyfile)) throw new Error(`release file serving lost its content validator:\n${caddyfile}`);
 });
 
+Deno.test("a released door answers HTML with no-transform, and both Caddyfiles compress glTF models", async () => {
+  const ssg = await ssgDefault();
+  if (!ssg.ok) throw new Error(ssg.out);
+  const { caddyfile } = JSON.parse(ssg.out) as { caddyfile: string };
+  if (!caddyfile.includes("  header {\n    match header Content-Type text/html*\n    +Cache-Control no-transform\n    defer\n  }\n")) throw new Error(`the door does not answer HTML with no-transform:\n${caddyfile}`);
+  for (const text of [caddyfile, await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url))]) {
+    for (const type of ["model/gltf-binary*", "model/gltf+json*"]) {
+      if (!text.includes(`header Content-Type ${type}`)) throw new Error(`encode does not match ${type}`);
+    }
+  }
+});
+
 Deno.test("the door advertises h3 on its published host port over both TCP and UDP", async () => {
   const ssg = await ssgDefault();
   if (!ssg.ok) throw new Error(ssg.out);

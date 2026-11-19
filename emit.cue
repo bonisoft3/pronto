@@ -5939,8 +5939,18 @@ _pgrollDir: "services/database/pgroll"
 					} {"/\(f)"}])
 					"  @\(m) {\n    header_regexp Host ^\(s)\\.\n    path \(strings.Join(paths, " "))\n  }\n  header @\(m) Content-Security-Policy \"sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' {$ORIGIN}\"\n"
 				}], "")
+				// A released page leaves the door as written: no-transform keeps a proxy in front
+				// from rewriting it, such as injecting an analytics beacon, a script from another
+				// origin this policy refuses (a console error on every page). Cloudflare, for one,
+				// skips that and its other rewrites of HTML on no-transform
+				// (developers.cloudflare.com/web-analytics/faq). A field of its own, beside
+				// whatever Cache-Control the page's handler sets. The exception: an answer on an
+				// _immutable-* path has its Cache-Control replaced by the immutable rule (>), so
+				// no-transform does not reach it; today those files are CSS, JSON and text,
+				// never HTML.
+				let untransformed = [if E.cluster.meta.served != _|_ {"  header {\n    match header Content-Type text/html*\n    +Cache-Control no-transform\n    defer\n  }\n"}, ""][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(subdomainRealms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(subdomainRealms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)\(untransformed)"
 			}, ""][0]
 			// A container hatch's door route, ahead of the platform's own
 			// routes' tail: dialed like every upstream, at its
