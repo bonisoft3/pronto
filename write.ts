@@ -565,8 +565,9 @@ async function timed<T>(phase: string, run: () => Promise<T>): Promise<T> {
 }
 
 // Emitted markup feeds derivation. A second pass is needed only when emission
-// or the derived declarations moved; unchanged declarations and bytes cannot
-// change what the first pass read. Every generation still derives and exports once.
+// or the derived declarations moved, or minting rewrote the program and ir the
+// first pass hashed; unchanged declarations and bytes cannot change what the
+// first pass read. Every generation still derives and exports once.
 async function generate(): Promise<void> {
   timings.length = 0;
   await writeMiseLocal();
@@ -574,7 +575,7 @@ async function generate(): Promise<void> {
   const before = await derivedText();
   let read = await timed("derive", () => derive(appDir));
   // An entity's writers come from the screens, so ids are minted once a derivation exists.
-  await mint(appDir, Object.values(read.entities));
+  const minted = await mint(appDir, Object.values(read.entities));
   const settled = await derivedText();
   const first = await timed("export", exportEmission);
   let currentEmission = first.emission;
@@ -582,7 +583,7 @@ async function generate(): Promise<void> {
   let derivations = 1;
   // A drawing is stale only when CUE's own package files or embeds moved.
   let drawn: Drawing | undefined = emission.cueWrote ? undefined : first.drawing;
-  if (emission.changed || settled !== before) {
+  if (emission.changed || settled !== before || minted) {
     read = await timed("derive", () => derive(appDir));
     derivations++;
     if ((await derivedText()) !== settled) {

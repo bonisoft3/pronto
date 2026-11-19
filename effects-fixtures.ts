@@ -129,6 +129,37 @@ export function readProgram({ rate = RATE, count = `{name: "pricings", type: "in
   return auth ? program.replace("capabilities: {hatches: {},", "capabilities: {auth: {required: false, service: \"/auth\"}, hatches: {},") : program;
 }
 
+/** The read program with the signal `vendor`, whose event enters the read's
+ * state, counting its moves in `count`, a field of its own beside the read's. */
+export function signalledReadProgram(count = "nudges"): string {
+  return readProgram({ count: `{name: "pricings", type: "int32"},\n          {name: "lineage", type: "uuid"},\n          {name: "nudges", type: "int32"},` })
+    .replace("    effects: {", `    signals: vendor: {machine: "PaymentMachine", event: "pay", id: {path: true}, count: "${count}"}\n    effects: {`);
+}
+
+/** Two rows whose moves a ':' between the parts would spell alike: a text key,
+ * a state `b:pricing` beside `pricing`, each invoking a read a signal's event
+ * enters, and `pricing`'s entry writing the row `a` into `b:pricing`. */
+export function collidingSignalProgram(): string {
+  return signalledReadProgram()
+    .replace(`{name: "id", type: "uuid", pk: true}`, `{name: "id", type: "string", pk: true}`)
+    .replace(`pending: on: pay: "pricing"`, `pending: on: {pay: "pricing", other: "b:pricing"}
+        "b:pricing": invoke: {src: "rate-other", onDone: "settled", onError: "failed"}`)
+    .replace(`pricing: invoke: {`, `pricing: entry: [{effect: {table: "payment", op: "update", values: {status: "b:pricing"}, where: {id: "a"}}}]
+        pricing: invoke: {`)
+    .replace(`signals: vendor: {`, `signals: other: {machine: "PaymentMachine", event: "other", id: {path: true}, count: "nudges"}\n    signals: vendor: {`)
+    .replace("    effects: {", `    effects: {\n    ${RATE.replace("rate: {", `"rate-other": {`)}`);
+}
+
+/** Two machines on one entity, each with a read's state `pricing` a signal's
+ * event enters, and the first's `pricing` assigning the second's field into
+ * its own. */
+export function twoMachineSignalProgram(): string {
+  return readProgram({ count: `{name: "pricings", type: "int32"},\n          {name: "lineage", type: "uuid"},\n          {name: "nudges", type: "int32"},\n          {name: "zstatus", type: "string"},\n          {name: "zpricings", type: "int32"},\n          {name: "zlineage", type: "uuid"},` })
+    .replace(`pricing: invoke: {`, `pricing: entry: [{assign: {zstatus: "pricing"}}]\n        pricing: invoke: {`)
+    .replace("    mecha: rows: PaymentMachine: {", `    mecha: rows: PhaseMachine: {name: "PhaseMachine", entity: "Payment", field: "zstatus", initial: "idle", states: {idle: on: phase: "pricing", pricing: invoke: {src: "rate-other", onDone: "idle", onError: "idle"}}}\n    mecha: rows: PaymentMachine: {`)
+    .replace("    effects: {", `    signals: {\n      vendor: {machine: "PaymentMachine", event: "pay", id: {path: true}, count: "nudges"}\n      phase: {machine: "PhaseMachine", event: "phase", id: {path: true}, count: "nudges"}\n    }\n    effects: {\n    ${RATE.replace("rate: {", `"rate-other": {`).replace(`count: "pricings"`, `count: "zpricings"`).replace(`incarnation: "lineage"`, `incarnation: "zlineage"`)}`);
+}
+
 /** The sink of `rate` that keeps the vendor's origin and names the bridge
  * `rates` where the compose stack runs. */
 const RATE_SIMULATED = `sink: {origin: "https://rates.example", credential: {scheme: "Bearer", secret: "RATES_KEY"}, targets: docker: bridge: "rates"}`;

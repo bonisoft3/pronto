@@ -327,7 +327,10 @@ the caller is the row's: the session wrote it under the tenancy floor and its ow
 policies (`auth_uid()`), and the read's input reads the caller's data through the row,
 `NEW.<col>` or `{raw: sql}`, as any effect's does. A program with a read declares auth,
 and the interpreter refuses a request's anonymous role entering the read's state, so a
-sink's credential is spent only for a write a signed-in session made.
+sink's credential is spent only for a write a signed-in session made, or for a
+[signal](../signals.md)'s move: the door's own function, which moves one declared event
+on the row its id names, and names that machine, row and state to the interpreter for its update
+alone.
 
 Entering the invoking state adds one to the row's `count`, an int32 column the program
 declares, and the row names its `incarnation` in a uuid column it declares, which takes a

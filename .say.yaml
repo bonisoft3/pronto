@@ -157,6 +157,10 @@ say:
           # A read through the emitted endpoint on a daprd behind the wall,
           # answered by its bridge's simulator in a container.
           - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue,deno reads-bridge.integration.test.ts"
+          # A signal through the door into a read's state, and a handler
+          # effect whose compose bridge the local stack does not run, settled
+          # by the airlock's own worker.
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue,deno signals-read.integration.test.ts bridge-undeployed.integration.test.ts"
           # An app's rewrites through the door's emitted blocks and PostgREST.
           - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue rewrites.integration.test.ts"
           # A signal and a blob claim through the door's own routes, whose

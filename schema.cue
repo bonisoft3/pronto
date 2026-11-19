@@ -1329,14 +1329,35 @@ import (
 // on as it came, its `Authorization` included, with the method and the target
 // it asked, as sent, in `X-Forwarded-Method` and `X-Forwarded-Uri`, which the
 // door sets itself; a `PUT`, `PATCH` or `DELETE` reaches a function as the
-// `POST` PostgREST calls one by. What the subset leaves out (`has`, `missing`,
-// wildcards, patterns) is refused, never ignored.
+// `POST` PostgREST calls one by. `has` is Next.js's, its `query` items alone
+// (#RewriteHas). What the subset leaves out (`missing`, the other `has`
+// types, wildcards, patterns) is refused, never ignored.
 #Rewrite: {
 	source:      =~"^(/([A-Za-z0-9][A-Za-z0-9_-]*|:[a-z][A-Za-z0-9_]*))+$" & !~"^/(crud|signal|electric|auth|poke|blob-claim|blobs|img|health|omnishell|shell|seed-assets)(/|$)"
 	destination: =~"^/crud/(rpc/)?[a-z][a-z0-9_]*(\\?[^\\s{}\"`\\\\#]*)?$"
 	methods?: [#RewriteMethod, ...#RewriteMethod] & list.UniqueItems()
+	has?: [#RewriteHas, ...#RewriteHas]
 }
 #RewriteMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
+
+// One condition of a rewrite, every one of which the request meets: the query
+// holds `key` once, with a value, and `value`, a regular expression, matches
+// that value in full. An item gives the destination parameters as Next.js
+// names them: with no `value`, the key's letters, whatever else it holds
+// dropped (`job_id` is `:jobid`); with one, each group it names
+// (`(?<name>…)`), and the key none. A name given twice, which Next.js
+// would have the later replace, is refused, as is a key two items name.
+// The expression is the door's, Go's: what it does not take (a lookaround,
+// a backreference) is refused, as is what the door's file would read as
+// its own (a quote, a backquote, a brace before a letter).
+#RewriteHas: {
+	type:   "query"
+	key:    =~"^[A-Za-z0-9_.-]+$"
+	value?: string & !="" & !~"[\"`\n\r]|\\{[A-Za-z$]"
+	if value != _|_ {
+		_compiles: regexp.Match("^(?:\(value))$", "")
+	}
+}
 
 // A role a token may name beside the cluster's own `anon`, `app_user` and
 // `service`: PostgreSQL's NOLOGIN role, which PostgREST's login may switch to
@@ -2825,17 +2846,62 @@ import (
 			len([for e in ent for f in e.fields if f.pk != _|_ if f.pk {f}]) != 1 {
 			"signal \(n): one machine's event, a plain target in every state that takes it, over a row with one primary key and the declared count field"
 		},
+		// A read's count is its interpreter's alone, which refuses the signal's
+		// own increment of it.
+		for n, sg in _signals if A.state.mecha.rows[sg.machine] != _|_
+		let m = A.state.mecha.rows[sg.machine]
+		if m.states != _|_ for _, st in m.states if st.on != _|_ if st.on[sg.event] != _|_
+		let to = st.on[sg.event]
+		if (to & string) != _|_ if m.states[to] != _|_ if m.states[to].invoke != _|_
+		let src = m.states[to].invoke.src
+		if _reads[src] != _|_ if _reads[src].count == sg.count {
+			"signal \(n) counts in \(sg.count), where the read \(src) counts its entries and only its machine writes: give the signal a count field of its own"
+		},
 	]
 	_signalRefusal: [if len(_signalViolations) == 0 {true}, _signalViolations[0]][0] & true
 	// A destination names only its source's parameters, and two rewrites one
 	// request matches would leave the answer to their order.
 	_rewrites: [if A.state.rewrites != _|_ {A.state.rewrites}, {}][0]
 	_rewriteSegments: {for n, r in _rewrites {(n): strings.Split(r.source, "/")}}
+	// The parameters a rewrite's `has` gives its destination: the letters
+	// of a key that states no value, where it has any, and the groups a
+	// value's expression names, which the expression itself tells: made
+	// optional it matches nothing, and names every group it has.
+	_rewriteHas: {for n, r in _rewrites {(n): [if r.has != _|_ for h in r.has for p in [
+		if h.value == _|_ if h.key =~ "[A-Za-z]" {regexp.ReplaceAll("[^A-Za-z]", h.key, "")},
+		if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {g},
+	] {p}]}}
 	_rewriteViolations: [
 		for n, r in _rewrites
-		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
-		if t =~ "^:[a-z]" if !strings.Contains(r.source + "/", "/" + t + "/") {
-			"rewrite \(n): the destination names \(t), which the source does not"
+		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
+		if t =~ "^:[A-Za-z]" if !strings.Contains(r.source + "/", "/" + t + "/") if !list.Contains(_rewriteHas[n], strings.TrimPrefix(t, ":")) {
+			"rewrite \(n): the destination names \(t), where the source and `has` give \(strings.Join(list.Concat([[for p in regexp.FindAll("(:[a-z][A-Za-z0-9_]*|$)", r.source, -1) if p != "" {p}], [for p in _rewriteHas[n] {":" + p}], [if !strings.Contains(r.source, ":") if len(_rewriteHas[n]) == 0 {"no parameter"}]]), ", "))"
+		},
+		// Next.js lets a name given twice be the later's, `has` after the
+		// source: a key's letters make that easy to do unseen (`page1` and
+		// `page2` are both `:page`), so here each name is given once.
+		for n, r in _rewrites for p in _rewriteHas[n] if strings.Contains(r.source + "/", "/:" + p + "/") {
+			"rewrite \(n): `has` and the source both give :\(p), where Next.js would have the one of `has` replace the source's: name one of them by a group of its value, (?<name>…)"
+		},
+		for n, r in _rewrites for i, p in _rewriteHas[n] if list.Contains(list.Drop(_rewriteHas[n], i+1), p) if !list.Contains(list.Take(_rewriteHas[n], i), p) {
+			"rewrite \(n): `has` gives :\(p) twice, where Next.js would have the later replace the earlier: name one of them by a group of its value, (?<name>…)"
+		},
+		// The door reads a key's one value, so one item states all of it.
+		for n, r in _rewrites if r.has != _|_ for i, h in r.has if list.Contains([for o in list.Drop(r.has, i+1) {o.key}], h.key) if !list.Contains([for o in list.Take(r.has, i) {o.key}], h.key) {
+			"rewrite \(n): two `has` items name the key \(h.key), and one item states all a key's value meets"
+		},
+		// Go's expression takes a name declared twice, and the door gives
+		// the parameter the last of them, empty where that one took no part
+		// in the match. The expression tells its names and not how often
+		// each is declared, and a group is declared in no other spelling
+		// than these, so one written twice is refused, declared twice or not.
+		for n, r in _rewrites if r.has != _|_ for h in r.has if h.value != _|_
+		for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") if len(regexp.FindAll("\\(\\?P?<\(g)>", h.value, -1)) > 1 {
+			"rewrite \(n): a `has` value declares the group \(g) more than once, and each group name is declared once: the door would give the parameter of the one that took no part, empty"
+		},
+		// A group's name is a parameter's, as the destination writes one.
+		for n, r in _rewrites for p in _rewriteHas[n] if p !~ "^[A-Za-z][A-Za-z0-9_]*$" {
+			"rewrite \(n): a `has` value names the group \(p), and a parameter is a letter, then letters, digits and _"
 		},
 		// The door tries a rewrite before its own routes, so a parameter in
 		// the first segment would answer /health and the shell's files.
@@ -2848,6 +2914,42 @@ import (
 		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?"
 		if len([if r.methods == _|_ {""}, if r.methods != _|_ for m in r.methods if m != "GET" if m != "HEAD" {m}]) > 0 {
 			"rewrite \(n): a function's destination has a query, which is its arguments under GET and HEAD alone, so its methods name no other; under any other the function reads the path and query from X-Forwarded-Uri"
+		},
+		// PostgREST takes the last of an argument its query names twice,
+		// so a function's destination names each key once, written as
+		// PostgREST reads it: an escape would hide one named twice.
+		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?."
+		let keys = [for pair in strings.Split(strings.SplitN(r.destination, "?", 2)[1], "&") {strings.SplitN(pair, "=", 2)[0]}]
+		for i, k in keys if strings.Contains(k, "%") || (list.Contains(list.Drop(keys, i+1), k) && !list.Contains(list.Take(keys, i), k)) {
+			[
+				if strings.Contains(k, "%") {"rewrite \(n): a function's destination writes the key \(k) with an escape, and a key is written as PostgREST reads it, so that one named twice is seen"},
+				"rewrite \(n): a function's destination names \(k) twice, and PostgREST takes the last, so the one before it is never the argument",
+			][0]
+		},
+		// What PostgREST makes of a function's query it decides pair by
+		// pair, by the key and by how the value opens, so a parameter a
+		// function's destination places is the whole value of a key
+		// PostgREST reads as an argument's name: the door holds what the
+		// parameter is (emit.cue's _rewriteOperand), and nothing written
+		// around it. The keys are PostgREST's own (`reserved` and
+		// `reservedEmbeddable` in its QueryParams.hs, at the version
+		// cluster.cue pins) and any that is more than a name, which it reads
+		// as a path. rewrites.integration.test.ts holds this to PostgREST.
+		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?."
+		for pair in strings.Split(strings.SplitN(r.destination, "?", 2)[1], "&") if pair =~ ":[A-Za-z]"
+		let placed = [for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", pair, -1) if t =~ "^:[A-Za-z]" {t}]
+		if len(placed) > 0
+		let kv = strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 || kv[len(kv)-1] != placed[0] {
+			"rewrite \(n): a function's destination places \(placed[0]) within \(pair), and a parameter is the whole value of its argument: beside other text PostgREST may read it as a filter on what the function returns"
+		},
+		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?."
+		for pair in strings.Split(strings.SplitN(r.destination, "?", 2)[1], "&") if pair =~ ":[A-Za-z]"
+		let placed = [for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", pair, -1) if t =~ "^:[A-Za-z]" {t}]
+		if len(placed) > 0
+		let kv = strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 if kv[1] == placed[0] if kv[0] !~ "^[A-Za-z_][A-Za-z0-9_]*$" || kv[0] =~ "^(select|columns|on_conflict|order|limit|offset|and|or)$" {
+			"rewrite \(n): a function's destination places \(placed[0]) under \(kv[0]), which PostgREST does not read as an argument's name: a name is letters, digits and _, and none of select, columns, on_conflict, order, limit, offset, and, or"
 		},
 		for n, r in _rewrites if strings.Contains(r.source, ":")
 		let ps = regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1)

@@ -4,7 +4,7 @@
 // mean is refused at vet.
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { bridgedReadProgram, cue, emitFiles, paymentProgram, RATE, readProgram } from "./effects-fixtures.ts";
+import { bridgedReadProgram, cue, emitFiles, paymentProgram, RATE, readProgram, signalledReadProgram } from "./effects-fixtures.ts";
 
 // The hatch `vendor` as an Activepieces runner, whose actions take a POST.
 const ACTIVEPIECES = `
@@ -55,6 +55,27 @@ Deno.test("entering a read's state counts the entry and enqueues the request wit
   // under a new incarnation, and no write sets either.
   assertStringIncludes(sql, `  IF TG_OP = 'INSERT' THEN\n    NEW."lineage" := gen_random_uuid();\n  ELSIF NEW."lineage" IS DISTINCT FROM OLD."lineage" THEN`);
   assertStringIncludes(sql, `  IF TG_OP = 'INSERT' THEN\n    NEW."pricings" := 0;\n  ELSIF NEW."pricings" IS DISTINCT FROM OLD."pricings" THEN`);
+});
+
+// A signal's function runs under the request's anonymous role, which a read's
+// state refuses: it names the table, the row and the state its move enters,
+// as a JSON array, for that update alone, and the state's interpreter admits
+// exactly that. A read no signal enters keeps its interpreter as it was.
+Deno.test("a signal enters a read's state by naming its move to the interpreter, and counts in a field of its own", async () => {
+  const files = await emitFiles(signalledReadProgram());
+  assertStringIncludes(
+    files["services/database/migrations/802_signals.sql"].text,
+    `        PERFORM set_config('airlock.signal', jsonb_build_array('payment', 'status', row_key::text, 'pricing')::text, true);
+        UPDATE "payment" SET "status" = 'pricing', "nudges" = "nudges" + 1 WHERE "id" = row_key;
+        PERFORM set_config('airlock.signal', '', true);
+        RETURN 'moved';`,
+  );
+  assertStringIncludes(
+    files["services/database/migrations/010_machines.sql"].text,
+    `        IF current_setting('role', true) = 'anon' AND current_setting('airlock.signal', true) IS DISTINCT FROM jsonb_build_array(TG_TABLE_NAME, 'status', NEW."id"::text, 'pricing')::text THEN`,
+  );
+  assertEquals((await emitFiles(readProgram()))["services/database/migrations/010_machines.sql"].text.includes("airlock.signal"), false);
+  assertStringIncludes(await refusal(signalledReadProgram("pricings")), "signal vendor counts in pricings, where the read rate counts its entries and only its machine writes");
 });
 
 Deno.test("the airlock is handed each read's request and where its answer lands, and no handler", async () => {

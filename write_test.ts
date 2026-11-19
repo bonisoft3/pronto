@@ -277,6 +277,63 @@ Deno.test("cold-start preflight reports all missing authored files and owed ids 
   }
 });
 
+// Minting rewrites program.cue and ir.html after the first derivation hashed
+// them. An ordinal minted back onto a field the emission already carries moves
+// no emitted byte, so only the mint itself can call for the derivation that
+// hashes what it wrote; the generate stamp covers the rewritten file, so a
+// second run would not repair the rows check-facts refuses.
+Deno.test("facts name the program and ir as minting left them", async () => {
+  const app = await Deno.makeTempDir({
+    dir: join(repo, "apps"),
+    prefix: ".write-mint-",
+  });
+  const decoder = new TextDecoder();
+  async function build(): Promise<string> {
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--no-check",
+        "--config",
+        join(repo, "plugins/pronto/deno.json"),
+        "--allow-read",
+        "--allow-write=.",
+        "--allow-run",
+        "--allow-env",
+        writer,
+        ".",
+      ],
+      cwd: app,
+      env: { ...Deno.env.toObject(), MISE_TRUSTED_CONFIG_PATHS: repo },
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const text = decoder.decode(result.stderr);
+    assert(result.success, text);
+    return text;
+  }
+  try {
+    await copyJsfb(app);
+    await build();
+    const programPath = join(app, "program.cue");
+    const minted = '{ordinal: 3, name: "picked", type: "string", required: false},';
+    const program = await Deno.readTextFile(programPath);
+    assertStringIncludes(program, minted);
+    await Deno.writeTextFile(programPath, program.replace(minted, minted.replace("ordinal: 3, ", "")));
+    await build();
+    assertEquals(await Deno.readTextFile(programPath), program);
+    const facts = JSON.parse(await Deno.readTextFile(join(app, ".pronto/facts.json")));
+    for (const row of facts.artifact as { path: string; sha256: string }[]) {
+      if (row.path !== "program.cue" && row.path !== "ir.html") continue;
+      const bytes = await Deno.readFile(join(app, row.path));
+      const actual = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
+      assertEquals(row.sha256, actual, `${row.path} changed after the facts were derived from it`);
+    }
+  } finally {
+    await Deno.remove(app, { recursive: true });
+  }
+});
+
 async function assertRejectsNotFound(path: string): Promise<void> {
   try {
     await Deno.stat(path);

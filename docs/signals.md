@@ -34,6 +34,29 @@ An unknown name answers 404, a body that is not JSON 400, and a body past 1 MiB 
 The `count` field is in the effect's `key` because a ledger key is performed once and a
 row is checked often. Each move therefore adds a ledger row, forged ones included.
 
+The state the event enters may invoke a [read](decisions/2026-10-03-external-effects.md#reads)
+instead: a GET whose answer moves the row, with no handler and no key. A read's state
+refuses a request's anonymous role, which is the role a signal arrives under, so
+`airlock.signal` names the table, the machine's state field, the row and the state its
+move enters, as a JSON array and for that update alone, and the interpreter of a read's
+state a signal's event enters admits exactly that move. An anonymous client's own write
+into the state stays refused, and so does anything else a transition's action writes into
+a read's state during the signal, another row or another machine's field on the same
+row, which fails the signal whole. A read counts its entries in a field only its
+machine writes, so the signal's `count` is another field. A read no signal's event
+enters keeps its interpreter as it is; one that gains a signal on a database that
+outlived a release has its machine restated in a forward migration
+([[schema-change-admission|schema changes]]).
+
+What an unauthenticated caller can make the app ask is bounded per row, for a read as
+for a handler effect: a row asks once at a time, since a signal mid-check is refused with
+503, and only while it stands in a state that takes the event. Where the state an answer
+leads to takes the event again, each further signal is one more check, with a new count:
+nothing limits how many over time, or across the rows whose ids a caller knows. One
+check is one call where the provider answers; where it does not, a handler effect is
+called up to its `attempts` and a read up to five runs of got's retries. A read's answer
+the airlock's cache still holds fresh is not asked again.
+
 The container door rewrites the route to PostgREST's `/rpc/signal_in` and states the path
 in `X-Signal-Path`, so no service is added and no provider's `Authorization` reaches it.
 The edge's object calls the function directly.

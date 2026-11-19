@@ -689,8 +689,10 @@ _sqlType: {
 	state:  _
 	states: _
 	timed:  *false | bool
-	// The effect each invoking state of the machine claims on entry.
+	// The effect each invoking state of the machine claims on entry, and the
+	// states a signal's event enters.
 	invokes:      _
+	signalled:    _
 	pk:           [...string]
 	cortex:       *false | bool
 	cortexStates: _
@@ -759,7 +761,7 @@ _sqlType: {
 		_entryActions: [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {
 			(#mechaActionSql & {action: a, op: "UPDATE"}).out
 		}]
-		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
+		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk, field: ST.field, signalled: ST.signalled[t.target] != _|_}).out}]
 		"""
 			      IF NEW."\(ST.field)" = '\(t.target)'\(_timerGate) THEN
 			\(_guardLine)\(strings.Join(list.Concat([_exitActions, _actionLines, _entryActions, _enterLines]), "\n"))
@@ -816,7 +818,7 @@ _sqlType: {
 		_actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		_exit:    [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		_entry:   [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
-		_enter:   [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
+		_enter:   [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk, field: ST.field, signalled: ST.signalled[t.target] != _|_}).out}]
 		"""
 			      IF NEW."\(ST.field)" = '\(t.delivery)' AND \(_kind)\(_guard) THEN
 			\(strings.Join(_exit, "\n"))
@@ -926,6 +928,8 @@ _sqlType: {
 	machine:  #MechaMachine
 	entities: {[string]: _}
 	effects: [string]: #ExternalEffect
+	// The app's signals: a read's state one's event enters admits its move.
+	signals: {[string]: _} | *{}
 	runtime: *true | bool
 	// The step that installs it, which a changed interpreter names.
 	step: *"010_machines.sql" | string
@@ -944,6 +948,7 @@ _sqlType: {
 			"""
 
 		_invokes:       {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
+		_signalled:     {for _, sg in S.signals if sg.machine == S.machine.name for _, sBody in S.machine.states if sBody.on != _|_ if sBody.on[sg.event] != _|_ if (sBody.on[sg.event] & string) != _|_ {(sBody.on[sg.event]): true}}
 		_hasInvoke:     len([for _, _ in _invokes {true}]) > 0
 		_hasTimers:     S.machine._timed
 		_cortex:        S.machine.cortex != _|_
@@ -951,7 +956,7 @@ _sqlType: {
 		_timerContext:  [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
 		_sameStateGate: [if _hasTimers {" AND timer_delay IS NULL"}, ""][0]
 		_pk:            [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
-		_initialEnter:  [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
+		_initialEnter:  [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk, field: _field, signalled: _signalled[S.machine.initial] != _|_}).out + "\n"}, ""][0]
 		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
 		for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
 			(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
@@ -1043,7 +1048,7 @@ _sqlType: {
 				if state.type != _|_ {type: state.type}
 				entry: list.Concat([
 					[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
-					[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk}).out}],
+					[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk, field: _field, signalled: _signalled[name] != _|_}).out}],
 				])
 				exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
 			}
@@ -1057,6 +1062,7 @@ _sqlType: {
 				states:       S.machine.states
 				timed:        _hasTimers
 				invokes:      _invokes
+				signalled:    _signalled
 				pk:           _pk
 				cortex:       _cortex
 				cortexStates: _cortexStates
@@ -1342,7 +1348,10 @@ _sqlType: {
 // and its digest. Graphile alone
 // retries it, #ReadAttempts times. It spends its sink's credential, so a
 // request's anonymous role enters its state no more than a write from no one
-// would claim a charge.
+// would claim a charge. A signal's move is the door's own, of the one row and
+// event it declares: `airlock.signal` names the table, the machine's state
+// field, the row and the state entered for its update alone (#signalsSql), and a state a signal's event
+// enters admits that move.
 #ReadAttempts: 5
 
 #invokeEnterSql: {
@@ -1350,6 +1359,12 @@ _sqlType: {
 	effect: _
 	state:  string
 	pk:     [...string]
+
+	// A signal's event enters the state (#mechaMachineSql's _signalled), of
+	// the machine whose state field this is.
+	signalled: *false | bool
+	field:     *"" | string
+
 	_wake: """
 		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
 		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
@@ -1361,7 +1376,7 @@ _sqlType: {
 	_inc:    [if I.effect.request != _|_ {"NEW.\"\(I.effect.incarnation)\""}, ""][0]
 	_rowKey: [if len(I.pk) == 1 {"NEW.\"\(I.pk[0])\"::text"}, "jsonb_build_array(" + strings.Join([for f in I.pk {"NEW.\"\(f)\"::text"}], ", ") + ")::text"][0]
 	_read: """
-		        IF current_setting('role', true) = 'anon' THEN
+		        IF current_setting('role', true) = 'anon'\([if I.signalled {" AND current_setting('airlock.signal', true) IS DISTINCT FROM jsonb_build_array(TG_TABLE_NAME, '\(I.field)', \(_rowKey), '\(I.state)')::text"}, ""][0]) THEN
 		          RAISE EXCEPTION 'read % is asked by a signed-in writer, and the request names none', '\(I.effect.name)' USING ERRCODE = 'insufficient_privilege';
 		        END IF;
 		        \(_n) := coalesce(\(_n), 0) + 1;
@@ -1396,10 +1411,18 @@ _sqlType: {
 		let pk = [for f in ent.fields if f.pk != _|_ if f.pk {f.name}][0]
 		let idSql = [if sg.id.path != _|_ {"path_id"}, "body #>> '{\(strings.Join(sg.id.body, ","))}'"][0]
 		let invoking = [for sn, st in m.states if st.invoke != _|_ {"'\(sn)'"}]
+
+		// A state that invokes a read refuses a request's anonymous role, which
+		// is the role this function is called under: the move names its table,
+		// its machine's state field, its row and the state it enters for the
+		// interpreter, as a JSON array
+		// no two moves spell alike, for the update alone.
+		let reads = {for sn, st in m.states if st.invoke != _|_ if state.effects[st.invoke.src].request != _|_ {(sn): true}}
 		let moves = [for sn, st in m.states if st.on != _|_ if st.on[sg.event] != _|_ {
+			let update = "UPDATE \"\(ent.table)\" SET \"\(m.field)\" = '\(st.on[sg.event])', \"\(sg.count)\" = \"\(sg.count)\" + 1 WHERE \"\(pk)\" = row_key;"
 			"""
 				      IF state_now = '\(sn)' THEN
-				        UPDATE "\(ent.table)" SET "\(m.field)" = '\(st.on[sg.event])', "\(sg.count)" = "\(sg.count)" + 1 WHERE "\(pk)" = row_key;
+				        \([if reads[st.on[sg.event]] != _|_ {"PERFORM set_config('airlock.signal', jsonb_build_array('\(ent.table)', '\(m.field)', row_key::text, '\(st.on[sg.event])')::text, true);\n        \(update)\n        PERFORM set_config('airlock.signal', '', true);"}, update][0])
 				        RETURN 'moved';
 				      END IF;
 				"""
@@ -3121,7 +3144,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			["-- tier: container\n" + (#publication & {name: L._pub, tables: [e.table]}).out + [if L._capture {"\n" + (#txnMarker & {pub: L._pub, tables: [e.table]}).out}, ""][0] + "\n" +
 				(#publication & {name: "electric_publication_default", tables: [e.table]}).out + "\nALTER TABLE \(e.table) REPLICA IDENTITY FULL;\n-- tier: any"],
 			["GRANT SELECT, INSERT, UPDATE, DELETE ON \(e.table) TO anon;"],
-			[for m in machines {(#mechaMachineSql & {machine: m, entities: L.code.state.entities, effects: L._effects, runtime: false}).out}],
+			[for m in machines {(#mechaMachineSql & {machine: m, entities: L.code.state.entities, effects: L._effects, signals: [if L.code.state.signals != _|_ {L.code.state.signals}, {}][0], runtime: false}).out}],
 		]), "\n\n") + "\n"
 	}}
 	out: {
@@ -3153,9 +3176,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 // The bridge an effect is settled by (mecha's services/airlock, "A bridge not
 // deployed"), as effects.json's `bridge`: its own, else the one its sink is
-// on a release target past the compose stack's, where the airlock settles it
-// not deployed as it would its own. A read, which the edge does not perform,
-// counts the compose stack's too. `out` is absent where it names none.
+// on a release target or the compose stack, where the airlock settles it not
+// deployed as it would its own. `out` is absent where it names none.
 #EffectBridge: {
 	let B = self
 	effect:  _
@@ -3164,7 +3186,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	targets: _
 	named: [
 		if B.effect.sink.bridge != _|_ {B.effect.sink.bridge},
-		for t in list.Concat([[if B.effect.request != _|_ {"docker"}], ["cloudflare", "k8s"]]) let at = (#SinkAt & {sink: B.effect.sink, target: t}).out if at != null if at.bridge != _|_ {at.bridge},
+		for t in ["cloudflare", "k8s", "docker"] let at = (#SinkAt & {sink: B.effect.sink, target: t}).out if at != null if at.bridge != _|_ {at.bridge},
 	]
 	if len(named) > 0 {
 		let local = (#SinkAt & {sink: B.effect.sink, target: "docker"}).out
@@ -3589,7 +3611,7 @@ _pgrollDir: "services/database/pgroll"
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
-					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, step: (#steps & {code: D.code}).machines})._effectUpgradeSql
+					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, signals: [if D.code.state.signals != _|_ {D.code.state.signals}, {}][0], step: (#steps & {code: D.code}).machines})._effectUpgradeSql
 				}], "\n\n")
 			}
 			pipelines: [for n, _ in (#streams & {code: D.code}).out {
@@ -5447,7 +5469,7 @@ _pgrollDir: "services/database/pgroll"
 			if len(_machines) > 0 if len([for r in E._raw if r.name == E._steps.machines {r}]) == 0 {
 				"services/database/migrations/\(E._steps.machines)": {
 					format: "sql"
-					text:   [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
+					text:   [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], signals: [if E.code.state.signals != _|_ {E.code.state.signals}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
 				}
 			}
 
@@ -6074,6 +6096,16 @@ _pgrollDir: "services/database/pgroll"
 
 					"""
 			}], "")
+			// How a value PostgREST reads as a filter opens (its pOpExpr, in
+			// src/library/PostgREST/ApiRequest/QueryParams.hs at the version
+			// cluster.cue pins): `not.`, an operator, a quantifier or a
+			// language where it takes one, and the dot. Asked of a function
+			// by GET, such a value is no argument: the function is called
+			// without it, by its default where it has one, and what it returns
+			// is filtered. So no rewrite answers a request whose value, placed
+			// by a function's destination, opens so.
+			// rewrites.integration.test.ts holds this to PostgREST.
+			_rewriteOperand: "^(?:not\\.|in\\.|is\\.|isdistinct\\.|(?:fts|plfts|phfts|wfts)(?:\\([\\pL0-9_ $]+\\))?\\.|(?:neq|cs|cd|ov|sl|sr|nxr|nxl|adj)\\.|(?:eq|gte|gt|lte|lt|like|ilike|match|imatch)(?:\\((?:any|all)\\))?\\.)"
 			// An app's rewrite (#Rewrite), beside the hatches' doors: the source's
 			// parameters captured, and the destination asked of crud as /crud
 			// itself asks it. What the client asked is stated in the headers
@@ -6088,8 +6120,38 @@ _pgrollDir: "services/database/pgroll"
 			_rewriteDoors: strings.Join([if E.code.state.rewrites != _|_ for rn, r in E.code.state.rewrites {
 				let matcher = "rewrite_\(strings.Replace(rn, "-", "_", -1))"
 				let params = [if strings.Contains(r.source, ":") for m in regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1) {m}]
-				let placed = strings.Join([for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1) {
-					[for i, p in params if p == t {"{re.\(matcher).\(i+1)}"}, t][0]
+				// A `has` item (#RewriteHas) is a regular expression over
+				// the key's decoded value, whose groups are parameters as
+				// the source's are, a key with no expression naming its own
+				// by its letters. Every item is one condition of the
+				// matcher's expression, since two `vars_regexp` matchers in
+				// one set are either, not both. A key sent twice, however
+				// it is escaped, meets none: the door would read its values
+				// as one, joined. Nor does a value a function's destination
+				// places that PostgREST would read as a filter (_rewriteOperand).
+				let has = [if r.has != _|_ for i, h in r.has {
+					name:    "\(matcher)_has\(i)"
+					value:   "{http.request.uri.query.\(h.key)}"
+					pattern: [if h.value != _|_ {"^(?:\(h.value))$"}, "(?s)^(.+)$"][0]
+					key:     strings.Join([for j, c in strings.Runes(h.key) {"(?:\(regexp.QuoteMeta(strings.SliceRunes(h.key, j, j+1)))|%(?i:\(strconv.FormatInt(c, 16))))"}], "")
+					groups: [if h.value == _|_ if h.key =~ "[A-Za-z]" {name: ":\(regexp.ReplaceAll("[^A-Za-z]", h.key, ""))", group: "1"}, if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {name: ":\(g)", group: g}]
+				}]
+				let tokens = regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1)
+				// A source's parameter a function's destination places is held
+				// to the same, read from the path as the matcher reads it: the
+				// expression matches the path itself, since one condition does
+				// not see what another matcher of the set captured.
+				let guarded = [if strings.HasPrefix(r.destination, "/crud/rpc/") for i, p in params if list.Contains(tokens, p) {"!{http.regexp.\(matcher)_path.\(i+1)}.matches(r\"\(_rewriteOperand)\")"}]
+				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\\(h.value)', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if list.Contains(tokens, g.name) {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
+				// The terms are read in the order written, each match setting
+				// its captures before the next term reads them: what the
+				// door's Caddy does (cluster.cue pins it), not what CEL
+				// promises of `&&`. Read otherwise, a capture would be empty
+				// where it is tested and an operand would pass, which
+				// rewrites.integration.test.ts refuses.
+				let conditions = [if len(terms) > 0 {"    expression `\(strings.Join(terms, " && "))`\n"}, ""][0]
+				let placed = strings.Join([for t in tokens {
+					[for i, p in params if p == t {"{re.\(matcher).\(i+1)}"}, for h in has for g in h.groups if g.name == t {"{re.\(h.name).\(g.group)}"}, t][0]
 				}], "")
 				let rpc = strings.HasPrefix(placed, "/rpc/")
 				// A rewrite to a path alone keeps the request's query, so a
@@ -6100,7 +6162,7 @@ _pgrollDir: "services/database/pgroll"
 				"""
 					  @\(matcher) {
 					\(methods)    path_regexp \(matcher) ^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$
-					  }
+					\(conditions)  }
 					  handle @\(matcher) {
 					    route {
 					      request_header -X-Signal-Path

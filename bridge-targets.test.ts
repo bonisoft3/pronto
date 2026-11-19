@@ -168,6 +168,34 @@ Deno.test("an effect's bridge on cloudflare is its cloudflare sink's", async () 
   assertEquals(onGcp["services/airlock/effects.json"].data.effects!.charge.bridge, { name: "fetch", targets: ["docker", "cloudflare", "k8s", "gcp"], simulated: true });
 });
 
+// An effect that keeps its vendor's origin and names a bridge for the compose
+// stack is settled by that bridge where it does not run: the local stack
+// without its simulator, and a docker release it does not name.
+Deno.test("an effect that names a bridge for the compose stack alone is settled not deployed where that bridge does not run", async () => {
+  type Emitted = Record<string, { data: { effects?: Record<string, { bridge?: unknown }> } }>;
+  const stood = (bridge: string) =>
+    emitFiles(
+      paymentProgram().replace(
+        'sink: {origin: "https://api.acquirer.example", idempotent: true}',
+        'sink: {origin: "https://api.acquirer.example", idempotent: true, targets: docker: bridge: "fetch"}',
+      ) + `\napp: capabilities: hatches: transport: {kind: "container", note: "a native transport"}\napp: state: bridges: fetch: ${bridge}\n_cluster: surface: targets: transport: ${BUILT}\n`,
+    ) as unknown as Promise<Emitted>;
+  const { parseManifest, undeployed } = await import(new URL("../../libraries/mecha/services/airlock/reentry.ts", import.meta.url).href) as {
+    parseManifest: (text: string) => Record<string, unknown>;
+    undeployed: (effect: unknown, target: string) => { data: unknown } | null;
+  };
+  const bare = (await stood('{container: "transport"}'))["services/airlock/effects.json"].data;
+  assertEquals(bare.effects!.charge.bridge, { name: "fetch", targets: ["cloudflare", "k8s"], simulated: false });
+  const charge = parseManifest(JSON.stringify(bare)).charge;
+  assertEquals(undeployed(charge, "local")?.data, { bridge: "fetch", target: "local", reason: "not deployed" });
+  assertEquals(undeployed(charge, "docker")?.data, { bridge: "fetch", target: "docker", reason: "not deployed" });
+  // Its origin is its sink on the release targets, the edge among them.
+  assertEquals([undeployed(charge, "k8s"), undeployed(charge, "cloudflare")], [null, null]);
+  const simulated = (await stood('{container: "transport", simulator: dockerfile: from: name: "alpine:3.22"}'))["services/airlock/effects.json"].data;
+  assertEquals(simulated.effects!.charge.bridge, { name: "fetch", targets: ["cloudflare", "k8s"], simulated: true });
+  assertEquals(undeployed(parseManifest(JSON.stringify(simulated)).charge, "local"), null);
+});
+
 // k8s runs the container's own image as a Deployment the airlock's daprd
 // calls by the container's name, as cloudflare runs it as a Cloudflare
 // Container: built from its Dockerfile as `<container>-appliance`, its own

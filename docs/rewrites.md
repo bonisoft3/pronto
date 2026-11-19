@@ -15,6 +15,12 @@ state: rewrites: {
     "payment-approve": {source: "/expense/payments/:id/approve", destination: "/crud/rpc/payment_approve", methods: ["POST"]}
     "payment-update":  {source: "/expense/payments/:id",         destination: "/crud/rpc/payment_update", methods: ["PUT"]}
     "payment-search":  {source: "/expense/search",               destination: "/crud/rpc/payment_search", methods: ["GET"]}
+    "export-download": {
+        source:      "/exports/pdf"
+        methods: ["GET"]
+        has: [{type: "query", key: "job_id", value: "(?<job_id>[0-9]+)"}, {type: "query", key: "dl_token"}]
+        destination: "/crud/rpc/download_xlsx?job_id=:job_id&dl_token=:dltoken"
+    }
 }
 ```
 
@@ -23,6 +29,7 @@ state: rewrites: {
 | `source` | path-to-regexp's literal and `:name` segments, the first a literal, since the door tries a rewrite before its own routes. A parameter is letters, digits and `. _ ~ -`, so its value carries no second query parameter |
 | `destination` | a [PostgREST](https://docs.postgrest.org/en/stable/references/api.html) path under `/crud`: a table, a view or `rpc/<function>`, with any query, naming the parameters it uses as `:name`; a colon after a name is PostgREST's own, an alias (`select=codigo:id`) or a cast, and is left as written |
 | `methods` | the methods the rewrite answers, as Vercel's `routes` spell it, matched on the method the client used; without it, every method |
+| `has` | Next.js's [conditions](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites#header-cookie-and-query-matching), the `query` type alone: the rewrite answers only a request that meets every item, and an item gives the destination parameters ([below](#a-key-of-the-query)) |
 
 The request is handed on as it came: its method, body, `Authorization` and query, the
 query after the destination's own; a function at the destination is asked by the
@@ -55,9 +62,12 @@ in two things:
 
 - a `PUT`, `PATCH` or `DELETE` reaches the function as a `POST`, its body untouched.
   A `GET` or `HEAD` stays one, in PostgREST's read-only transaction;
-- the client's query is not handed on. The destination's own (`rpc/payment_total?id=:id`)
-  is the function's arguments, and the function reads the client's from
-  `X-Forwarded-Uri`.
+- the client's query is not handed on. The destination's own is the function's
+  arguments, each a parameter of the path (`rpc/payment_total?id=:id`) or a key of
+  the query a [`has`](#a-key-of-the-query) item names, and the function reads
+  whatever else the client sent from `X-Forwarded-Uri`. Either is the argument
+  unless it opens as one of PostgREST's operators, when the request is no
+  rewrite's ([below](#a-key-of-the-query)).
 
 PostgREST reads the query of a `POST` as filters on what the function returns, never
 as its arguments. So a destination's query is a function's arguments under `GET` and
@@ -111,15 +121,71 @@ CREATE FUNCTION payment_update(json) RETURNS json LANGUAGE sql AS $$
 $$;
 ```
 
+## A key of the query
+
+A `has` item is `{type: "query", key, value}`, as Next.js writes it. The request meets
+it when its query holds `key`, with a value, and `value`, a regular expression, matches
+that value in full; without `value` any value does. A request that does not meet every
+item is not the rewrite's to answer.
+
+An item gives the destination parameters, placed as a path's are and named as Next.js
+names them. Without `value` it gives one, the key's letters: `:token` for `key:
+"token"`, `:dltoken` for `dl_token`, `:dlToken` for `dlToken`, `:page` for `page2`,
+and none for a key with no letter. With `value` it gives each group the expression
+names, `:job_id` for `(?<job_id>[0-9]+)`, and none for the key. A destination naming a
+parameter none of them gives is refused, with the names they do give. So is a name
+given twice, by two items or by an item and the `source`: Next.js would have the
+later replace the earlier, `page1` and `page2` both being `:page`, and a group of a
+`value` names one of them apart. Two items do not name one key.
+
+```
+GET /exports/pdf?job_id=42&dl_token=s3cret&utm_source=mail
+ →  /crud/rpc/download_xlsx?job_id=42&dl_token=s3cret
+```
+
+A parameter is the client's value, decoded, placed as one value: whatever it holds,
+`&`, `=`, `#`, `+`, a space, `%`, it is that argument and no other, and PostgREST
+decodes it to what the client wrote. A group that takes no part in a match is the
+empty value. A key `has` does not name is not handed on.
+
+Three things are the door's and PostgREST's, not Next.js's:
+
+- a key sent more than once, however either is escaped, meets no item, and neither
+  does a key with an empty value, nor one in a pair the door does not read, a `;`
+  in it or an escape that is none (`%zz`);
+- `value` is Go's regular expression, which has no lookaround and no backreference,
+  and holds no quote, no backquote and no brace before a letter;
+- a value a function's destination places, a parameter of the path as much as one
+  of `has`, is no rewrite's where it opens as one of PostgREST's operators (`eq.1`,
+  `not.is.null`, `in.(a,b)`, `like(any).{a,b}`). PostgREST reads such a value as a
+  filter on what the function returns, at `/crud/rpc` too, and calls the function
+  without the argument, by its default where it has one. Any other value is the
+  argument, a dot in it or not (`1.5`, `john.doe@example.com`, `eq`).
+
+A table or view's rewrite takes `has` as its condition too, and the client's query
+follows the destination's as ever, the named key with it.
+
 Refused:
 
-- `has`, `missing`, `basePath` and `locale`; a wildcard (`:path*`), an optional or a
-  pattern (`:id(\\d+)`) in `source`;
+- `missing`, `basePath` and `locale`; a `has` item of type `header`, `cookie` or
+  `host`; a wildcard (`:path*`), an optional or a pattern (`:id(\\d+)`) in `source`;
 - a `destination` anywhere but under `/crud`, another origin included, or naming a
-  parameter its `source` does not;
+  parameter neither its `source` nor a `has` item gives;
+- a function's destination that places a parameter as anything but the whole value
+  of an argument (`scope=:scope`, never `scope=eq.:scope` or `scope=:a.:b`), or under
+  a key PostgREST does not read as an argument's name: `select`, `columns`,
+  `on_conflict`, `order`, `limit`, `offset`, `and`, `or`, and any that is more than
+  letters, digits and `_` (`not.and`, `rows.order`, `scope->a`). Around a parameter,
+  or under such a key, PostgREST may read a filter on what the function returns;
+  what the author writes in full is the author's;
+- a function's destination that names one key twice, or writes a key with an escape
+  (`%73cope`): PostgREST takes the last of an argument named twice;
+- a `has` value that declares one group name twice (`(?<kind>a)|(?<kind>b)`): the
+  door would give the parameter of the one that took no part, empty;
 - a `source` under one of the door's own paths (`/crud`, `/signal`, `/auth`, …);
 - two rewrites one request matches, a parameter of one standing where the other
-  has a parameter or a word, unless their `methods` do not meet.
+  has a parameter or a word, unless their `methods` do not meet; `has` does not
+  tell two apart, their order being no one's to state.
 
 A rewrite shadows a document at the same path.
 

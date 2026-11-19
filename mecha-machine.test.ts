@@ -443,6 +443,8 @@ Deno.test("a signal is one machine's event over a counted row, and nothing refus
   const sql = files["services/database/migrations/802_signals.sql"].text;
   assertStringIncludes(sql, `row_key := body #>> '{data,object,client_reference_id}';`);
   assertStringIncludes(sql, `UPDATE "payment" SET "status" = 'charging', "checks" = "checks" + 1 WHERE "id" = row_key;`);
+  // Only a move into a read's state is named to the interpreter.
+  assertEquals(sql.includes("set_config"), false);
   assertStringIncludes(sql, `IF state_now IN ('charging') THEN RAISE EXCEPTION`);
   assertStringIncludes(sql, `GRANT EXECUTE ON FUNCTION public.signal_in(json) TO anon;`);
   for (const bad of [`event: "absent"`, `count: "absent"`]) {

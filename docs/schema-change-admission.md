@@ -32,8 +32,8 @@ without regenerating it. Omitted entries keep the current generated or mecha-pro
 scripts. Carry changes to an applied baseline in a forward `state.migrations`
 pgroll migration; the ledger still refuses a changed digest. A machine added
 after `010_machines.sql` was pinned takes its guard from the same generator,
-never a copy: `(pronto.#mechaMachineSql & {machine, entities, effects, runtime:
-false}).out` as the migration's SQL.
+never a copy: `(pronto.#mechaMachineSql & {machine, entities, effects, signals,
+runtime: false}).out` as the migration's SQL.
 
 ## Who cannot be migrated
 
@@ -246,7 +246,9 @@ release has carried it, the app owns its bytes: it declares that same name in
 nothing under it. A change to the entity or its machine is then carried by a
 migration that sorts after it: the new columns, and the machine restated by
 `#mechaMachineSql` with `runtime: false`, which a fresh database runs after the
-kept one just as a live one does. The emitter refuses a kept migration its
+kept one just as a live one does. A [[signals|signal]] whose event enters a
+read's state is such a change to the read's machine, restated with the app's
+`signals` beside its `effects`. The emitter refuses a kept migration its
 entity has moved past unless a later migration names the table and
 `state.baseline.carried` holds the digest of what it would generate today, which
 the refusal prints; so each further change is refused again until the app writes

@@ -4,7 +4,7 @@
 // credential and query included, and a parameter carries nothing but its value;
 // a function is called whatever method the client used and reads what was asked
 // from the two headers the door sets, never from the client's own.
-import { assertEquals } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertRejects } from "jsr:@std/assert@1.0.11";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
@@ -37,6 +37,13 @@ const program = paymentProgram().replace("    effects: charge:", `    rewrites: 
       "payment-search": {source: "/expense/search", destination: "/crud/rpc/payment_search", methods: ["GET", "HEAD"]}
       "payment-echo": {source: "/expense/echo", destination: "/crud/rpc/payment_echo"}
       "payment-told": {source: "/expense/told", destination: "/crud/rpc/payment_told"}
+      "payment-export": {source: "/exports/pdf", methods: ["GET"], has: [{type: "query", key: "job_id", value: "(?<job_id>.+)"}, {type: "query", key: "token"}], destination: "/crud/rpc/payment_export?job_id=:job_id&token=:token"}
+      "payment-kind": {source: "/exports/kind", methods: ["GET"], has: [{type: "query", key: "kind", value: "(?<kind>pdf|xlsx)-(?<year>[0-9]{4})"}], destination: "/crud/rpc/payment_export?job_id=:kind&token=:year"}
+      "payment-rows-of": {source: "/exports/rows/:scope", methods: ["GET"], destination: "/crud/rpc/payment_rows?scope=:scope"}
+      "payment-rows": {source: "/exports/rows", methods: ["GET"], has: [{type: "query", key: "scope"}], destination: "/crud/rpc/payment_rows?scope=:scope"}
+      "payment-draft": {source: "/exports/draft", methods: ["GET"], has: [{type: "query", key: "kind", value: "(?<kind>pdf|xlsx)(?<draft>-draft)?"}], destination: "/crud/rpc/payment_export?job_id=:kind&token=:draft"}
+      "payment-names": {source: "/exports/names/:token", methods: ["GET"], has: [{type: "query", key: "job_id"}, {type: "query", key: "dlToken"}], destination: "/crud/rpc/payment_export?job_id=:jobid&token=:dlToken"}
+      "payment-settled": {source: "/expense/settled", methods: ["GET"], has: [{type: "query", key: "select", value: "status"}], destination: "/crud/payment_list?status=eq.settled"}
     }
     effects: charge:`);
 
@@ -49,7 +56,7 @@ async function doorRewrites(): Promise<string> {
     return found;
   });
   const rewrites = door.match(/  @rewrite_\w+ \{\n[\s\S]*?\n  \}\n  handle @rewrite_\w+ \{\n[\s\S]*?\n  \}\n/g);
-  if (rewrites?.length !== 9) throw new Error("the door does not hold the nine rewrites");
+  if (rewrites?.length !== 16) throw new Error("the door does not hold the sixteen rewrites");
   return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n(bounded-blobs) {\n}\n:8080 {\n${rewrites.join("")}${own.join("")}  handle {\n    respond "no rewrite" 404\n  }\n}\n`;
 }
 
@@ -102,6 +109,13 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
           'method', h ->> 'x-forwarded-method', 'uri', h ->> 'x-forwarded-uri', 'prefer', h ->> 'prefer')
         FROM (SELECT current_setting('request.headers', true)::json) AS _(h) $$;
       -- Stand-ins for what the door's signal and claim routes call, answering what each is told.
+      -- The arguments a rewrite's \`has\` gives a function, beside what the door says the client asked.
+      CREATE FUNCTION payment_export(job_id text, token text) RETURNS json LANGUAGE sql STABLE AS $$
+        SELECT json_build_object('job_id', job_id, 'token', token, 'method', h ->> 'x-forwarded-method', 'uri', h ->> 'x-forwarded-uri')
+        FROM (SELECT current_setting('request.headers', true)::json) AS _(h) $$;
+      -- An argument with a default, answered beside rows that hold a column of its name.
+      CREATE FUNCTION payment_rows(scope text DEFAULT 'all') RETURNS TABLE (scope text, asked text) LANGUAGE sql STABLE AS
+        $$ SELECT s, payment_rows.scope FROM unnest(ARRAY['own', 'all']) AS s $$;
       CREATE FUNCTION payment_told() RETURNS jsonb LANGUAGE sql AS $$
         SELECT jsonb_build_object('method', h ->> 'x-forwarded-method', 'uri', h ->> 'x-forwarded-uri', 'signal', h ->> 'x-signal-path', 'blob', h ->> 'x-blob-path')
         FROM (SELECT current_setting('request.headers', true)::json) AS _(h) $$;
@@ -121,7 +135,7 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       CREATE TABLE note (id int PRIMARY KEY, body text NOT NULL);
       GRANT SELECT, INSERT, UPDATE, DELETE ON note TO app_user;
       GRANT SELECT ON payment_list, payment TO anon, app_user;
-      GRANT EXECUTE ON FUNCTION payment_total(uuid), payment_approve(), payment_echo(), payment_echo(json), payment_search(), payment_told(), signal_in(json), claim_upload(), upload_allowed(text) TO anon, app_user;`));
+      GRANT EXECUTE ON FUNCTION payment_rows(text), payment_export(text, text), payment_total(uuid), payment_approve(), payment_echo(), payment_echo(json), payment_search(), payment_told(), signal_in(json), claim_upload(), upload_allowed(text) TO anon, app_user;`));
     await must(run("docker", ["run", "-d", "--rm", "--name", rest, "--network", network, "--network-alias", "crud",
       "-e", "PGRST_DB_URI=postgres://postgres:pw@database:5432/postgres", "-e", "PGRST_DB_ANON_ROLE=anon", "-e", `PGRST_JWT_SECRET=${SECRET}`, pinned("postgrest/postgrest")]));
     await must(run("docker", ["run", "-d", "--rm", "--name", door, "--network", network, "-p", "127.0.0.1::8080", "-v", `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro`,
@@ -226,6 +240,128 @@ Deno.test({ name: "a rewrite answers an app path as /crud answers its destinatio
       for (const target of [`http://door.example${approve}`, `/expense/payments/%30${one.slice(1)}/approve`, `//expense/payments/${one}/approve`, `/expense/payments/00000000-0000-0000-0000-000000000002/../${one}/approve`]) {
         assertEquals(await told("POST", target, "{}"), { as: "anon", path: target, id: null }, target);
       }
+    });
+    await t.step("a `has` key is one argument of the function, the client's value decoded and nothing else of its query", async () => {
+      const get = async (target: string) => {
+        const answer = await raw(port, `GET ${target} HTTP/1.1\r\nHost: door\r\nConnection: close`);
+        return answer.status === 200 ? json(answer) : answer.status;
+      };
+      assertEquals(await get("/exports/pdf?job_id=j1&token=t1"), { job_id: "j1", token: "t1", method: "GET", uri: "/exports/pdf?job_id=j1&token=t1" });
+      // Whatever a value holds it is that one argument's, as the client wrote it and PostgREST decodes it.
+      for (const [sent, got] of [
+        ["x%26scope%3Dall", "x&scope=all"], ["x%26job_id%3Dother", "x&job_id=other"], ["a%3Db", "a=b"], ["a=b", "a=b"], ["a%23b", "a#b"], ["a+b", "a b"], ["a%20b", "a b"],
+        ["a%2Bb", "a+b"], ["100%25", "100%"], ["%2526", "%26"], ["%C3%A9%E2%82%AC", "\u00e9\u20ac"], ["a%0Ab", "a\nb"], ["a%2Cb", "a,b"], ["a%3Fb?c", "a?b?c"],
+        ["%7Bhttp.request.host%7D", "{http.request.host}"], ["{re.rewrite_payment_export_has0.job_id}", "{re.rewrite_payment_export_has0.job_id}"], ["%22%27%60%5C", "\"'`\\"],
+      ]) {
+        const target = `/exports/pdf?job_id=j1&token=${sent}`;
+        assertEquals(await get(target), { job_id: "j1", token: got, method: "GET", uri: target }, sent);
+      }
+      assertEquals(await get("/exports/kind?kind=pdf-2026"), { job_id: "pdf", token: "2026", method: "GET", uri: "/exports/kind?kind=pdf-2026" });
+      // A key `has` does not name reaches the function in X-Forwarded-Uri alone, wherever it stands.
+      assertEquals((await get("/exports/pdf?scope=all&job_id=j1&token=x&scope=all&select=token")).token, "x");
+      // A key's own parameter is named as Next.js names it, by the key's letters, its case kept and
+      // a digit or a mark dropped.
+      assertEquals(await get("/exports/names/path?job_id=j1&dlToken=t1"), { job_id: "j1", token: "t1", method: "GET", uri: "/exports/names/path?job_id=j1&dlToken=t1" });
+      assertEquals(await get("/exports/names/path?jobid=j1&dltoken=t1"), 404);
+      // A value is a regular expression's to match in full, its named groups the parameters.
+      assertEquals(await get("/exports/kind?kind=xlsx-2026"), { job_id: "xlsx", token: "2026", method: "GET", uri: "/exports/kind?kind=xlsx-2026" });
+      // A group that takes no part in the match is an empty value.
+      assertEquals((await get("/exports/draft?kind=pdf-draft")).token, "-draft");
+      assertEquals(await get("/exports/draft?kind=pdf"), { job_id: "pdf", token: "", method: "GET", uri: "/exports/draft?kind=pdf" });
+      for (const target of ["/exports/kind?kind=xlsx-2026x", "/exports/kind?kind=axlsx-2026", "/exports/kind?kind=csv-2026", "/exports/kind?kind=", "/exports/kind"]) assertEquals(await get(target), 404, target);
+    });
+    await t.step("a value PostgREST would read as a filter on a function's answer meets no `has`", async () => {
+      // The shapes are those of the PostgREST the cluster pins (pOpExpr in its QueryParams.hs), which
+      // the door's expression mirrors: another version's are read from its source before this is moved.
+      // When this fails PostgREST has moved. Re-read, in its src/library/PostgREST/ApiRequest/QueryParams.hs
+      // at the new tag: pOpExpr, simpleOperator and quantOperator, and bring emit.cue's _rewriteOperand and
+      // the operators below to what they say; `reserved`, `reservedEmbeddable` and how `parse` tells a
+      // filter from a parameter, and bring schema.cue's refused keys and the keys below to those; and
+      // toRpcParams in its Plan/CallPlan.hs, which takes the last of an argument named twice. Only then
+      // name the new version here.
+      assertEquals(pinned("postgrest/postgrest").split("@")[0], "postgrest/postgrest:v16.4");
+      const get = (target: string) => raw(port, `GET ${target} HTTP/1.1\r\nHost: door\r\nConnection: close`);
+      const rows = (answer: { body: string }) => JSON.parse(answer.body.slice(answer.body.indexOf("["), answer.body.lastIndexOf("]") + 1));
+      // What the trap is, asked of /crud itself: the function is called by its default, and its rows are filtered.
+      assertEquals(rows(await get("/crud/rpc/payment_rows?scope=own")), [{ scope: "own", asked: "own" }, { scope: "all", asked: "own" }]);
+      assertEquals(rows(await get("/crud/rpc/payment_rows?scope=eq.own")), [{ scope: "own", asked: "all" }]);
+      const quantified = ["eq", "gte", "gt", "lte", "lt", "like", "ilike", "match", "imatch"], simple = ["neq", "cs", "cd", "ov", "sl", "sr", "nxr", "nxl", "adj"], search = ["fts", "plfts", "phfts", "wfts"];
+      const operands = [
+        ...[...quantified, ...simple, ...search, "isdistinct"].map((op) => `${op}.own`),
+        ...quantified.flatMap((op) => [`${op}(any).own`, `${op}(all).{own,all}`]),
+        ...search.flatMap((op) => [`${op}(english).own`, `${op}(pg_catalog simple).own`]),
+        "in.(own,all)", "in.(own)", "in.own", "is.null", "is.NOT_NULL", "is.true", "is.own", "eq.", "isdistinct.",
+      ];
+      for (const sent of [...operands, ...operands.map((o) => `not.${o}`), "not.own", "not."]) {
+        const value = encodeURIComponent(sent);
+        // PostgREST does not hand it to the function, by a filter or by refusing to parse it,
+        const direct = await get(`/crud/rpc/payment_rows?scope=${value}`);
+        assertEquals(direct.status === 200 ? rows(direct).some((r: { asked: string }) => r.asked === sent) : false, false, sent);
+        // so the rewrite is not this request's.
+        assertEquals(await get(`/exports/rows?scope=${value}`), { status: 404, body: "no rewrite" }, sent);
+      }
+      // Any other value is the argument, a dot in it or an operator's letters: at /crud and through the rewrite alike.
+      for (const sent of ["own", "john.doe@x.com", "1.5", "v1.2", ".eq.own", "eq", "EQ.own", "Not.eq.own", "x.eq.own", "noteq.own", "island.own", "inside.(own)", "equal.own", "liked.own", "eq(some).own", "eq(any)own", "fts().own", "fts(a-b).own", " eq.own", "nota.eq.own"]) {
+        const value = encodeURIComponent(sent), asked = [{ scope: "own", asked: sent }, { scope: "all", asked: sent }];
+        assertEquals(rows(await get(`/crud/rpc/payment_rows?scope=${value}`)), asked, sent);
+        assertEquals(rows(await get(`/exports/rows?scope=${value}`)), asked, sent);
+      }
+      // A parameter of the path is held to the same, as the door matched it, whatever the client's spelling;
+      for (const segment of ["eq.own", "not.eq.own", "is.null", "in.own", "like.own", "isdistinct.own", "fts.own", "neq.own", "not.own", "%65q.own", "eq%2Eown", "x/../eq.own"]) {
+        assertEquals(await get(`/exports/rows/${segment}`), { status: 404, body: "no rewrite" }, segment);
+      }
+      assertEquals(await get("/expense/payments/eq.1/total"), { status: 404, body: "no rewrite" });
+      // and a segment with a dot, or an operator's letters, is the argument as ever.
+      for (const segment of ["own", "1.5", "v1.2", "john.doe", "eq", "EQ.own", "x.eq.own", "noteq.own", "island.own", "equal.own", ".eq.own"]) {
+        assertEquals(rows(await get(`/exports/rows/${segment}`)), [{ scope: "own", asked: segment }, { scope: "all", asked: segment }], segment);
+      }
+      // A group of a value is held to the same, being what the destination places.
+      assertEquals(await get("/exports/pdf?job_id=eq.j1&token=t1"), { status: 404, body: "no rewrite" });
+
+      // The door holds the value, and the key is the destination's: one PostgREST keeps for itself, or
+      // reads as more than a name, is no argument whatever its value, so no destination places a parameter
+      // under it. Asked of /crud, none of them is looked up as the function's parameter,
+      const placing = (key: string) => emitFiles(program.replace(`      "payment-told":`, `      "placed": {source: "/exports/placed", methods: ["GET"], has: [{type: "query", key: "token"}], destination: "/crud/rpc/payment_rows?${key}=:token"}\n      "payment-told":`));
+      const sought = (key: string) => `Searched for the function public.payment_rows with parameter ${key},`;
+      for (const key of ["select", "columns", "on_conflict", "order", "limit", "offset", "and", "or", "not.and", "not.or", "rows.order", "rows.limit", "rows.offset", "rows.and", "rows.scope", "scope->a"]) {
+        for (const value of ["own", "(scope.eq.own)"]) assertEquals((await get(`/crud/rpc/payment_rows?${key}=${value}`)).body.includes(sought(key)), false, key);
+        await assertRejects(() => placing(key), Error, `a function's destination places :token under ${key}, which PostgREST does not read as an argument's name`);
+      }
+      // a logical key filtering what the function returns by its default, and a dotted one naming another argument;
+      assertEquals(rows(await get("/crud/rpc/payment_rows?and=(scope.eq.own)")), [{ scope: "own", asked: "all" }]);
+      assertEquals(rows(await get("/crud/rpc/payment_rows?rows.scope=own")), [{ scope: "own", asked: "own" }, { scope: "all", asked: "own" }]);
+      // Of an argument named twice PostgREST takes the last, however either is written, so a destination
+      // that named one again after a parameter would have its own word replace the client's.
+      for (const again of ["scope=all", "%73cope=all"]) {
+        assertEquals(rows(await get(`/crud/rpc/payment_rows?scope=own&${again}`)), [{ scope: "own", asked: "all" }, { scope: "all", asked: "all" }], again);
+        await assertRejects(() => emitFiles(program.replace(`      "payment-told":`, `      "placed": {source: "/exports/placed", methods: ["GET"], has: [{type: "query", key: "token"}], destination: "/crud/rpc/payment_rows?scope=:token&${again}"}\n      "payment-told":`)), Error, "a function's destination");
+      }
+      // and any other name is the parameter PostgREST looks for.
+      for (const key of ["foo", "Scope", "selects", "ordering", "andor", "_limit"]) {
+        assertEquals((await get(`/crud/rpc/payment_rows?${key}=own`)).body.includes(sought(key)), true, key);
+        await placing(key);
+      }
+    });
+    await t.step("a rewrite whose `has` is not met is no rewrite: a key absent, empty, or sent more than once", async () => {
+      for (const target of [
+        "/exports/pdf", "/exports/pdf?job_id=j1", "/exports/pdf?token=t1", "/exports/pdf?job_id=j1&token=", "/exports/pdf?job_id=j1&token", "/exports/pdf?job_id=&token=t1",
+        // Sent twice, plainly or escaped, with a value or none.
+        "/exports/pdf?job_id=j1&token=a&token=b", "/exports/pdf?job_id=j1&token=a&%74oken=b", "/exports/pdf?job_id=j1&%74%6F%6B%65%6E=a&token=b", "/exports/pdf?job_id=j1&token=a&token",
+        "/exports/pdf?job_id=j1&token=a&job%5Fid=j2", "/exports/pdf?token=a&job_id=j1&x=1&job_id=j2",
+        // A pair the door does not read, a `;` in it or an escape that is none, is no key.
+        "/exports/pdf?job_id=j1&token=a;b", "/exports/pdf?job_id=j1&token=%zz", "/exports/pdf?job_id=j1;token=t1",
+      ]) {
+        assertEquals(await raw(port, `GET ${target} HTTP/1.1\r\nHost: door\r\nConnection: close`), { status: 404, body: "no rewrite" }, target);
+      }
+      // The methods are the rewrite's as ever.
+      assertEquals(await ask("POST", "/exports/pdf?job_id=j1&token=t1"), { status: 404, body: "no rewrite" });
+      // A key that only begins or ends as the named one is another key.
+      assertEquals((await ask("GET", "/exports/pdf?job_id=j1&token=t1&xtoken=b&token2=c&tokens")).body.token, "t1");
+    });
+    await t.step("`has` is a condition of a table or view's rewrite too, whose query the client's follows as ever", async () => {
+      assertEquals(await ask("GET", "/expense/settled?select=status"), { status: 200, body: [{ status: "settled" }] });
+      assertEquals(await ask("GET", "/expense/settled?select=id"), { status: 404, body: "no rewrite" });
+      assertEquals(await ask("GET", "/expense/settled"), { status: 404, body: "no rewrite" });
     });
     await t.step("a function takes the destination's query alone and reads the client's from X-Forwarded-Uri", async () => {
       // A repeated key reaches the function whole, and binds to none of its arguments.
