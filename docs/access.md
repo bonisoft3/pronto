@@ -217,6 +217,15 @@ beforehand by the owner: `CREATE EXTENSION IF NOT EXISTS` finds one that exists
 without asking for a privilege. It needs `BYPASSRLS` because validation
 migrations and machine writers run as it under forced row-level security.
 
+The check needs PostgreSQL 16 or later: it reads the membership options
+(`set_option`, `inherit_option`, `admin_option`) that `pg_auth_members` gained
+there, and `REVOKE ... GRANTED BY` and `GRANT ... WITH INHERIT, SET` are its fixes.
+
+Roles belong to the cluster, not the database, so one cluster serves one checked
+app: a second app's model names other roles, memberships or settings, and the
+first's check refuses them as extras, and the reverse. Apps that share a server
+each need their own instance until a model can name roles it shares.
+
 The check refuses any difference, not only a missing one. A setting that is the
 same duration spelled differently (`'5000'` for `'5s'`) differs, and is refused.
 Roles outside the model that are members of model roles that neither bypass RLS nor replicate, passwords (`pg_roles` hides them; they are the
