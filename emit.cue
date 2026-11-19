@@ -2224,6 +2224,9 @@ _sqlType: {
 		ord:    i + 1
 		member: x.member
 		role:   x.role
+		// What GRANT gives a member that does not inherit (authenticator) is
+		// SET alone; an admin option is never the model's.
+		inherit: access.roles[x.member].inherit
 		fix:    "GRANT \((#roleName & {role: x.role, declared: access.roles[x.role].declared}).out) TO \((#roleName & {role: x.member, declared: access.roles[x.member].declared}).out);"
 	}]
 	_settings: [for r in access.order for k in #settingKeys if access.roles[r].settings[k] != _|_ {
@@ -2266,8 +2269,8 @@ _sqlType: {
 		"rows": [for r in rows.roles {(#sqlRow & {vs: [r.ord, r.name, r.a.login, r.a.inherit, r.a.superuser, r.a.createrole, r.a.createdb, r.a.bypassrls, r.a.replication, r.create, r.alter]}).out}]
 	}).out
 	let edgeTable = (#valuesOr & {
-		cols: [{name: "ord", type: "int"}, {name: "member", type: "text"}, {name: "role", type: "text"}, {name: "fix", type: "text"}]
-		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.ord, x.member, x.role, x.fix]}).out}]
+		cols: [{name: "ord", type: "int"}, {name: "member", type: "text"}, {name: "role", type: "text"}, {name: "inherit", type: "boolean"}, {name: "fix", type: "text"}]
+		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.ord, x.member, x.role, x.inherit, x.fix]}).out}]
 	}).out
 	let pairTable = (#valuesOr & {
 		cols: [{name: "member", type: "text"}, {name: "role", type: "text"}]
@@ -2295,6 +2298,16 @@ _sqlType: {
 		"""
 		SELECT 3, e.ord, e.fix FROM \(edgeTable)
 		      WHERE NOT EXISTS (SELECT FROM pg_auth_members m WHERE m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role)))
+		""",
+		"""
+		SELECT 3, 1000 + e.ord, format('REVOKE ADMIN OPTION FOR %I FROM %I GRANTED BY %I;', e.role, e.member, pg_get_userbyid(m.grantor))
+		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+		      WHERE m.admin_option
+		""",
+		"""
+		SELECT 3, 2000 + e.ord, format('GRANT %I TO %I WITH INHERIT %s, SET TRUE GRANTED BY %I;', e.role, e.member, CASE WHEN e.inherit THEN 'TRUE' ELSE 'FALSE' END, pg_get_userbyid(m.grantor))
+		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+		      WHERE NOT (m.set_option AND m.inherit_option = e.inherit)
 		""",
 		"""
 		SELECT 4, 0, format('REVOKE %I FROM %I GRANTED BY %I;', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor))

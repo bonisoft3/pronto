@@ -159,6 +159,23 @@ Deno.test("a CREATE on the schema that a non-owner granted is revoked as its gra
   });
 });
 
+Deno.test("a membership of authenticator that carries an admin option, or inherits or cannot SET, is refused and fixed", async () => {
+  const generated = await emitFiles(paymentProgram());
+  const check = sql(await emitFiles(checked(paymentProgram())), "001_roles");
+  await withPostgres(async (execute) => {
+    await must(execute, "postgres", MIGRATOR);
+    await must(execute, "postgres", sql(generated, "001_roles") + sql(generated, "002_grants"));
+    await must(execute, "postgres", "GRANT anon TO authenticator WITH ADMIN OPTION; GRANT service TO authenticator WITH INHERIT TRUE, SET FALSE;");
+    const fixes = await refused(execute, "migrator", check);
+    assert.deepEqual(fixes, [
+      "REVOKE ADMIN OPTION FOR anon FROM authenticator GRANTED BY postgres;",
+      "GRANT service TO authenticator WITH INHERIT FALSE, SET TRUE GRANTED BY postgres;",
+    ]);
+    await must(execute, "postgres", fixes.join("\n"));
+    await must(execute, "migrator", check);
+  });
+});
+
 Deno.test("the login that migrates is held to what its migrations need", async () => {
   const generated = await emitFiles(paymentProgram());
   const check = sql(await emitFiles(checked(paymentProgram())), "001_roles");
