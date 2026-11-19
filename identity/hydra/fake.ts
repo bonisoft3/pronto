@@ -7,16 +7,19 @@ import { base64url, randomToken } from "../oidc.ts";
 import { esc, json, page, type Provider } from "../broker/main.ts";
 
 const enc = new TextEncoder();
-const ISSUER = "https://fake-google.localhost";
-const CLIENT = "fake-google-client";
-const SECRET = "fake-google-secret";
 
 /** The test people a reader may sign in as: two, so "a stranger to another
  * person" can be tried by hand. */
 export const PEOPLE = ["tester", "tester-2"];
 
-export async function fakeGoogle(issuer: string): Promise<{ provider: Provider; handle: (req: Request, url: URL) => Promise<Response> | null }> {
-  const base = `${issuer.replace(/\/$/, "")}/fake/google`;
+export async function fakeProvider(
+  issuer: string,
+  name: "google" | "apple" = "google",
+): Promise<{ provider: Provider; handle: (req: Request, url: URL) => Promise<Response> | null }> {
+  const providerIssuer = `https://fake-${name}.localhost`;
+  const clientId = `fake-${name}-client`;
+  const clientSecret = `fake-${name}-secret`;
+  const base = `${issuer.replace(/\/$/, "")}/fake/${name}`;
   const pair = await crypto.subtle.generateKey(
     { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   const jwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid: "fake-1" };
@@ -30,14 +33,15 @@ export async function fakeGoogle(issuer: string): Promise<{ provider: Provider; 
 
   function authorize(url: URL): Response {
     const q = url.searchParams;
-    if (q.get("client_id") !== CLIENT || !q.get("redirect_uri") || !q.get("state") || !q.get("nonce")) {
+    if (q.get("client_id") !== clientId || !q.get("redirect_uri") || !q.get("state") || !q.get("nonce")) {
       return page("Test sign-in refused", `<h1>This test sign-in can't continue</h1>`, 400);
     }
     const id = randomToken(16);
     asked.set(id, { nonce: q.get("nonce")!, state: q.get("state")!, redirect: q.get("redirect_uri")!, expires: Date.now() + 600_000 });
     const links = PEOPLE.map((who) => `<p><a class="go" href="${esc(`${base}/approve?id=${id}&who=${who}`)}">Continue as ${esc(who)}</a></p>`).join("\n");
+    const displayName = name === "apple" ? "Apple" : "Google";
     return page("Test sign-in", `<h1>Test sign-in</h1>
-<p>This is not Google: the broker on this machine has no Google client, so it signs in a test person instead.</p>
+<p>This is not ${displayName}: the broker on this machine has no ${displayName} client, so it signs in a test person instead.</p>
 ${links}`);
   }
 
@@ -56,26 +60,34 @@ ${links}`);
   async function token(req: Request): Promise<Response> {
     const f = new URLSearchParams(await req.text());
     const c = live(codes, f.get("code"));
-    if (!c || f.get("client_id") !== CLIENT || f.get("client_secret") !== SECRET || f.get("redirect_uri") !== c.redirect) {
+    if (!c || f.get("client_id") !== clientId || f.get("client_secret") !== clientSecret || f.get("redirect_uri") !== c.redirect) {
       return json(400, { error: "invalid_grant" });
     }
     const now = Math.floor(Date.now() / 1000);
     const head = base64url(enc.encode(JSON.stringify({ alg: "RS256", kid: jwk.kid })));
-    const body = base64url(enc.encode(JSON.stringify({ iss: ISSUER, aud: CLIENT, sub: c.sub, nonce: c.nonce, iat: now, exp: now + 300 })));
+    const body = base64url(enc.encode(JSON.stringify({ iss: providerIssuer, aud: clientId, sub: c.sub, nonce: c.nonce, iat: now, exp: now + 300 })));
     const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
     return json(200, { id_token: `${head}.${body}.${base64url(sig)}`, token_type: "Bearer", expires_in: 300 });
   }
 
   return {
     provider: {
-      name: "google", label: "a test person", authUrl: `${base}/auth`, tokenUrl: `${base}/token`, issuers: [ISSUER],
-      keys: async (kid) => (kid === jwk.kid ? jwk : undefined), clientId: CLIENT, clientSecret: SECRET,
+      name, label: "a test person", authUrl: `${base}/auth`, tokenUrl: `${base}/token`, issuers: [providerIssuer],
+      keys: async (kid) => (kid === jwk.kid ? jwk : undefined), clientId, clientSecret,
     },
     handle(req, url) {
-      if (req.method === "GET" && url.pathname === "/fake/google/auth") return Promise.resolve(authorize(url));
-      if (req.method === "GET" && url.pathname === "/fake/google/approve") return Promise.resolve(approve(url));
-      if (req.method === "POST" && url.pathname === "/fake/google/token") return token(req);
+      if (req.method === "GET" && url.pathname === `/fake/${name}/auth`) return Promise.resolve(authorize(url));
+      if (req.method === "GET" && url.pathname === `/fake/${name}/approve`) return Promise.resolve(approve(url));
+      if (req.method === "POST" && url.pathname === `/fake/${name}/token`) return token(req);
       return null;
     },
   };
+}
+
+export function fakeGoogle(issuer: string) {
+  return fakeProvider(issuer, "google");
+}
+
+export function fakeApple(issuer: string) {
+  return fakeProvider(issuer, "apple");
 }

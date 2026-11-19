@@ -49,6 +49,24 @@ const fakeGoogle = async (req: Request) => {
     const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
     return Response.json({ id_token: `${head}.${body}.${base64url(sig)}` });
   }
+  if (url.pathname === "/apple-token") {
+    const f = new URLSearchParams(await req.text());
+    const c = pending.get(f.get("code") ?? "");
+    pending.delete(f.get("code") ?? "");
+    if (!c || f.get("client_secret") !== "apple-secret" || f.get("redirect_uri") !== c.redirect) return Response.json({ error: "invalid_grant" }, { status: 400 });
+    const head = base64url(enc.encode(JSON.stringify({ alg: "RS256", kid: "g1" })));
+    const body = base64url(enc.encode(JSON.stringify({
+      iss: "https://appleid.apple.com",
+      aud: "apple-client",
+      sub: c.sub,
+      nonce: c.nonce,
+      exp: Math.floor(Date.now() / 1000) + 600,
+      email: "apple.reader@privaterelay.appleid.com",
+      email_verified: "true",
+    })));
+    const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
+    return Response.json({ id_token: `${head}.${body}.${base64url(sig)}` });
+  }
   return new Response("not found", { status: 404 });
 };
 const ISSUER = "https://id.example";
@@ -180,6 +198,66 @@ cases.push(["a tenant with a valid _pronto-identity DNS TXT record 302-redirects
   assertEquals(forgedRes.status, 200, "replayed TXT record on another domain still shows confirmation page");
 }]);
 
+cases.push(["Sign in with Apple form_post callback extracts first-consent user profile and mints pairwise ID token", async () => {
+  const key = await tenantTrustKey(SECRET);
+  txtRecords.set(tenantTxtHost(TRUSTED), [await tenantTxtValue(key, ISSUER, TRUSTED)]);
+  const verifier = randomToken(32);
+  const q = new URLSearchParams({
+    client_id: TRUSTED,
+    redirect_uri: `${TRUSTED}/auth/oidc/apple/callback`,
+    response_type: "code",
+    scope: "openid profile email",
+    state: "st-apple",
+    nonce: "nn-apple",
+    provider: "apple",
+    code_challenge: await sha256url(verifier),
+    code_challenge_method: "S256",
+  });
+  const direct = await call(`${ISSUER}/authorize?${q}`);
+  assertEquals(direct.status, 302);
+  const toApple = new URL(direct.headers.get("location")!);
+  assertEquals(toApple.searchParams.get("response_mode"), "form_post");
+  assertEquals(toApple.searchParams.get("scope"), "name email");
+
+  const appleCode = crypto.randomUUID();
+  pending.set(appleCode, {
+    nonce: toApple.searchParams.get("nonce")!,
+    sub: "apple-user-001",
+    redirect: toApple.searchParams.get("redirect_uri")!,
+    scope: "name email",
+  });
+  const formPost = await call(`${ISSUER}/callback/apple`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code: appleCode,
+      state: toApple.searchParams.get("state")!,
+      user: JSON.stringify({ name: { firstName: "Ada", lastName: "Lovelace" }, email: "apple.reader@privaterelay.appleid.com" }),
+    }),
+  });
+  assertEquals(formPost.status, 302);
+  const landed = new URL(formPost.headers.get("location")!);
+  assertEquals(`${landed.origin}${landed.pathname}`, `${TRUSTED}/auth/oidc/apple/callback`);
+  assertEquals(landed.searchParams.get("state"), "st-apple");
+
+  const redeemed = await redeem(TRUSTED, landed.searchParams.get("code")!, verifier, {
+    redirect_uri: `${TRUSTED}/auth/oidc/apple/callback`,
+  });
+  assertEquals(redeemed.status, 200);
+  const claims = await verifyIdToken(redeemed.body.id_token, {
+    alg: "ES256",
+    issuers: [ISSUER],
+    audience: TRUSTED,
+    nonce: "nn-apple",
+    keys: brokerKeys,
+  });
+  assertEquals([claims.name, claims.email, claims.email_verified], [
+    "Ada Lovelace",
+    "apple.reader@privaterelay.appleid.com",
+    true,
+  ]);
+}]);
+
 
 // One test owns the fake Google from start to shutdown, so no operation of
 // its server outlives the test; each case is a step within it.
@@ -190,10 +268,16 @@ Deno.test("the broker end to end", async (t) => {
     name: "google", label: "Google", authUrl: `${G}/auth`, tokenUrl: `${G}/token`, issuers: ["https://accounts.google.com"],
     keys: async (kid) => (kid === "g1" ? googleJwk : undefined), clientId: "op-client", clientSecret: "op-secret",
   };
+  const appleProvider: Provider = {
+    name: "apple", label: "Apple", authUrl: `${G}/auth`, tokenUrl: `${G}/apple-token`, issuers: ["https://appleid.apple.com"],
+    keys: async (kid) => (kid === "g1" ? googleJwk : undefined), clientId: "apple-client", clientSecret: "apple-secret",
+    formatScope: (s) => [s.includes("profile") ? "name" : "", s.includes("email") ? "email" : ""].filter(Boolean).join(" "),
+    responseMode: "form_post", prompt: null,
+  };
   handler = await broker({
     issuer: ISSUER,
     secret: SECRET,
-    providers: [provider],
+    providers: [provider, appleProvider],
     resolveTxt: async (host) => txtRecords.get(host) ?? [],
   });
   try {

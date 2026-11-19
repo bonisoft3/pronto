@@ -99,7 +99,12 @@ export function profileClaims(claims: Record<string, unknown>, scopes: readonly 
     if (typeof claims.name === "string" && claims.name.trim() !== "") out.name = claims.name.trim().slice(0, 120);
     if (typeof claims.picture === "string" && claims.picture.startsWith("https://")) out.picture = claims.picture;
   }
-  if (scopes.includes("email") && claims.email_verified === true && typeof claims.email === "string" && claims.email.trim() !== "") {
+  if (
+    scopes.includes("email") &&
+    (claims.email_verified === true || claims.email_verified === "true") &&
+    typeof claims.email === "string" &&
+    claims.email.trim() !== ""
+  ) {
     out.email = claims.email.trim().toLowerCase().slice(0, 254);
     out.email_verified = true;
   }

@@ -25,7 +25,7 @@ export interface IceServer {
 }
 export interface Addresses {
   local: (value: string, base: string) => string | null
-  addressRelease: (out: string, options?: { htmlSuffix?: string; iceServers?: IceServer[]; frames?: string[] }) => Promise<Release>
+  addressRelease: (out: string, options?: { htmlSuffix?: string; iceServers?: IceServer[]; frames?: string[]; nativeBridge?: string | Uint8Array; ed25519PrivateKey?: CryptoKey | Uint8Array }) => Promise<Release & { signature?: string }>
   parseIceServers: (text: string) => IceServer[]
   retainReleases: (out: string, previous: string) => Promise<Set<string>>
   separateAssetDirectories: (out: string, previous: string) => void
@@ -67,9 +67,9 @@ const REALM_POLICY = "sandbox allow-scripts allow-popups allow-popups-to-escape-
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
  * hints to send each route's preloads as early hints. The terminal config
  * carries the target's ICE servers. */
-export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers, domain }: { previous?: string; iceServers: IceServer[]; domain?: string }): Promise<EdgeHints> {
+export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers, domain, nativeBridge, ed25519PrivateKey }: { previous?: string; iceServers: IceServer[]; domain?: string; nativeBridge?: string | Uint8Array; ed25519PrivateKey?: CryptoKey | Uint8Array }): Promise<EdgeHints> {
   const { addressRelease, local, retainReleases } = addresses
-  const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers, frames: await edgeFrames(out, domain) })
+  const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers, frames: await edgeFrames(out, domain), ...(nativeBridge !== undefined ? { nativeBridge } : {}), ...(ed25519PrivateKey !== undefined ? { ed25519PrivateKey } : {}) })
   const { imports, screens, cfg } = release
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
   if (previous) await retainReleases(out, previous)

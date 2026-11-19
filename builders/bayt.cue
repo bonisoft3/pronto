@@ -27,6 +27,7 @@ import (
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
+	distribution "github.com/bonisoft3/pronto/distribution"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
 	"github.com/bonisoft3/pronto/identity"
@@ -76,6 +77,8 @@ import (
 		// under the switch (project.imageDir); write.ts holds it to the
 		// checkout.
 		dir:         *"apps/\(app)" | string
+		domain:      *"" | string
+		native:      *false | bool
 		generateCmd: string
 		testCmd:     string
 		targets:     *[] | [...string]
@@ -634,13 +637,28 @@ import (
 		// here rather than served as a dead terminal. The graph cannot carry
 		// this edge: the targets an app commits are its mirror's, and a
 		// cross-project dep includes a tree the mirror lacks.
+		_nativeDistribution: distribution.#Project & {domain: B.meta.domain}
 		_bundleGates: {
-			build:     {default: true, platforms: []}
+			build:     {default: true, platforms: [if B.meta.native {"android"}, if B.meta.native {"ios"}]}
 			launch:    {default: true, platforms: ["host", "compose", "cloudflare"]}
 			integrate: {default: true, platforms: ["host"]}
 			release:   {default: false, platforms: [for t in B.meta.targets if t == "pages" || t == "cloudflare" {t}]}
 		}
 		_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
+		if B.meta.native {
+			files: "say.yaml": say: build: rulemap: {
+				android: {
+					platform: "android"
+					stop:     true
+					cmds:     [{do: _nativeDistribution.nativeAndroid}]
+				}
+				ios: {
+					platform: "ios"
+					stop:     true
+					cmds:     [{do: _nativeDistribution.nativeIos}]
+				}
+			}
+		}
 		files: "say.yaml": say: {for verb, g in _bundleGates if g.default || len(g.platforms) > 0 {
 			(verb): rulemap: {
 				if g.default {"omnishell-bundle": _bundleGate}

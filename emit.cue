@@ -3405,7 +3405,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		screenSources:   [for _, s in D.code.surface.screens for path in [s.files.html, s.files.css] {path}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
 		meta: {
-			app:         D.code.meta.name
+			app: D.code.meta.name
+			if D.code.meta.domain != _|_ {
+				domain: "\(D.code.meta.domain)"
+			}
+			native:      D.code.capabilities.native
 			generateCmd: distribution.#Project.compiler
 			testCmd:     D.loop.surface.testCmd
 			targets:     D.code.meta.targets

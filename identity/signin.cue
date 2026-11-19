@@ -191,6 +191,8 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 								BROKER_FAKE_GOOGLE:   "1"
 								GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
 								GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+								APPLE_CLIENT_ID:      "${APPLE_CLIENT_ID:-}"
+								APPLE_CLIENT_SECRET:  "${APPLE_CLIENT_SECRET:-}"
 								HYDRA_PUBLIC:         {peer: "identity-hydra", port: "public", prefix: "http://"}
 								HYDRA_ADMIN:          {peer: "identity-hydra", port: "admin", prefix: "http://"}
 								PORT:                 {port: "http", part: "port"}
@@ -226,6 +228,8 @@ issuerPortEnv: "IDENTITY_HTTP_PORT"
 								BROKER_FAKE_GOOGLE:   "1"
 								GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
 								GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+								APPLE_CLIENT_ID:      "${APPLE_CLIENT_ID:-}"
+								APPLE_CLIENT_SECRET:  "${APPLE_CLIENT_SECRET:-}"
 								HYDRA_PUBLIC:         "http://identity-hydra:28453"
 								HYDRA_ADMIN:          "http://identity-hydra:28455"
 								PORT:                 "28443"

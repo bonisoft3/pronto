@@ -132,3 +132,20 @@ gcpVerifyLiveTarget: strings.Contains(_project.verifyGcp, "SAY_VERIFY_ARGS_TARGE
 gcpVerifyDomain:     strings.Contains(_project.verifyGcp, "'SAY_VERIFY_ARGS_DOMAIN' in $env") & true
 gcpVerifyHttp:       strings.Contains(_project.verifyGcp, "verify verify.ts") & true
 gcpVerifyDrivers:    strings.Contains(_project.verifyGcp, "gcp verify.nu") & true
+
+_nativeApp: pronto.#App & {
+	for k, v in _code if k != "capabilities" {(k): v}
+	capabilities: {
+		for k, v in _code.capabilities if k != "native" {(k): v}
+		native: true
+	}
+}
+_nativeBuild: (pronto.#DefaultBuild & {code: _nativeApp, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
+nativeBuildPlatforms: [
+	_nativeBuild.files["say.yaml"].say.build.rulemap.android.platform,
+	_nativeBuild.files["say.yaml"].say.build.rulemap.ios.platform,
+	_nativeBuild.files["say.yaml"].say.build.rulemap["omnishell-bundle-android"].platform,
+	_nativeBuild.files["say.yaml"].say.build.rulemap["omnishell-bundle-ios"].platform,
+] & ["android", "ios", "android", "ios"]
+nativeBuildCommands: strings.Contains(_nativeBuild.files["say.yaml"].say.build.rulemap.android.cmds[0].do, "native.ts) . --platform android") &
+	strings.Contains(_nativeBuild.files["say.yaml"].say.build.rulemap.ios.cmds[0].do, "native.ts) . --platform ios") & true

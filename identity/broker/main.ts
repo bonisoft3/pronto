@@ -35,6 +35,9 @@ export interface Provider {
   keys: KeySource;
   clientId: string;
   clientSecret: string;
+  responseMode?: "query" | "form_post";
+  formatScope?: (scopes: readonly OptionalScope[]) => string;
+  prompt?: string | null;
 }
 
 export function google(env: (k: string) => string | undefined): Provider | null {
@@ -50,6 +53,46 @@ export function google(env: (k: string) => string | undefined): Provider | null 
     clientId,
     clientSecret,
   };
+}
+
+export function apple(env: (k: string) => string | undefined): Provider | null {
+  const clientId = env("APPLE_CLIENT_ID"), clientSecret = env("APPLE_CLIENT_SECRET");
+  if (!clientId || !clientSecret) return null;
+  return {
+    name: "apple",
+    label: "Apple",
+    authUrl: env("APPLE_AUTH_URL") || "https://appleid.apple.com/auth/authorize",
+    tokenUrl: env("APPLE_TOKEN_URL") || "https://appleid.apple.com/auth/token",
+    issuers: ["https://appleid.apple.com", "appleid.apple.com"],
+    keys: jwksSource(env("APPLE_JWKS_URL") || "https://appleid.apple.com/auth/keys"),
+    clientId,
+    clientSecret,
+    responseMode: "form_post",
+    formatScope: (scopes) => scopes.map((s) => (s === "profile" ? "name" : s)).join(" "),
+    prompt: null,
+  };
+}
+
+export function parseAppleUserJson(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as {
+      name?: { firstName?: string; lastName?: string };
+      email?: string;
+    };
+    const out: Record<string, unknown> = {};
+    const fullName = [parsed?.name?.firstName, parsed?.name?.lastName]
+      .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      .join(" ")
+      .trim();
+    if (fullName) out.name = fullName;
+    if (typeof parsed?.email === "string" && parsed.email.trim().length > 0) {
+      out.email = parsed.email.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export async function hmacKey(secret: string, label: string): Promise<CryptoKey> {
@@ -163,10 +206,22 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
 
   function toProvider(provider: Provider, legToken: string, pn: string, scopes: readonly OptionalScope[] = []): Response {
     const to = new URL(provider.authUrl);
-    to.search = new URLSearchParams({
-      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
-      scope: ["openid", ...scopes].join(" "), state: legToken, nonce: pn, prompt: "select_account",
-    }).toString();
+    const scopeStr = provider.formatScope ? provider.formatScope(scopes) : ["openid", ...scopes].join(" ");
+    const params: Record<string, string> = {
+      client_id: provider.clientId,
+      redirect_uri: callback(provider.name),
+      response_type: "code",
+      state: legToken,
+      nonce: pn,
+    };
+    if (scopeStr) params.scope = scopeStr;
+    if (provider.responseMode === "form_post" && scopeStr) {
+      params.response_mode = "form_post";
+    }
+    if (provider.prompt !== null) {
+      params.prompt = provider.prompt ?? "select_account";
+    }
+    to.search = new URLSearchParams(params).toString();
     return new Response(null, { status: 302, headers: { location: to.toString(), "cache-control": "no-store", "referrer-policy": "no-referrer" } });
   }
 
@@ -199,23 +254,28 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
     return toProvider(provider, legToken, leg.pn as string);
   }
 
-  async function arrive(name: string, url: URL): Promise<Response> {
+  async function arrive(name: string, req: Request, url: URL): Promise<Response> {
+    const params = new URLSearchParams(url.searchParams);
+    if (req.method === "POST") {
+      const form = new URLSearchParams(await req.text());
+      for (const [k, v] of form.entries()) params.set(k, v);
+    }
     const provider = providers.get(name);
-    const leg = await unseal(stateKey, url.searchParams.get("state"));
+    const leg = await unseal(stateKey, params.get("state"));
     if (!provider || !leg || (leg.r as AuthRequest).provider !== name) {
       return page("Sign-in refused", `<h1>This sign-in can't continue</h1><p>Go back to the app and start again.</p>`, 400);
     }
     const r = leg.r as AuthRequest;
     // Each refusal says why on the broker's log: the app is told only access_denied.
-    if (url.searchParams.get("error")) {
-      console.error(`broker: ${name} refused: ${url.searchParams.get("error")}`);
+    if (params.get("error")) {
+      console.error(`broker: ${name} refused: ${params.get("error")}`);
       return back(r.redirectUri, { error: "access_denied", state: r.state });
     }
     const exchanged = await fetch(provider.tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        grant_type: "authorization_code", code: url.searchParams.get("code") ?? "", client_id: provider.clientId,
+        grant_type: "authorization_code", code: params.get("code") ?? "", client_id: provider.clientId,
         client_secret: provider.clientSecret, redirect_uri: callback(provider.name),
       }),
     });
@@ -234,10 +294,13 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
       console.error(`broker: ${name}'s id token refused: ${e.message}`);
       return back(r.redirectUri, { error: "access_denied", state: r.state });
     }
+    const mergedClaims = provider.name === "apple"
+      ? { ...parseAppleUserJson(params.get("user")), ...claims }
+      : claims;
     const sub = await pairwiseSubject(pairwise, r.tenant, provider.name, claims.sub);
     const code = codes.issue({
       tenant: r.tenant, redirectUri: r.redirectUri, challenge: r.challenge, nonce: r.nonce, sub, provider: provider.name,
-      ...profileClaims(claims, r.scopes ?? []),
+      ...profileClaims(mergedClaims, r.scopes ?? []),
     });
     return back(r.redirectUri, { code, state: r.state });
   }
@@ -272,7 +335,9 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
       if (req.method === "GET" && path === "/jwks") return json(200, { keys: [publicJwk] });
       if (req.method === "GET" && path === "/authorize") return await authorize(url);
       if (req.method === "GET" && path === "/authorize/continue") return await proceed(url);
-      if (req.method === "GET" && path.startsWith("/callback/")) return await arrive(path.slice("/callback/".length), url);
+      if ((req.method === "GET" || req.method === "POST") && path.startsWith("/callback/")) {
+        return await arrive(path.slice("/callback/".length), req, url);
+      }
       if (req.method === "POST" && path === "/token") return await token(req);
       if (req.method === "GET" && path === "/health") return json(200, { ok: true });
       return json(404, { error: "not found" });
@@ -288,7 +353,7 @@ if (import.meta.main) {
   const issuer = env("BROKER_ISSUER");
   const secret = env("BROKER_SECRET");
   if (!issuer || !secret) throw new Error("BROKER_ISSUER and BROKER_SECRET are required");
-  const providers = [google(env)].filter((x): x is Provider => x !== null);
-  if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
+  const providers = [google(env), apple(env)].filter((x): x is Provider => x !== null);
+  if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or APPLE_CLIENT_ID/APPLE_CLIENT_SECRET");
   Deno.serve({ port: Number(env("PORT") ?? 28443) }, await broker({ issuer, secret, providers }));
 }

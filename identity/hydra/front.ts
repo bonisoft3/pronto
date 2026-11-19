@@ -17,8 +17,8 @@
 // each application already linked.
 import { Refused, randomToken, verifyIdToken } from "../oidc.ts";
 import { callbackOf, type OptionalScope, pairwiseKey, pairwiseSubject, profileClaims, tenantOf } from "../broker/core.ts";
-import { esc, google, hmacKey, json, page, type Provider, seal, tenantVerifier, type TxtResolver, unseal } from "../broker/main.ts";
-import { fakeGoogle } from "./fake.ts";
+import { apple, esc, google, hmacKey, json, page, parseAppleUserJson, type Provider, seal, tenantVerifier, type TxtResolver, unseal } from "../broker/main.ts";
+import { fakeApple, fakeGoogle } from "./fake.ts";
 
 export interface Hydra {
   /** Hydra's public API, as the front reaches it. */
@@ -121,10 +121,22 @@ export async function front(p: {
 
   function toProvider(provider: Provider, legToken: string, pn: string, scopes: readonly OptionalScope[] = []): Response {
     const to = new URL(provider.authUrl);
-    to.search = new URLSearchParams({
-      client_id: provider.clientId, redirect_uri: callback(provider.name), response_type: "code",
-      scope: ["openid", ...scopes].join(" "), state: legToken, nonce: pn, prompt: "select_account",
-    }).toString();
+    const scopeStr = provider.formatScope ? provider.formatScope(scopes) : ["openid", ...scopes].join(" ");
+    const params: Record<string, string> = {
+      client_id: provider.clientId,
+      redirect_uri: callback(provider.name),
+      response_type: "code",
+      state: legToken,
+      nonce: pn,
+    };
+    if (scopeStr) params.scope = scopeStr;
+    if (provider.responseMode === "form_post" && scopeStr) {
+      params.response_mode = "form_post";
+    }
+    if (provider.prompt !== null) {
+      params.prompt = provider.prompt ?? "select_account";
+    }
+    to.search = new URLSearchParams(params).toString();
     return go(to.toString());
   }
 
@@ -161,9 +173,14 @@ export async function front(p: {
     return toProvider(provider, legToken, leg.pn as string);
   }
 
-  async function arrive(name: string, url: URL): Promise<Response> {
+  async function arrive(name: string, req: Request, url: URL): Promise<Response> {
+    const params = new URLSearchParams(url.searchParams);
+    if (req.method === "POST") {
+      const form = new URLSearchParams(await req.text());
+      for (const [k, v] of form.entries()) params.set(k, v);
+    }
     const provider = providers.get(name);
-    const leg = await unseal(stateKey, url.searchParams.get("state"));
+    const leg = await unseal(stateKey, params.get("state"));
     if (!provider || !leg || leg.p !== name) {
       return page("Sign-in refused", `<h1>This sign-in can't continue</h1><p>Go back to the app and start again.</p>`, 400);
     }
@@ -174,12 +191,12 @@ export async function front(p: {
       const { redirect_to } = await adminJson("PUT", `/oauth2/auth/requests/login/reject?login_challenge=${challenge}`, { error: "access_denied" });
       return go(redirect_to as string);
     };
-    if (url.searchParams.get("error")) return await refuse(`${name} refused: ${url.searchParams.get("error")}`);
+    if (params.get("error")) return await refuse(`${name} refused: ${params.get("error")}`);
     const exchanged = await fetcher(provider.tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        grant_type: "authorization_code", code: url.searchParams.get("code") ?? "", client_id: provider.clientId,
+        grant_type: "authorization_code", code: params.get("code") ?? "", client_id: provider.clientId,
         client_secret: provider.clientSecret, redirect_uri: callback(provider.name),
       }),
     });
@@ -198,7 +215,10 @@ export async function front(p: {
     // is derived for that tenant and no other.
     const sub = await pairwiseSubject(pairwise, leg.t as string, provider.name, claims.sub);
     const scopes = (leg.scopes as OptionalScope[] | undefined) ?? [];
-    const profile = profileClaims(claims, scopes);
+    const mergedClaims = provider.name === "apple"
+      ? { ...parseAppleUserJson(params.get("user")), ...claims }
+      : claims;
+    const profile = profileClaims(mergedClaims, scopes);
     const { redirect_to } = await adminJson("PUT", `/oauth2/auth/requests/login/accept?login_challenge=${challenge}`, {
       subject: sub, remember: false, context: { idp: provider.name, scopes, profile },
     });
@@ -267,7 +287,9 @@ export async function front(p: {
       if (req.method === "GET" && path === "/login") return await login(url);
       if (req.method === "GET" && path === "/login/continue") return await proceed(url);
       if (req.method === "GET" && path === "/consent") return await consent(url);
-      if (req.method === "GET" && path.startsWith("/callback/")) return await arrive(path.slice("/callback/".length), url);
+      if ((req.method === "GET" || req.method === "POST") && path.startsWith("/callback/")) {
+        return await arrive(path.slice("/callback/".length), req, url);
+      }
       if (req.method === "GET" && path === "/health") {
         // Hydra not yet listening is not ready, not an error.
         const ok = await fetcher(`${p.hydra.public}/health/ready`).then(async (r) => (await r.body?.cancel(), r.ok), () => false);
@@ -286,18 +308,35 @@ if (import.meta.main) {
   const issuer = env("BROKER_ISSUER");
   const secret = env("BROKER_SECRET");
   if (!issuer || !secret) throw new Error("BROKER_ISSUER and BROKER_SECRET are required");
-  const providers = [google(env)].filter((x): x is Provider => x !== null);
-  // The stand-in for Google, asked for by name and only on the developer's
-  // own machine: a broker anyone else reaches never signs in a test person.
-  let extra;
-  if (providers.length === 0 && env("BROKER_FAKE_GOOGLE") === "1") {
+  const realGoogle = google(env);
+  const realApple = apple(env);
+  const providers = [realGoogle, realApple].filter((x): x is Provider => x !== null);
+  let extra: ((req: Request, url: URL) => Promise<Response> | null) | undefined;
+  if (env("BROKER_FAKE_GOOGLE") === "1") {
     if (new URL(issuer).hostname !== "localhost") throw new Error(`BROKER_FAKE_GOOGLE is for a localhost broker, not ${issuer}`);
-    const fake = await fakeGoogle(issuer);
-    providers.push(fake.provider);
-    extra = fake.handle;
-    console.error("broker: no Google client, so it signs in test people (hydra/fake.ts)");
+    const fakeHandlers: Array<(req: Request, url: URL) => Promise<Response> | null> = [];
+    if (!realGoogle) {
+      const fake = await fakeGoogle(issuer);
+      providers.push(fake.provider);
+      fakeHandlers.push(fake.handle);
+    }
+    if (!realApple) {
+      const fake = await fakeApple(issuer);
+      providers.push(fake.provider);
+      fakeHandlers.push(fake.handle);
+    }
+    if (fakeHandlers.length > 0) {
+      extra = (req, url) => {
+        for (const h of fakeHandlers) {
+          const out = h(req, url);
+          if (out) return out;
+        }
+        return null;
+      };
+      console.error("broker: using test stand-in providers where client secrets are absent (hydra/fake.ts)");
+    }
   }
-  if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
+  if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or APPLE_CLIENT_ID/APPLE_CLIENT_SECRET");
   const hydra = { public: env("HYDRA_PUBLIC") ?? "http://127.0.0.1:28453", admin: env("HYDRA_ADMIN") ?? "http://127.0.0.1:28455" };
   Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
 }
