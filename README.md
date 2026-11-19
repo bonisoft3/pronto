@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo-light.svg" alt="pronto" width="360">
+  </picture>
+</p>
+
 # Pronto
 
 Pronto is a new breed of programming language. It is built for LLMs and relies
