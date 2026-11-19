@@ -141,7 +141,7 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts duckstream-columns_test.ts"
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write duckstream/compiler_test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run --allow-env duckstream/compiler_test.ts"
       # The airlock plane bayt lowers for a declared effect, booted as a compose
       # project of mecha's cluster with a sink and a mail bridge beside it.
       # Docker, so a platform of its own: CI's bonisoft3 job runs it on Linux
