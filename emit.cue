@@ -2318,7 +2318,9 @@ _sqlType: {
 		      WHERE COALESCE(NOT has_schema_privilege(to_regrole(quote_ident(e.role)), \(sname), e.privilege), true)
 		""",
 		"""
-		SELECT DISTINCT 7, 1000, format('REVOKE CREATE ON SCHEMA %I FROM %s;', n.nspname, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)::text) END)
+		SELECT DISTINCT 7, 1000, CASE WHEN a.grantor = n.nspowner THEN '' ELSE format('SET ROLE %I; ', pg_get_userbyid(a.grantor)) END
+		        || format('REVOKE CREATE ON SCHEMA %I FROM %s;', n.nspname, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)::text) END)
+		        || CASE WHEN a.grantor = n.nspowner THEN '' ELSE ' RESET ROLE;' END
 		      FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
 		      WHERE n.nspname = \(sname) AND a.privilege_type = 'CREATE'
 		        AND (a.grantee = 0 OR pg_get_userbyid(a.grantee)::text = ANY (\(names)))

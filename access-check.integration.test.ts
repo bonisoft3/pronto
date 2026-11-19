@@ -145,6 +145,20 @@ Deno.test("what pronto's generated provisioning leaves passes the check, and a d
   });
 });
 
+Deno.test("a CREATE on the schema that a non-owner granted is revoked as its grantor", async () => {
+  const generated = await emitFiles(paymentProgram());
+  const check = sql(await emitFiles(checked(paymentProgram())), "001_roles");
+  await withPostgres(async (execute) => {
+    await must(execute, "postgres", MIGRATOR);
+    await must(execute, "postgres", sql(generated, "001_roles") + sql(generated, "002_grants"));
+    await must(execute, "postgres", "GRANT CREATE ON SCHEMA public TO migrator WITH GRANT OPTION; SET ROLE migrator; GRANT CREATE ON SCHEMA public TO anon; RESET ROLE;");
+    const fixes = await refused(execute, "migrator", check);
+    assert.deepEqual(fixes, ["SET ROLE migrator; REVOKE CREATE ON SCHEMA public FROM anon; RESET ROLE;"]);
+    await must(execute, "postgres", fixes.join("\n"));
+    await must(execute, "migrator", check);
+  });
+});
+
 Deno.test("the login that migrates is held to what its migrations need", async () => {
   const generated = await emitFiles(paymentProgram());
   const check = sql(await emitFiles(checked(paymentProgram())), "001_roles");
