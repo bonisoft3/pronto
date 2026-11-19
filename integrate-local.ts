@@ -92,11 +92,11 @@ const before = mode === "all" ? await treeKey() : ""
 const compose = await Deno.readTextFile(`${appDir}/.bayt/process-compose.yaml`)
 const portVars = [...new Set([...compose.matchAll(/\$\{([A-Z0-9_]+_PORT):-[0-9]+\}/g)].map((m) => m[1]))]
 const ports: Record<string, string> = {}
-for (const v of portVars) {
-  const l = Deno.listen({ hostname: "127.0.0.1", port: 0 })
-  ports[v] = String((l.addr as Deno.NetAddr).port)
-  l.close()
-}
+// Every listener stays open until the last port is drawn: one closed at once frees its port, which the
+// kernel may hand to the next variable, and two processes of the stack then race for one port.
+const held = portVars.map(() => Deno.listen({ hostname: "127.0.0.1", port: 0 }))
+portVars.forEach((v, i) => ports[v] = String((held[i].addr as Deno.NetAddr).port))
+for (const l of held) l.close()
 // The door: mecha's host launch before 0.22 named it DOOR_PORT; from 0.22 the
 // app's own URL names it (APP_URL=https://localhost:${CADDY_TLS_HOST_PORT:-n}),
 // and Caddy binds CADDY_DOOR_PORT (its Caddyfile's {$CADDY_DOOR_PORT:8443}),
