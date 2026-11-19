@@ -1987,13 +1987,104 @@ _sqlType: {
 		"""
 }
 
-// A declared token role's bounds, the client tier's (plugins/pronto/resilience).
+// The innermost timeouts of a request (plugins/pronto/resilience) for a role
+// of one tier: the client's, or the service's.
+#roleSettings: {
+	tier: "client" | "service"
+	let bounds = resilience.resilience.timeouts
+	out: {
+		statement_timeout:                   "\(bounds.statement[tier])s"
+		lock_timeout:                        "\(bounds.lock[tier])s"
+		idle_in_transaction_session_timeout: "\(bounds.idleInTransaction[tier])s"
+	}
+}
+
+// A role's name as SQL prints it: quoted where the program declared it, since
+// the name may be a keyword.
+#roleName: {
+	role:     string
+	declared: *false | bool
+	out:      [if declared {"\"\(role)\""}, role][0]
+}
+
+#settingKeys: ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout"]
+
+#alterSettings: {
+	role:     string
+	quoted:   *false | bool
+	settings: [string]: string
+	let name = (#roleName & {"role": role, declared: quoted}).out
+	out: strings.Join([for k in #settingKeys if settings[k] != _|_ {"ALTER ROLE \(name) SET \(k) = '\(settings[k])';\n"}], "")
+}
+
+// A declared token role's bounds, the client tier's.
 #tokenRoleBounds: {
 	role: string
-	let bounds = resilience.resilience.timeouts
-	out: "ALTER ROLE \"\(role)\" SET statement_timeout = '\(bounds.statement.client)s';\n" +
-		"ALTER ROLE \"\(role)\" SET lock_timeout = '\(bounds.lock.client)s';\n" +
-		"ALTER ROLE \"\(role)\" SET idle_in_transaction_session_timeout = '\(bounds.idleInTransaction.client)s';\n"
+	out:  (#alterSettings & {"role": role, quoted: true, settings: (#roleSettings & {tier: "client"}).out}).out
+}
+
+// The GRANT statements of the access model in two parts: the grants to roles
+// no token names, which 001_roles.sql states with their attributes, and the
+// rest, 002_grants.sql's.
+#grantsSql: {
+	access: #access
+	let S = access.schema
+	let names = {for r, x in access.roles {(r): (#roleName & {role: r, declared: x.declared}).out}}
+	let gs = {for k, g in {schema: access.schemaGrants, table: access.tableGrants, default: access.defaultPrivileges, published: access.publishedGrants} {(k): [for x in g {
+		owned: len([for t in x.to if access.roles[t].token {t}]) == 0
+		privs: strings.Join(x.privileges, ", ")
+		to:    strings.Join([for t in x.to {names[t]}], ", ")
+	}]}}
+	let stmts = list.Concat([
+		[for g in gs.schema {owned: g.owned, text: "GRANT \(g.privs) ON SCHEMA \(S) TO \(g.to);\n"}],
+		[for g in gs.table {owned: g.owned, text: "GRANT \(g.privs) ON ALL TABLES IN SCHEMA \(S) TO \(g.to);\n"}],
+		[for g in gs.default {owned: g.owned, text: "ALTER DEFAULT PRIVILEGES IN SCHEMA \(S) GRANT \(g.privs) ON TABLES TO \(g.to);\n"}],
+	])
+	owned:     strings.Join([for x in stmts if x.owned {x.text}], "")
+	requested: strings.Join([for x in stmts if !x.owned {x.text}], "")
+	published: strings.Join([for g in gs.published {"GRANT \(g.privs) ON ALL TABLES IN SCHEMA \(S) TO \(g.to);\n"}], "")
+}
+
+// A role of the app's database as the emitted access model states it.
+#accessRole: {
+	// authenticator logs in and switches into a request role; a sync role
+	// (electric) is read by a service outside the app's requests.
+	kind:        "request" | "sync" | "authenticator"
+	login:       bool
+	inherit:     bool
+	superuser:   bool
+	createrole:  bool
+	createdb:    bool
+	bypassrls:   bool
+	replication: bool
+	// A request role authenticator may switch into.
+	token: bool
+	// Created only where it stands with no more than a token role holds
+	// (#tokenRole); quoted, its name being the program's.
+	declared: bool
+	memberOf: [...string]
+	settings: [string]: string
+}
+
+// One grant: to roles, on the schema's tables, the schema itself, or the
+// tables created later.
+#accessGrant: {
+	to: [...string]
+	privileges: [...string]
+}
+
+// The database access model a program resolves to (E._access), which
+// 001_roles.sql and 002_grants.sql render.
+#access: {
+	schema: string
+	order: [...string]
+	roles: [string]: #accessRole
+	schemaGrants:      [...#accessGrant]
+	tableGrants:       [...#accessGrant]
+	defaultPrivileges: [...#accessGrant]
+	// Rights 008_publication.sql gives the tables it publishes, once there are
+	// any: the sync of an entity reaches them as a request does.
+	publishedGrants: [...#accessGrant]
 }
 
 // The declared token roles as 001_roles.sql leaves them, restated on every
@@ -2007,7 +2098,7 @@ _sqlType: {
 	roles: [...string]
 	out: mecha.#TenancySql + "\n" +
 		"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
-		"GRANT \(strings.Join([for r in roles {"\"\(r)\""}], ", ")) TO authenticator;\n" +
+		"GRANT \(strings.Join([for r in roles {(#roleName & {role: r, declared: true}).out}], ", ")) TO authenticator;\n" +
 		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "") +
 		"INSERT INTO mecha.token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
 		(#tokenRolesPrune & {"roles": roles}).out
@@ -4542,6 +4633,44 @@ _pgrollDir: "services/database/pgroll"
 	// the issuers a release trusts.
 	_declaredRoles: list.SortStrings([if E.code.state.tokenRoles != _|_ for n, _ in E.code.state.tokenRoles {n}])
 	cluster: capabilities: issuers: len(E._declaredRoles) > 0
+	// The database access model (#access). A role no token names (electric) is
+	// granted with its attributes, in 001; the request roles' grants are 002's.
+	// `access` exposes it, only where there is a database, to tools outside
+	// this package, which cannot see hidden fields.
+	if E._serverOn {access: E._access}
+	_access: #access & {
+		schema: "public"
+		let base = list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
+		order: list.Concat([base, E._declaredRoles, ["authenticator"]])
+		for r in base if r != "electric" {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
+				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
+			}
+		}
+		for r in E._declaredRoles {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
+				settings: (#roleSettings & {tier: "client"}).out
+			}
+		}
+		if E._serverOn {
+			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
+		}
+		roles: authenticator: {
+			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
+			memberOf: [for r in order if roles[r].token {r}]
+		}
+		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+		let granted = [if E._authOn {["app_user", "service"]}, if E._serviceOn {["anon", "service"]}, ["anon"]][0]
+		let visible = [if E._authOn {["anon", "app_user", "service"]}, granted][0]
+		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if E._serverOn {to: ["electric"], privileges: ["USAGE"]}]
+		tableGrants: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		defaultPrivileges: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		publishedGrants: [if len(E._baseTables) > 0 {to: ["anon"], privileges: dml}]
+	}
 	_declaredRolesServed: [if len(E._declaredRoles) > 0 if !E._serverOn {"tokenRoles: a token role is a role of the app's database, and the app has no server tier"}, true][0] & true
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
@@ -4924,7 +5053,7 @@ _pgrollDir: "services/database/pgroll"
 					schema:   E.cluster.surface.schema
 					database: mecha.published.database
 					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
-					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					tokenRoles: E._access.roles.authenticator.memberOf
 					if len(E._declaredRoles) > 0 {declaredRoles: E._declaredRoles}
 					// Whether this release takes back a role an earlier one declared
 					// (write.ts refuses to drop the last one where it does not).
@@ -5115,27 +5244,39 @@ _pgrollDir: "services/database/pgroll"
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
-				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
-				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
+				_a: E._access
+				// Login is set below, once the role stands, so one that already
+				// stood gets it as well.
+				_create: [for r in _a.order if !_a.roles[r].declared if _a.roles[r].kind != "authenticator" {
 					"""
 						  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
-						    CREATE ROLE \(r) NOLOGIN;
+						    CREATE ROLE \((#roleName & {role: r}).out) NOLOGIN;
 						  END IF;
 						"""
-				}], "\n") + "\n" + strings.Join([for r in E._declaredRoles {(#tokenRole & {role: r}).out + "\n"}], "") + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+				}]
+				_declared: [for r in _a.order if _a.roles[r].declared {(#tokenRole & {role: r}).out + "\n"}]
+				_authenticator: strings.Join([for r in _a.order if _a.roles[r].kind == "authenticator" {
+					"""
+						  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+						    CREATE ROLE \(r)\([if !_a.roles[r].inherit {" NOINHERIT"}, ""][0]);
+						  END IF;
 
+						"""
+				}], "")
+				_attrs: {for r in _a.order {
+					(r): strings.Join([
+						if _a.roles[r].bypassrls {"BYPASSRLS"},
+						if _a.roles[r].replication {"REPLICATION"},
+						if _a.roles[r].login {"LOGIN"},
+					], " ")
+				}}
 				// PostgREST's login, which switches to the role a request's token
 				// names; it applies that role's settings (the bounds below) only
 				// when the role is granted to it. No password, as electric's: the
 				// deployment's secret sets it (mecha's #RolePasswordsStep).
-				_tokenRoles: list.Concat([[for r in _roles if r != "electric" {r}], E._declaredRoles])
-				_authenticator: """
-					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
-					    CREATE ROLE authenticator NOINHERIT;
-					  END IF;
-
-					"""
-				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(list.Concat([[for r in _roles if r != "electric" {r}], [for r in E._declaredRoles {"\"\(r)\""}]]), ", ")) TO authenticator;\n"
+				_login: [for r in _a.order if _a.roles[r].kind == "authenticator" {
+					"\nALTER ROLE \(r) \(_attrs[r]);\nGRANT \(strings.Join([for m in _a.roles[r].memberOf {(#roleName & {role: m, declared: _a.roles[m].declared}).out}], ", ")) TO \(r);\n"
+				}]
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -5146,53 +5287,26 @@ _pgrollDir: "services/database/pgroll"
 				// for every tenant, and a role without BYPASSRLS gets `{}` from
 				// current_scopes(), so every shape yields an empty snapshot with no
 				// error.
-				_bypass: [
-					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
-					// No password: the deployment's secret sets it (mecha's
-					// #RolePasswordsStep), and a schema that set one would
-					// overwrite it whenever it ran.
-					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
-						"GRANT USAGE ON SCHEMA public TO electric;\n" +
-						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
-						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
-						""},
-				]
+				//
+				// No password: the deployment's secret sets it (mecha's
+				// #RolePasswordsStep), and a schema that set one would
+				// overwrite it whenever it ran.
+				_bypass: [for r in _a.order if _a.roles[r].kind != "authenticator" if _attrs[r] != "" {"\nALTER ROLE \((#roleName & {role: r, declared: _a.roles[r].declared}).out) \(_attrs[r]);\n"}]
 
 				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
-				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
-					for r in _roles if r != "electric"
-					let tier = [if r == "service" {"service"}, "client"][0] {
-						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
-							"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
-							"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
-					},
-				], [for r in E._declaredRoles {(#tokenRoleBounds & {role: r}).out}]])
+				_timeouts: [for r in _a.order if len(_a.roles[r].settings) > 0 {
+					(#alterSettings & {role: r, quoted: _a.roles[r].declared, settings: _a.roles[r].settings}).out
+				}]
+				text: "DO $$ BEGIN\n" + strings.Join(_create, "\n") + "\n" + strings.Join(_declared, "") + _authenticator + "END $$;\n" + strings.Join(_login, "") + strings.Join(_bypass, "") + (#grantsSql & {access: _a}).owned + "\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" + strings.Join(_timeouts, "")
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
-				if !E._authOn {
-					// The service role beside anon where only a wake brings it:
-					// the schedule tables, which anon never reaches, are its.
-					_grantees: [if E._serviceOn {"anon, service"}, "anon"][0]
-					text: """
-						GRANT USAGE ON SCHEMA public TO \(_grantees);
-						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \(_grantees);
-						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \(_grantees);
-
-						"""
-				}
-
-				// Auth'd grants: anon can connect (USAGE) but touches no table —
-				// every row read or written goes through app_user or service,
-				// where 006's policies decide.
-				if E._authOn {
-					text: """
-						GRANT USAGE ON SCHEMA public TO anon, app_user, service;
-						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user, service;
-						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user, service;
-
-						"""
-				}
+				// With auth, anon is granted USAGE and no table here: rows go
+				// through app_user or service, where 006's policies decide (008
+				// gives anon a table right once something is synced). Without auth,
+				// the service role stands beside anon where only a wake brings it:
+				// the schedule tables, which anon never reaches, are its.
+				text: (#grantsSql & {access: E._access}).requested
 			}
 			"services/database/migrations/008_publication.sql": {
 				format: "sql"
@@ -5238,7 +5352,7 @@ _pgrollDir: "services/database/pgroll"
 
 							\(strings.Join([for t in E._baseTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
 							-- tier: any
-							GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
+							\(strings.TrimSuffix((#grantsSql & {access: E._access}).published, "\n"))
 
 							"""
 					},

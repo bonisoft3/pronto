@@ -153,6 +153,21 @@ subtly wrong floor, and a correction to the floor reaches every app by
 migration rather than by regeneration. The floor holds even when the
 generator is bypassed.
 
+## Emitted database access model
+
+For a program with a server tier, `#emit.access` exposes the desired database
+roles, role settings, authenticator memberships and schema/table grants as
+CUE data. `001_roles.sql`, `002_grants.sql` and the grant in
+`008_publication.sql` render from this model in [[../emit.cue]]. It is derived
+from the program; it is not an operator-supplied access policy.
+
+The model is not a database-state audit or a complete provisioning contract.
+The SQL does not enforce every negative attribute on an existing built-in
+role, such as `superuser: false`. Membership options and grant ownership,
+function/column grants, the tenancy floor and token-role reconciliation are
+not fully represented. Inspecting this value therefore does not establish
+that an existing database conforms to Pronto's access requirements.
+
 ## Declared token roles
 
 A [declared token role](identity.md#token-roles-and-trusted-issuers) is a
