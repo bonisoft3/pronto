@@ -2264,6 +2264,9 @@ _sqlType: {
 	let rows = #accessRows & {"access": access}
 	let sname = (#sqlLit & {v: access.schema}).out
 	let names = "ARRAY[\(strings.Join([for r in access.order {(#sqlLit & {v: r}).out}], ", "))]::text[]"
+	// A role that bypasses row-level security or replicates is power a member
+	// acts with, so who belongs to it is the model's alone.
+	let privileged = "ARRAY[\(strings.Join([for r in access.order if access.roles[r].bypassrls || access.roles[r].replication {(#sqlLit & {v: r}).out}], ", "))]::text[]"
 	let roleTable = (#valuesOr & {
 		cols: list.Concat([[{name: "ord", type: "int"}, {name: "name", type: "text"}], [for b in ["login", "inherit", "superuser", "createrole", "createdb", "bypassrls", "replication"] {name: b, type: "boolean"}], [{name: "create_fix", type: "text"}, {name: "alter_fix", type: "text"}]])
 		"rows": [for r in rows.roles {(#sqlRow & {vs: [r.ord, r.name, r.a.login, r.a.inherit, r.a.superuser, r.a.createrole, r.a.createdb, r.a.bypassrls, r.a.replication, r.create, r.alter]}).out}]
@@ -2312,7 +2315,7 @@ _sqlType: {
 		"""
 		SELECT 4, 0, format('REVOKE %I FROM %I GRANTED BY %I;', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor))
 		      FROM pg_auth_members m
-		      WHERE pg_get_userbyid(m.member)::text = ANY (\(names))
+		      WHERE (pg_get_userbyid(m.member)::text = ANY (\(names)) OR pg_get_userbyid(m.roleid)::text = ANY (\(privileged)))
 		        AND NOT EXISTS (SELECT FROM \(pairTable) WHERE e.member = pg_get_userbyid(m.member)::text AND e.role = pg_get_userbyid(m.roleid)::text)
 		""",
 		"""

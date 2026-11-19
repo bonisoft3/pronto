@@ -202,7 +202,7 @@ the owner's whole provisioning script, which is also emitted as
 | role | each model role exists with all seven attributes (`LOGIN`, `INHERIT`, `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `BYPASSRLS`, `REPLICATION`) | `CREATE ROLE` or `ALTER ROLE ... WITH` all seven |
 | owner | no model role owns the database | `ALTER DATABASE ... OWNER TO` the migrating login |
 | member | each `memberOf` edge exists, with `SET` and no `ADMIN` option, and `INHERIT` only where the member inherits | `GRANT`, `REVOKE ADMIN OPTION FOR ... GRANTED BY`, `GRANT ... WITH INHERIT ..., SET TRUE GRANTED BY` |
-| extra | a model role belongs to nothing beyond its `memberOf` | `REVOKE ... GRANTED BY` each grantor |
+| extra | a model role belongs to nothing beyond its `memberOf`, and nothing outside the model's memberships belongs to a model role that bypasses RLS or replicates (`service`, `electric`) | `REVOKE ... GRANTED BY` each grantor |
 | setting | each role-wide setting has the model's value | `ALTER ROLE ... SET` |
 | override | no database-level setting hides one | `ALTER ROLE ... IN DATABASE ... RESET` |
 | schema | each schema grant is held, and no model role, nor PUBLIC, holds `CREATE` on it | `GRANT`, `REVOKE CREATE` |
@@ -219,7 +219,7 @@ migrations and machine writers run as it under forced row-level security.
 
 The check refuses any difference, not only a missing one. A setting that is the
 same duration spelled differently (`'5000'` for `'5s'`) differs, and is refused.
-Roles outside the model that are members of model roles, passwords (`pg_roles` hides them; they are the
+Roles outside the model that are members of model roles that neither bypass RLS nor replicate, passwords (`pg_roles` hides them; they are the
 deployment's secrets) and request roles' `search_path` (PostgREST sets it per
 request) are not compared. A provider that names an attribute differently, such
 as RDS's `rds_replication` for `REPLICATION`, fails the role phase; that
