@@ -199,11 +199,12 @@ Deno.test("the login that migrates is held to what its migrations need", async (
   await withPostgres(async (execute) => {
     await must(execute, "postgres", MIGRATOR);
     await must(execute, "postgres", sql(generated, "001_roles") + sql(generated, "002_grants"));
-    await must(execute, "postgres", "ALTER ROLE migrator NOBYPASSRLS; REVOKE CREATE ON SCHEMA public FROM migrator;");
+    await must(execute, "postgres", "ALTER ROLE migrator NOBYPASSRLS; REVOKE CREATE ON SCHEMA public FROM migrator; REVOKE CREATE ON DATABASE postgres FROM migrator;");
     const fixes = await refused(execute, "migrator", check);
     assert.deepEqual(fixes, [
       "GRANT USAGE, CREATE ON SCHEMA public TO migrator;",
       "ALTER ROLE migrator BYPASSRLS;",
+      "GRANT CREATE ON DATABASE postgres TO migrator;",
     ]);
     await must(execute, "postgres", fixes.join("\n"));
     await must(execute, "migrator", check);

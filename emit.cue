@@ -2353,6 +2353,10 @@ _sqlType: {
 		SELECT 8, 3, format('ALTER ROLE %I BYPASSRLS;', current_user)
 		      FROM pg_roles WHERE rolname = current_user AND NOT (rolbypassrls OR rolsuper)
 		""",
+		"""
+		SELECT 8, 4, format('GRANT CREATE ON DATABASE %I TO %I;', current_database(), current_user)
+		      WHERE NOT has_database_privilege(current_user, current_database(), 'CREATE')
+		""",
 	]
 	out: """
 		-- The database against its access model (state.provisioning: "checked"). Its owner

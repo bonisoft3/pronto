@@ -206,7 +206,7 @@ the owner's whole provisioning script, which is also emitted as
 | setting | each role-wide setting has the model's value | `ALTER ROLE ... SET` |
 | override | no database-level setting hides one | `ALTER ROLE ... IN DATABASE ... RESET` |
 | schema | each schema grant is held, and no model role, nor PUBLIC, holds `CREATE` on it | `GRANT`, `REVOKE CREATE` |
-| login | the migrating login has `public` first on its search path, `USAGE` and `CREATE` on it, and bypasses RLS | `ALTER ROLE`, `GRANT` |
+| login | the migrating login has `public` first on its search path, `USAGE` and `CREATE` on it, `CREATE` on the database, and bypasses RLS | `ALTER ROLE`, `GRANT` |
 
 The migrating login need not own the roles: `NOSUPERUSER` and
 `NOCREATEROLE` suit it. Beyond what the check holds it needs `LOGIN`, `CREATE`
