@@ -2110,6 +2110,59 @@ _sqlType: {
 	publishedGrants: [...#accessGrant]
 }
 
+// The access model of a program, computed from its code alone so that the
+// emit (E._access) and the cluster (#DefaultCluster's `roles` reconcile) read
+// one value; the flags it follows are computed here, once.
+#accessModel: {
+	let M = self
+	code!: _
+	_appMigrations: #appMigrations & {"code": M.code}
+	// The auth plane switches on as one: declaring #App.auth or any entity
+	// access implies the roles and service-token plumbing.
+	_authOn: M.code.capabilities.auth != _|_ || len(M._appMigrations.accessed) > 0
+	// The `service` role alone also stands where a schedule or an effect is
+	// declared: the ticker writes its ticks as it.
+	_serviceOn: len((#TimedMachines & {code: M.code}).out) > 0 || M._authOn || len(M.code.state.schedules) > 0 || [if M.code.state.effects != _|_ {len(M.code.state.effects) > 0}, false][0]
+	_serverOn:  (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
+	// The roles a token may name beside the cluster's own, in one order
+	// (#TokenRole).
+	_declaredRoles: list.SortStrings([if M.code.state.tokenRoles != _|_ for n, _ in M.code.state.tokenRoles {n}])
+	_baseTables: [for _, e in M.code.state.entities if e.server if M._appMigrations.held[e.name] != _|_ {e.table}]
+	out: #access & {
+		schema: "public"
+		let base = list.Concat([["anon"], [if M._authOn {"app_user"}, if M._serviceOn {"service"}], [if M._serverOn {"electric"}]])
+		order: list.Concat([base, M._declaredRoles, ["authenticator"]])
+		for r in base if r != "electric" {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
+				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
+			}
+		}
+		for r in M._declaredRoles {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
+				settings: (#roleSettings & {tier: "client"}).out
+			}
+		}
+		if M._serverOn {
+			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
+		}
+		roles: authenticator: {
+			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
+			memberOf: [for r in order if roles[r].token {r}]
+		}
+		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+		let granted = [if M._authOn {["app_user", "service"]}, if M._serviceOn {["anon", "service"]}, ["anon"]][0]
+		let visible = [if M._authOn {["anon", "app_user", "service"]}, granted][0]
+		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if M._serverOn {to: ["electric"], privileges: ["USAGE"]}]
+		tableGrants: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		defaultPrivileges: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		publishedGrants: [if len(M._baseTables) > 0 {to: ["anon"], privileges: dml}]
+	}
+}
+
 // The declared token roles as 001_roles.sql leaves them, restated on every
 // release ahead of its migrations (the cluster's `roles` reconcile): initdb
 // runs 001 once, and a role may be declared after it did, with a migration
@@ -4649,54 +4702,23 @@ _pgrollDir: "services/database/pgroll"
 	// access implies the roles and service-token plumbing — policies without
 	// tokens (or vice versa) is not a supported state. The auth_uid() the
 	// policies call is the database image's (mecha's tenancy floor).
-	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
+	_authOn: E._model._authOn
 	// The `service` role alone also stands where a schedule or an effect is
 	// declared: the ticker writes its ticks as it, through crud, which mecha's
 	// cluster has verify the token wherever something wakes (its _serviceToken).
-	_serviceOn: len(E._timedMachines) > 0 || E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
+	_serviceOn: E._model._serviceOn
 	// The roles a token may name beside the cluster's own, in one order
 	// (#TokenRole). They are crud's to switch to, so crud takes the keys of
 	// the issuers a release trusts.
-	_declaredRoles: list.SortStrings([if E.code.state.tokenRoles != _|_ for n, _ in E.code.state.tokenRoles {n}])
+	_declaredRoles: E._model._declaredRoles
+	_model:         #accessModel & {code: E.code}
 	cluster: capabilities: issuers: len(E._declaredRoles) > 0
 	// The database access model (#access). A role no token names (electric) is
 	// granted with its attributes, in 001; the request roles' grants are 002's.
 	// `access` exposes it, only where there is a database, to tools outside
 	// this package, which cannot see hidden fields.
 	if E._serverOn {access: E._access}
-	_access: #access & {
-		schema: "public"
-		let base = list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
-		order: list.Concat([base, E._declaredRoles, ["authenticator"]])
-		for r in base if r != "electric" {
-			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
-				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
-			}
-		}
-		for r in E._declaredRoles {
-			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
-				settings: (#roleSettings & {tier: "client"}).out
-			}
-		}
-		if E._serverOn {
-			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
-		}
-		roles: authenticator: {
-			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
-			memberOf: [for r in order if roles[r].token {r}]
-		}
-		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
-		let granted = [if E._authOn {["app_user", "service"]}, if E._serviceOn {["anon", "service"]}, ["anon"]][0]
-		let visible = [if E._authOn {["anon", "app_user", "service"]}, granted][0]
-		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if E._serverOn {to: ["electric"], privileges: ["USAGE"]}]
-		tableGrants: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
-		defaultPrivileges: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
-		publishedGrants: [if len(E._baseTables) > 0 {to: ["anon"], privileges: dml}]
-	}
+	_access: _model.out
 	_declaredRolesServed: [if len(E._declaredRoles) > 0 if !E._serverOn {"tokenRoles: a token role is a role of the app's database, and the app has no server tier"}, true][0] & true
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
