@@ -288,9 +288,14 @@ state: effects: rate: {
 
 - **The declaration is the request.** There is no handler: the airlock expands the
   path and sends it through the effect's endpoint on its daprd, as a write's handler
-  does, with the sink's credential. The answer is the outcome: a 2xx is `done` with its
+  does, with the sink's credential. The sink is an origin or a
+  [bridge](#bridges-a-sink-the-cluster-hosts), per target as a write's is, so a read
+  that names a bridge for the compose stack is answered there by the bridge's
+  simulator. The answer is the outcome: a 2xx is `done` with its
   body, anything else the sink answered is `failed` with `{status, body}`, and no answer
-  after every retry is `failed` with the error. Never `unknown`: a GET that never
+  after every retry is `failed` with the error. A read whose bridge is not deployed on
+  the airlock's target is `failed` on its first run with `{bridge, target, reason:
+  "not deployed"}`, asking nothing. Never `unknown`: a GET that never
   answered changed nothing. Nothing claims it, so a read states no key, idempotency,
   reentry, note or attempts.
 - **got performs it, configured and not wrapped.** Its retry (408, 429, 5xx and network
@@ -302,8 +307,11 @@ state: effects: rate: {
   over 1 MiB and none of unstated length, shared by every row's read and keyed by each
   exact request, so a credential is never a key (got's own key is the URL as
   normalize-url rewrites it, which drops `utm_` parameters, so the airlock keeps a
-  partition per exact path). As a shared cache it keeps no `private` answer and no answer
-  to an authorized request unless the answer says `public`, `s-maxage` or
+  partition per exact path). It is one process's, and a process does not outlive its
+  endpoints once a release settles; while a release changes where a read is sent, the
+  running airlock may still deliver an answer it cached from the previous sink, for at
+  most that answer's freshness. As a shared cache it keeps no `private` answer and no
+  answer to an authorized request unless the answer says `public`, `s-maxage` or
   `must-revalidate` (RFC 9111 §3.5). `Vary` and `no-store` are honoured. `cacheControl`
   stands in for the freshness a legacy sink never sends: got's `beforeCache` hook applies
   it to an answer with neither `Cache-Control` nor `Expires` whose status a cache may give
@@ -369,8 +377,8 @@ left to re-run. No entry outlives 30 days, which is as far back as a replay reac
 - a read with a `body`: a GET's has no meaning (RFC 9110 §9.3.1);
 - a read with a `key`, `idempotent`, `reentry`, `note`, `attempts`, `secrets`,
   `endowments` or `contentType`: nothing claims it, and it has no handler and sends no body;
-- a read on a bridge, which stands in for a sink that does not speak HTTP, or on the
-  AI gateway, which answers only what is posted to it;
+- a read on an Activepieces bridge or on the AI gateway, which answer only what is
+  posted to them;
 - a read no state invokes, as any effect;
 - a path naming a variable the input does not, or an input the path sends nowhere, or an
   input value that is no string, number, boolean or `{raw: sql}`;

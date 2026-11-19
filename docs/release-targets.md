@@ -1097,7 +1097,12 @@ upgrade and the bridges named for k8s
   effect's endpoint mounted over the image's from a ConfigMap. The image's
   endpoints are the compose stack's, the docker target's; an effect's sink on
   k8s (`sink.targets.k8s`, else its default) is what `.pronto/cluster.json`
-  carries as `endpoints.k8s`, and one with none there is refused.
+  carries as `endpoints.k8s`, and one with none there is refused. A changed
+  endpoint rolls the daprd and the airlock both, by a digest of the endpoints
+  on each pod: the airlock's cache of reads does not know where an endpoint
+  leads. While the release changes where a read is sent, the running airlock
+  may still deliver an answer it cached from the previous sink, for at most
+  that answer's freshness.
 - **Compose's networks are NetworkPolicies.** The airlock reaches the
   cluster's resolver on port 53, the database and its daprd, and only the
   ticker's wake reaches it, on its health port. The resolver is

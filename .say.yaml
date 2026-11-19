@@ -154,6 +154,14 @@ say:
           # A read in postgres under the emitted interpreter, delivered,
           # journaled and replayed by the airlock's own code.
           - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue,deno reads.integration.test.ts"
+          # A read through the emitted endpoint on a daprd behind the wall,
+          # answered by its bridge's simulator in a container.
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue,deno reads-bridge.integration.test.ts"
+          # An app's rewrites through the door's emitted blocks and PostgREST.
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue rewrites.integration.test.ts"
+          # A signal and a blob claim through the door's own routes, whose
+          # path headers no caller's request supplies.
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-net --allow-run=docker,cue signals.integration.test.ts blob-claims.integration.test.ts"
           # A declared token role from Hydra's client credentials through the
           # door and PostgREST; Hydra is identity/hydra's tool, as signin's.
           - do: "mise -C identity/hydra x -- sh -c 'export HYDRA_BIN=$(command -v hydra); cd ../.. && deno test --no-config --allow-read --allow-write --allow-env --allow-net --allow-run=docker,cue,hydra token-roles.integration.test.ts'"

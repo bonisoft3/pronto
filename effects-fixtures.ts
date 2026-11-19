@@ -129,6 +129,18 @@ export function readProgram({ rate = RATE, count = `{name: "pricings", type: "in
   return auth ? program.replace("capabilities: {hatches: {},", "capabilities: {auth: {required: false, service: \"/auth\"}, hatches: {},") : program;
 }
 
+/** The sink of `rate` that keeps the vendor's origin and names the bridge
+ * `rates` where the compose stack runs. */
+const RATE_SIMULATED = `sink: {origin: "https://rates.example", credential: {scheme: "Bearer", secret: "RATES_KEY"}, targets: docker: bridge: "rates"}`;
+
+/** The read program with `rate`'s sink replaced by `sink`, and the bridge
+ * `rates`, declared as `bridge`, over the container hatch `vendor`. */
+export function bridgedReadProgram({ sink = RATE_SIMULATED, bridge = `{container: "vendor", port: 3000, simulator: dockerfile: from: name: "alpine:3.22"}` } = {}): string {
+  return readProgram({ rate: RATE.replace(/sink: \{.*\}\}/, sink) }) +
+    `\napp: capabilities: hatches: vendor: {kind: "container", note: "the vendor's API, played locally"}\napp: state: bridges: rates: ${bridge}\n` +
+    `_cluster: surface: targets: vendor: {activate: "", dockerfile: {from: name: "alpine:3.22"}, compose: {}}\n`;
+}
+
 export async function cue(args: string[], code: string): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const child = new Deno.Command("cue", { args, stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
   const writer = child.stdin.getWriter();

@@ -3060,6 +3060,42 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	][0]
 }
 
+// The bridge an effect is settled by (mecha's services/airlock, "A bridge not
+// deployed"), as effects.json's `bridge`: its own, else the one its sink is
+// on a release target past the compose stack's, where the airlock settles it
+// not deployed as it would its own. A read, which the edge does not perform,
+// counts the compose stack's too. `out` is absent where it names none.
+#EffectBridge: {
+	let B = self
+	effect:  _
+	bridges: _
+	// The app's release targets (meta.targets).
+	targets: _
+	named: [
+		if B.effect.sink.bridge != _|_ {B.effect.sink.bridge},
+		for t in list.Concat([[if B.effect.request != _|_ {"docker"}], ["cloudflare", "k8s"]]) let at = (#SinkAt & {sink: B.effect.sink, target: t}).out if at != null if at.bridge != _|_ {at.bridge},
+	]
+	if len(named) > 0 {
+		let local = (#SinkAt & {sink: B.effect.sink, target: "docker"}).out
+		out: {
+			name: named[0]
+			// The release targets where the effect's sink there is reachable:
+			// an origin, the AI gateway, or a bridge that target runs; the
+			// app's own targets past those a bridge may name among them. The
+			// airlock settles the effect not deployed elsewhere, so an effect
+			// whose own bridge runs only on docker but whose k8s sink is an
+			// origin is called on k8s.
+			targets: [for t in list.Concat([#BridgeTargets, [for t in B.targets if t != "pages" if !list.Contains(#BridgeTargets, t) {t}]])
+			let at = (#SinkAt & {sink: B.effect.sink, target: t}).out
+			if at != null
+			if [if at.bridge != _|_ {list.Contains(B.bridges[at.bridge].targets, t)}, true][0] {t}]
+			// Whether the local stack, which takes docker's sink, calls it:
+			// an origin, or a bridge it runs a simulator of.
+			simulated: [if local != null if local.bridge != _|_ {B.bridges[local.bridge].simulator != _|_}, true][0]
+		}
+	}
+}
+
 // Default runtime instances, parameterized by the code. program.cue wires
 // them; overrides land in bayt.cue by unification.
 //
@@ -5362,13 +5398,9 @@ _pgrollDir: "services/database/pgroll"
 							let edge = (#SinkAt & {sink: i.effect.sink, target: "cloudflare"}).out
 							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.origin != _|_ {edgeOrigin: edge.origin}
 
-							// The bridge the effect is settled by: its own, else the one its
-							// sink is on a release target past the compose stack's, where
-							// the airlock settles it not deployed as it would its own.
-							let named = [
-								if i.effect.sink.bridge != _|_ {i.effect.sink.bridge},
-								for t in ["cloudflare", "k8s"] let at = (#SinkAt & {sink: i.effect.sink, target: t}).out if at != null if at.bridge != _|_ {at.bridge},
-							]
+							// The bridge the effect is settled by (#EffectBridge).
+							let settledBy = #EffectBridge & {effect: i.effect, bridges: [if E.code.state.bridges != _|_ {E.code.state.bridges}, {}][0], targets: E.code.meta.targets}
+							let named = settledBy.named
 
 							// And the bridge the edge calls, where that is not it.
 							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.bridge != _|_ if edge.bridge != named[0] {edgeBridge: edge.bridge}
@@ -5376,28 +5408,7 @@ _pgrollDir: "services/database/pgroll"
 							// Or the AI gateway, where the bridge is another target's.
 							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.ai != _|_ if len(named) > 0 {edgeAi: true}
 							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
-							if len(named) > 0 {
-								let local = (#SinkAt & {sink: i.effect.sink, target: "docker"}).out
-								bridge: {
-									name: named[0]
-									// The release targets where the effect's sink there is
-									// reachable: an origin, the AI gateway, or a bridge that
-									// target runs; the app's own targets past those a bridge
-									// may name among them.
-									// The airlock settles the effect not deployed
-									// elsewhere, so an effect whose own bridge runs
-									// only on docker but whose k8s sink is an origin
-									// is called on k8s.
-									targets: [for t in list.Concat([#BridgeTargets, [for t in E.code.meta.targets if t != "pages" if !list.Contains(#BridgeTargets, t) {t}]])
-									let at = (#SinkAt & {sink: i.effect.sink, target: t}).out
-									if at != null
-									if [if at.bridge != _|_ {list.Contains(E.code.state.bridges[at.bridge].targets, t)}, true][0] {t}]
-									// Whether the local stack, which takes docker's sink,
-									// calls it: an origin, or a bridge it runs a simulator
-									// of.
-									simulated: [if local != null if local.bridge != _|_ {E.code.state.bridges[local.bridge].simulator != _|_}, true][0]
-								}
-							}
+							if len(named) > 0 {bridge: settledBy.out}
 						}
 					}}
 					// The reads (mecha's services/airlock/read.ts): the request, and
@@ -5411,6 +5422,10 @@ _pgrollDir: "services/database/pgroll"
 									if i.effect.cacheControl != _|_ {cacheControl: i.effect.cacheControl}
 									if i.effect.got != _|_ {got: i.effect.got}
 									if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
+
+									// The bridge the read is settled by, as a write's.
+									let settledBy = #EffectBridge & {effect: i.effect, bridges: [if E.code.state.bridges != _|_ {E.code.state.bridges}, {}][0], targets: E.code.meta.targets}
+									if len(settledBy.named) > 0 {bridge: settledBy.out}
 								}
 							}
 						}
@@ -5947,14 +5962,26 @@ _pgrollDir: "services/database/pgroll"
 			}], "")
 			// An app's rewrite (#Rewrite), beside the hatches' doors: the source's
 			// parameters captured, and the destination asked of crud as /crud
-			// itself asks it.
+			// itself asks it. What the client asked is stated in the headers
+			// forward_auth states it in, set on the upstream request as
+			// forward_auth sets them: never the client's own, and past the
+			// hop-by-hop headers its Connection names for removal. The URI
+			// is the request target as sent, not the cleaned and decoded path
+			// that matched. A function is called by GET or POST alone, so a
+			// PUT, PATCH or DELETE reaches one as a POST; and its arguments
+			// are not a query's, so the client's query reaches it in
+			// X-Forwarded-Uri alone.
 			_rewriteDoors: strings.Join([if E.code.state.rewrites != _|_ for rn, r in E.code.state.rewrites {
 				let matcher = "rewrite_\(strings.Replace(rn, "-", "_", -1))"
 				let params = [if strings.Contains(r.source, ":") for m in regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1) {m}]
 				let placed = strings.Join([for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1) {
 					[for i, p in params if p == t {"{re.\(matcher).\(i+1)}"}, t][0]
 				}], "")
-				let query = [if strings.Contains(placed, "?") {"&{query}"}, "?{query}"][0]
+				let rpc = strings.HasPrefix(placed, "/rpc/")
+				// A rewrite to a path alone keeps the request's query, so a
+				// function's ends in the `?` that leaves it none.
+				let query = [if rpc if strings.Contains(placed, "?") {""}, if rpc {"?"}, if strings.Contains(placed, "?") {"&{query}"}, "?{query}"][0]
+				let called = [if rpc {"      @\(matcher)_call method PUT PATCH DELETE\n      method @\(matcher)_call POST\n"}, ""][0]
 				let methods = [if r.methods != _|_ {"    method \(strings.Join(r.methods, " "))\n"}, ""][0]
 				"""
 					  @\(matcher) {
@@ -5962,12 +5989,15 @@ _pgrollDir: "services/database/pgroll"
 					  }
 					  handle @\(matcher) {
 					    route {
-					      @\(matcher)_post method POST
+					      request_header -X-Signal-Path
+					      request_header -X-Blob-Path
+					\(called)      @\(matcher)_post method POST
 					      request_header @\(matcher)_post Prefer "return=representation,resolution=ignore-duplicates"
-					      request_header X-Rewrite-Path {http.request.uri.path}
 					      rewrite * \(placed)\(query)
 					      reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
 					        header_up dapr-app-id crud
+					        header_up X-Forwarded-Method {http.request.orig_method}
+					        header_up X-Forwarded-Uri {http.request.orig_uri}
 					        import bounded-crud
 					      }
 					    }

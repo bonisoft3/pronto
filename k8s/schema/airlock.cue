@@ -86,6 +86,8 @@ import (
 		})
 	}}
 
+	let endpointsDigest = hex.Encode(sha256.Sum256(yaml.Marshal(endpointFiles)))
+
 	// The wall is its NetworkPolicies, and a sink k8s cannot reach would be
 	// dialed under the docker target's endpoint.
 	let refused = [if app.airlock != _|_ for r in [
@@ -122,7 +124,7 @@ import (
 						labels: (component & {c: "airlock-mesh"}).out
 						// subPath mounts never follow their ConfigMap, so a changed
 						// endpoint rolls the pod.
-						annotations: "pronto.dev/endpoints-digest": hex.Encode(sha256.Sum256(yaml.Marshal(endpointFiles)))
+						annotations: "pronto.dev/endpoints-digest": endpointsDigest
 					}
 					spec: {
 						automountServiceAccountToken: false
@@ -165,6 +167,10 @@ import (
 				template: {
 					metadata: {
 						labels: (component & {c: "airlock"}).out
+						// A read's cache is the process's and keyed by the request,
+						// not by where its endpoint leads, so a changed endpoint
+						// rolls the airlock with the daprd.
+						annotations: "pronto.dev/endpoints-digest": endpointsDigest
 						if A.secretDigest != "" {
 							annotations: "pronto.dev/airlock-secret-digest": A.secretDigest
 						}

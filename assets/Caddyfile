@@ -133,8 +133,19 @@
   # path; a gcp release to the service's localhost port in the one Cloud Run
   # instance they share; compose and docker leave them unset and dial the
   # service directly.
+  # What a route states of the client's request is the door's to state: a
+  # rewrite's X-Forwarded-Method and X-Forwarded-Uri (emit.cue's
+  # _rewriteDoors), a signal's and a claim's path below. Asked directly, a
+  # function is told none of them, and each route to PostgREST drops the
+  # ones it does not state. A route that states one sets it on the upstream
+  # request (header_up), past the hop-by-hop headers a client's Connection
+  # names for removal.
   handle /crud/* {
     uri strip_prefix /crud
+    request_header -X-Forwarded-Method
+    request_header -X-Forwarded-Uri
+    request_header -X-Signal-Path
+    request_header -X-Blob-Path
     @post method POST
     request_header @post Prefer "return=representation,resolution=ignore-duplicates"
     reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
@@ -151,12 +162,15 @@
       request_body {
         max_size 1MB
       }
-      request_header X-Signal-Path {http.request.uri.path}
       request_header -Authorization
+      request_header -X-Forwarded-Method
+      request_header -X-Forwarded-Uri
+      request_header -X-Blob-Path
       request_header Content-Type application/json
       rewrite * /rpc/signal_in
       reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
         header_up dapr-app-id crud
+        header_up X-Signal-Path {http.request.orig_uri.path}
         import bounded-crud
       }
     }
@@ -229,11 +243,14 @@
     route {
       @other not method POST
       respond @other 405
-      request_header X-Blob-Path {http.request.uri.path}
+      request_header -X-Forwarded-Method
+      request_header -X-Forwarded-Uri
+      request_header -X-Signal-Path
       request_header Content-Type application/json
       rewrite * /rpc/claim_upload
       reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
         header_up dapr-app-id crud
+        header_up X-Blob-Path {http.request.orig_uri.path}
         import bounded-crud
       }
     }
@@ -267,6 +284,8 @@
         forward_auth {$PRONTO_UPSTREAM_CRUD:crud:3000} {
           uri /rpc/upload_allowed?key={http.request.uri.path.2}
           header_up dapr-app-id crud
+          header_up -X-Signal-Path
+          header_up -X-Blob-Path
           import bounded-crud
         }
       }

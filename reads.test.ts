@@ -4,7 +4,22 @@
 // mean is refused at vet.
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { cue, emitFiles, paymentProgram, RATE, readProgram } from "./effects-fixtures.ts";
+import { bridgedReadProgram, cue, emitFiles, paymentProgram, RATE, readProgram } from "./effects-fixtures.ts";
+
+// The hatch `vendor` as an Activepieces runner, whose actions take a POST.
+const ACTIVEPIECES = `
+app: capabilities: hatches: vendor: activepieces: {
+  lock: "./pieces/integrations.lock"
+  pieces: rates: {local: "./pieces/rates", export: "rates"}
+  actions: quote: {
+    piece: "rates", action: "quote"
+    inputSchema: "./pieces/rates/quote.input.schema.json"
+    outputSchema: "./pieces/rates/quote.output.schema.json"
+    fixedProps: {}
+    idempotencyKeyProp: "requestKey"
+  }
+}
+`;
 
 async function refusal(code: string): Promise<string> {
   const res = await cue(["vet", "-c", "-"], code);
@@ -74,6 +89,59 @@ Deno.test("a cluster with a read runs its airlock as any effect's, with no handl
   assertEquals(t.airlock.dockerfile.copy.length, 1, "the manifest alone: a read has no handler");
 });
 
+// A bridge is a read's sink as it is a write's: the endpoint is the bridge's
+// container, and the manifest says where the airlock finds it deployed.
+Deno.test("a read's sink may be a bridge, its own or the one it names for a target, and the airlock is told where the bridge runs", async () => {
+  const emitted = async (code: string) => {
+    const files = await emitFiles(code);
+    return {
+      bridge: JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.reads.rate.bridge,
+      credential: JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.reads.rate.credential,
+      compose: JSON.parse(JSON.stringify(files["services/airlock/dapr/rate.yaml"])).data.spec.baseUrl,
+      k8s: JSON.parse(JSON.stringify(files[".pronto/cluster.json"])).data.endpoints.k8s.rate,
+    };
+  };
+  // The vendor's origin everywhere but the compose stack, which calls the
+  // bridge's simulator with the same request and the same header.
+  assertEquals(await emitted(bridgedReadProgram()), {
+    bridge: { name: "rates", targets: ["cloudflare", "k8s"], simulated: true },
+    credential: { header: "Authorization", scheme: "Bearer", secret: "RATES_KEY" },
+    compose: "http://vendor:3000",
+    k8s: "https://rates.example",
+  });
+  // The bridge as the read's own sink, on every target.
+  assertEquals(await emitted(bridgedReadProgram({ sink: `sink: {bridge: "rates"}` })), {
+    bridge: { name: "rates", targets: [], simulated: true },
+    credential: undefined,
+    compose: "http://vendor:3000",
+    k8s: "http://vendor:3000",
+  });
+  // No simulator: the local stack runs no container for it, and the airlock
+  // settles the read not deployed there.
+  assertEquals((await emitted(bridgedReadProgram({ bridge: `{container: "vendor", port: 3000}` }))).bridge, { name: "rates", targets: ["cloudflare", "k8s"], simulated: false });
+  assertEquals(
+    (await emitted(bridgedReadProgram({ sink: `sink: {bridge: "rates"}`, bridge: `{container: "vendor", port: 3000, targets: ["k8s"]}` }).replace("targets: []", `targets: ["k8s"]`))).bridge,
+    { name: "rates", targets: ["k8s"], simulated: false },
+  );
+  // An isolate hatch's bridge is handed the request as its module is any.
+  const isolate = readProgram({ rate: RATE.replace(/sink: \{.*\}\}/, `sink: {bridge: "rates"}`) }) +
+    `\napp: capabilities: hatches: quotes: {kind: "isolate", note: "answers rates from a table", entrypoint: "isolates/quotes/main.ts", files: ["isolates/quotes/main.ts"]}\napp: state: bridges: rates: {isolate: "quotes", simulator: {}}\n`;
+  assertEquals((await emitted(isolate)).bridge, { name: "rates", targets: [], simulated: true });
+});
+
+Deno.test("a cluster runs a read's bridge as a write's: the daprd waits on its simulator, and the credential it is sent is a fake with a default", async () => {
+  const res = await cue(["export", "-", "-e", "_cluster.state.effects", "--out", "json"], bridgedReadProgram());
+  if (!res.success) throw new Error(res.stderr);
+  const effects = JSON.parse(res.stdout) as Record<string, unknown>[];
+  assertEquals(effects.map((e) => [e.name, e.read, e.bridge, e.simulated, e.secrets]), [["rate", true, "rates", true, ["RATES_KEY"]]]);
+  const targets = await cue(["export", "-", "-e", "_build.project.targets", "--out", "json"], bridgedReadProgram());
+  if (!targets.success) throw new Error(targets.stderr);
+  const t = JSON.parse(targets.stdout);
+  assertEquals([t.airlock.compose.environment.AIRLOCK_TARGET, t.airlock.compose.environment.RATES_KEY], ["local", "${RATES_KEY:-simulator}"]);
+  assertEquals(t["airlock-mesh"].compose.depends_on, { "test-effects-vendor": { condition: "service_started" } });
+  assertEquals(Object.keys(t.vendor.compose.networks).sort(), ["airlock-out", "bridge-rates-egress"]);
+});
+
 Deno.test("what a GET cannot mean is refused at vet, with the reason", async () => {
   const sink = `sink: {origin: "https://rates.example", credential: {scheme: "Bearer", secret: "RATES_KEY"}}`;
   const refusals: [string, string][] = [
@@ -85,6 +153,11 @@ Deno.test("what a GET cannot mean is refused at vet, with the reason", async () 
     [readProgram({ rate: RATE.replace(sink, sink.replace("}}", "}, idempotent: true}")) }), "effect rate is a read and declares idempotent"],
     [readProgram({ rate: RATE.replace("cacheControl:", `secrets: ["OTHER_KEY"]\n      cacheControl:`) }), "effect rate is a read and declares secrets"],
     [readProgram({ rate: RATE.replace(sink, `sink: {ai: "text"}`) }), "effect rate is a GET on the AI gateway"],
+    [bridgedReadProgram({ sink: `sink: {bridge: "rates", credential: {secret: "RATES_KEY"}}` }), "effect rate declares a credential or content type for a sink that is no origin"],
+    [bridgedReadProgram({ sink: `sink: {bridge: "rates", idempotent: false}` }), "effect rate is a read and declares idempotent"],
+    [bridgedReadProgram({ sink: `sink: {origin: "https://rates.example", targets: docker: bridge: "absent"}` }), "effect rate reaches undeclared bridge: absent"],
+    [bridgedReadProgram({ sink: `sink: {bridge: "rates"}`, bridge: `{container: "vendor", action: "quote"}` }) + ACTIVEPIECES, "effect rate is a GET on bridge rates, whose Activepieces action answers only what is posted to it"],
+    [bridgedReadProgram({ bridge: `{container: "vendor", action: "quote"}` }) + ACTIVEPIECES, "effect rate is a GET on bridge rates, whose Activepieces action answers only what is posted to it"],
     [readProgram({ rate: RATE.replace(`day: "2026-11-16"`, `day: "2026-11-16", extra: "x"`) }), "effect rate's input extra is sent nowhere"],
     [readProgram({ rate: RATE.replace(`{?day}`, `{?day,limit}`) }), "effect rate's path names limit, which its input does not"],
     [readProgram({ rate: RATE.replace(`"max-age=3600"`, `"private, max-age=3600"`) }), "effect rate declares its answers private"],

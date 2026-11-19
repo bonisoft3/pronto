@@ -172,7 +172,7 @@ Deno.test({ name: "a client calls the function its declared role alone may execu
       CREATE FUNCTION advance_residual() RETURNS json LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
         INSERT INTO advance_payment (amount, parent_id)
         SELECT p.amount / 2, p.id FROM advance_payment p
-        WHERE p.id = split_part(current_setting('request.headers', true)::json ->> 'x-rewrite-path', '/', 4)::uuid
+        WHERE p.id = substring(current_setting('request.headers', true)::json ->> 'x-forwarded-uri' from '^/expense/advance-payment/([0-9a-f-]{36})/residual([?]|$)')::uuid
         RETURNING json_build_object('parent', parent_id, 'amount', amount, 'by', current_setting('request.jwt.claims', true)::json ->> 'sub')
       $$;
       REVOKE EXECUTE ON FUNCTION advance_residual() FROM PUBLIC;

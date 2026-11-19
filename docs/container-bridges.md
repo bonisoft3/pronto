@@ -31,8 +31,35 @@ is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/b
 for the ledger and transport contract.
 
 A [read](decisions/2026-10-03-external-effects.md#reads), an effect that is an
-HTTP GET, never reaches a bridge: a bridge stands in for a sink that does not
-speak HTTP, so there is nothing of it to GET, and the compiler refuses one.
+HTTP GET, reaches a bridge as a write does: its path and query go to the
+bridge's container through the read's endpoint on the airlock's daprd, and
+what the container answers is the read's outcome. A read that keeps its
+vendor's origin and names a bridge for the compose stack is answered there by
+the bridge's simulator:
+
+```cue
+code: state: bridges: rates: {container: "rates", port: 3000, simulator: {…}}
+code: state: effects: rate: {
+    sink: {
+        origin:     "https://rates.example"
+        credential: {scheme: "Bearer", secret: "RATES_KEY"}
+        targets: docker: bridge: "rates"
+    }
+    request: {method: "GET", path: "/rates/{currency}{?day}"}
+    input: {currency: "NEW.currency", day: "NEW.spent_on"}
+    count:       "pricings"
+    incarnation: "lineage"
+}
+```
+
+The bridge is sent the sink's credential header as the origin is, with
+whatever the credential's variable holds. In the compose stack the variable
+of an effect that names a bridge for `docker` defaults to `simulator`, so the
+stack starts without the vendor's key and the simulator is sent that fake; a
+vendor's key set in the stack's environment is sent to the simulator as it
+is. A bridge that is an effect's own sink takes no
+credential. An Activepieces bridge's action answers only what is posted to it,
+so the compiler refuses a read on one.
 
 ## Where a bridge runs
 
@@ -206,6 +233,9 @@ but each fails at once: the airlock settles the claimed effect `failed` with
 `{bridge, target, reason: "not deployed"}` and calls neither handler nor sink,
 so the row takes its `onError` arrow, no run is spent and no dead letter is left
 ([Airlock](https://github.com/bonisoft3/mecha/blob/v0.26.0/services/airlock/README.md#a-bridge-not-deployed)).
+A read fails the same way on its first run, through its own delivery: the row
+moves on the entry it waits on and the outcome is journaled, so a replay
+answers it.
 That is the local stack for a bridge without a simulator, and every release
 target it does not name. The edge never dials a bridge's internal address: a
 bridge not on `cloudflare` is such an address there. An explicitly declared

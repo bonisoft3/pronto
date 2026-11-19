@@ -1323,11 +1323,14 @@ import (
 // Next.js's `rewrites`, a subset. `source` is path-to-regexp's literal and
 // `:name` segments, a parameter being letters, digits and `. _ ~ -`;
 // `destination` is a PostgREST path under `/crud`, naming the parameters it
-// uses, and takes the request's own query after its own. `methods`, as
-// Vercel's routes spell it, narrows what is otherwise every method. The
-// request is handed on as it came, its `Authorization` included, with the
-// path it asked for in `X-Rewrite-Path`. What the subset leaves out (`has`,
-// `missing`, wildcards, patterns) is refused, never ignored.
+// uses; a table or view takes the request's own query after it, a function
+// (`rpc/`) the destination's alone. `methods`, as Vercel's routes spell it,
+// narrows what is otherwise every method, the client's. The request is handed
+// on as it came, its `Authorization` included, with the method and the target
+// it asked, as sent, in `X-Forwarded-Method` and `X-Forwarded-Uri`, which the
+// door sets itself; a `PUT`, `PATCH` or `DELETE` reaches a function as the
+// `POST` PostgREST calls one by. What the subset leaves out (`has`, `missing`,
+// wildcards, patterns) is refused, never ignored.
 #Rewrite: {
 	source:      =~"^(/([A-Za-z0-9][A-Za-z0-9_-]*|:[a-z][A-Za-z0-9_]*))+$" & !~"^/(crud|signal|electric|auth|poke|blob-claim|blobs|img|health|omnishell|shell|seed-assets)(/|$)"
 	destination: =~"^/crud/(rpc/)?[a-z][a-z0-9_]*(\\?[^\\s{}\"`\\\\#]*)?$"
@@ -2839,6 +2842,13 @@ import (
 		for n, _ in _rewrites if strings.HasPrefix(_rewriteSegments[n][1], ":") {
 			"rewrite \(n): the source begins with a parameter, and its first segment is a word"
 		},
+		// PostgREST reads the query of a function's POST as filters on what
+		// it returns, never as its arguments, and the door calls a function
+		// by POST for a PUT, PATCH or DELETE too; no `methods` is every one.
+		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?"
+		if len([if r.methods == _|_ {""}, if r.methods != _|_ for m in r.methods if m != "GET" if m != "HEAD" {m}]) > 0 {
+			"rewrite \(n): a function's destination has a query, which is its arguments under GET and HEAD alone, so its methods name no other; under any other the function reads the path and query from X-Forwarded-Uri"
+		},
 		for n, r in _rewrites if strings.Contains(r.source, ":")
 		let ps = regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1)
 		if len(ps) != len({for p in ps {(p): true}}) {
@@ -3098,8 +3108,9 @@ import (
 			"effect \(n) is a read and declares \(w): a GET is safe (RFC 9110 §9.2.1), so nothing claims it, and it has no handler and sends no body"
 		}],
 		[for n, x in _reads
-		for b in list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]]) {
-			"effect \(n) is a GET on bridge \(b): a bridge stands in for a sink that does not speak HTTP, so there is nothing of it to GET"
+		for b in list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]])
+		if _declaredBridges[b] != _|_ if _declaredBridges[b].action != _|_ {
+			"effect \(n) is a GET on bridge \(b), whose Activepieces action answers only what is posted to it"
 		}],
 		[for n, x in _reads if x.sink.ai != _|_ {
 			"effect \(n) is a GET on the AI gateway, which answers only what is posted to it"

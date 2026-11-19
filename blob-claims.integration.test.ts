@@ -33,6 +33,15 @@ async function token(sub: string): Promise<string> {
   return `${body}.${b64(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))))}`;
 }
 
+/** A request written to the socket as given, for what fetch does not send: a Connection header naming others. */
+async function raw(port: string | undefined, head: string, body = ""): Promise<{ status: number; body: string }> {
+  const conn = await Deno.connect({ hostname: "127.0.0.1", port: Number(port) });
+  const bytes = new TextEncoder().encode(body);
+  await conn.write(new TextEncoder().encode(`${head}\r\nContent-Length: ${bytes.length}\r\n\r\n${body}`));
+  const answer = await new Response(conn.readable).text();
+  return { status: Number(answer.split(" ")[1]), body: answer.slice(answer.indexOf("\r\n\r\n") + 4) };
+}
+
 async function doorRoutes(): Promise<string> {
   const door = await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url));
   const route = (name: string) => {
@@ -40,7 +49,7 @@ async function doorRoutes(): Promise<string> {
     if (!found) throw new Error(`the door has no ${name} route`);
     return found;
   };
-  return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n(bounded-blobs) {\n}\n:8080 {\n${route("blob-claim")}${route("blobs")}\n}\n`;
+  return `{\n  admin off\n  auto_https off\n}\n(bounded-crud) {\n}\n(bounded-blobs) {\n}\n:8080 {\n${route("blob-claim")}${route("blobs")}${route("crud")}\n}\n`;
 }
 
 Deno.test({ name: "a session writes only the keys it claimed, once, and reads back the same bytes", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
@@ -108,6 +117,18 @@ Deno.test({ name: "a session writes only the keys it claimed, once, and reads ba
       // rclone serve s3 ignores If-None-Match, so the claimant may replace its own.
       assertEquals(await status(`/blobs/mecha-objects/${key}`, { method: "PUT", body: new Uint8Array([1]), headers: two }), 403);
       assertEquals((await (await at(`/blobs/mecha-objects/${key}`)).arrayBuffer()).byteLength, bytes.length);
+    });
+    await t.step("the key is the door's to state: one a client names at /crud claims nothing", async () => {
+      const forged = `${crypto.randomUUID()}.jpg`;
+      const direct = await status("/crud/rpc/claim_upload", { method: "POST", body: "{}", headers: { ...one, "content-type": "application/json", "x-blob-path": `/blob-claim/${forged}` } });
+      assertEquals(direct >= 400 && direct < 500, true, `answered ${direct}`);
+      assertEquals((await psql(`SELECT count(*) FROM blob_plane.claim WHERE key = '${forged}'`)).out, "0");
+    });
+    await t.step("a client's Connection header cannot drop the key the door states", async () => {
+      const kept = `${crypto.randomUUID()}.jpg`;
+      const claimed = await raw(port, `POST /blob-claim/${kept} HTTP/1.1\r\nHost: door\r\nAuthorization: ${one.authorization}\r\nConnection: X-Blob-Path, close`, "{}");
+      assertEquals(claimed.status < 300, true, `answered ${claimed.status}`);
+      assertEquals((await psql(`SELECT count(*) FROM blob_plane.claim WHERE key = '${kept}'`)).out, "1");
     });
     await t.step("no listing and no delete", async () => {
       assertEquals(await status("/blobs/mecha-objects/"), 405);

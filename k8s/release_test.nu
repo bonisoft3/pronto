@@ -687,6 +687,9 @@ def test_airlock_manifests [] {
 	let vars = $airlock.spec.containers.0.env
 	let value = {|name| $vars | where name == $name | first | get -o value }
 	assert equal (do $value AIRLOCK_TARGET) k8s
+	# A changed endpoint rolls the airlock with the daprd: its read cache does
+	# not know where an endpoint leads.
+	assert equal $airlock.metadata.annotations."pronto.dev/endpoints-digest" $mesh.metadata.annotations."pronto.dev/endpoints-digest"
 	assert equal (do $value ORIGIN) "https://effects.localhost"
 	assert equal (do $value MESH_URL) "http://airlock-mesh:3500"
 	assert equal (do $value AIRLOCK_DIR) /airlock
