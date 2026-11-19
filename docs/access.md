@@ -240,7 +240,10 @@ before migrate's check, so a role dropped since the last release fails 006's
 policies with PostgreSQL's own error before the check names the fix. The
 release still fails.
 
-Named follow-ups, none taken by the program that turns `checked` on:
+No release target runs a checked app yet: initdb runs `001_roles.sql` as the
+superuser of a database with no roles, which the check refuses, and mecha's
+`899_role_passwords.sh` needs `CREATEROLE`. The knob is the first step; the named
+follow-ups complete it:
 
 - *Local stack for a checked app.* mecha's database service runs initdb, whose
   001 refuses an unprovisioned database, so a checked app has no local stack
