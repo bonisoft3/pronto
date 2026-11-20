@@ -22,6 +22,7 @@
 // with a quote stopped the door, and one naming `$(…)` ran it.
 
 import { fileURLToPath } from "node:url";
+import { get as httpGet } from "node:http";
 import { created } from "./docker-copy.ts";
 
 const dir = fileURLToPath(new URL("./testdata/emit", import.meta.url));
@@ -71,6 +72,9 @@ const FILES: [string, string, (v: string) => string][] = [
   ["/shell/screens/regras.css", "srv/shell/screens/regras.css", (v) => `.${v} {}\n/* ${filler} */\n`],
   ["/omnishell/interpreter/shell.js", "omnishell/interpreter/shell.js", (v) => `export const v = "${v}";\n// ${filler}\n`],
   ["/robots.txt", "srv/robots.txt", (v) => `User-agent: *\nAllow: /${v}\n# ${filler}\n`],
+  ["/shell/piece.glb", "srv/shell/piece.glb", (v) => `glTF\0${v}${filler}`],
+  ["/shell/scene.gltf", "srv/shell/scene.gltf", (v) => JSON.stringify({ asset: { version: "2.0" }, extras: `${v}${filler}` })],
+  ["/shell/data.bin", "srv/shell/data.bin", (v) => `\0${v}${filler}`],
   ["/regras", "srv/regras/index.html", (v) => `<!doctype html><title>${v}</title><p>${filler}</p>\n`],
 ];
 const ENTRY = (v: string) => `<!doctype html><title>entry-${v}</title><p>${filler}</p>\n`;
@@ -106,9 +110,30 @@ for (const development of [false, true]) Deno.test({ name: development
   };
   const get = async (url: string, etag?: string) => {
     const res = await fetch(url, { headers: {
+      "Accept-Encoding": "gzip",
       ...(etag === undefined ? {} : { "If-None-Match": etag }),
       ...(development ? { "If-Modified-Since": new Date(CLAMPED * 1000).toUTCString() } : {}),
     } });
+    const path = new URL(url).pathname;
+    const mime = path.endsWith(".glb") ? "model/gltf-binary" : path.endsWith(".gltf") ? "model/gltf+json" : path.endsWith(".bin") ? "application/octet-stream" : undefined;
+    if (res.status === 200 && mime) {
+      if (res.headers.get("content-type") !== mime) fail(`${path}: expected ${mime}, got ${res.headers.get("content-type")}`);
+      // Fetch decodes gzip and removes Content-Encoding; inspect the wire response too.
+      const encoding = await new Promise<string | undefined>((resolve, reject) => {
+        httpGet(url, { headers: { "Accept-Encoding": "gzip" } }, (response) => {
+          response.on("error", reject);
+          response.on("end", () => resolve(response.headers["content-encoding"]));
+          response.resume();
+        }).on("error", reject);
+      });
+      if (encoding !== (mime === "application/octet-stream" ? undefined : "gzip")) fail(`${path}: unexpected encoding ${encoding}`);
+    }
+    if (!development && res.status === 200) {
+      const html = res.headers.get("content-type")?.startsWith("text/html") ?? false;
+      const cacheControl = res.headers.get("cache-control")?.split(",").map((value) => value.trim()) ?? [];
+      if (cacheControl.includes("no-transform") !== html) fail(`${path}: unexpected Cache-Control ${cacheControl.join(", ")}`);
+      if (path === "/regras" && !cacheControl.includes("no-cache")) fail(`${path}: lost no-cache`);
+    }
     const policy = res.headers.get("content-security-policy") ?? "";
     if (new URL(url).pathname.startsWith("/docs/")) {
       if (!policy.includes("script-src-attr 'none'") || !policy.includes("object-src 'none'") || policy.includes("require-trusted-types-for") || policy.includes("'unsafe-eval'")) {
@@ -127,9 +152,11 @@ for (const development of [false, true]) Deno.test({ name: development
     await Deno.writeTextFile(`${scratch}/${file}`, file);
   }
   await Deno.writeTextFile(`${scratch}/Caddyfile`, caddyfile);
+  // A host without glTF MIME entries must behave like the container that has them.
+  await Deno.writeTextFile(`${scratch}/mime.types`, "application/octet-stream glb gltf bin\n");
   const tree: [string, string][] = [[`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]];
   try {
-    await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", ...(development ? ["-e", "PRONTO_FILE_MODE=development"] : []), "-p", "127.0.0.1::8080", CADDY, ...command], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], ...tree])]);
+    await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", ...(development ? ["-e", "PRONTO_FILE_MODE=development"] : []), "-p", "127.0.0.1::8080", CADDY, ...command], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/mime.types`, "/etc/mime.types"], ...tree])]);
     let url = await base();
     const started = await docker(["inspect", "-f", "{{.State.StartedAt}}", name]);
     const before: Record<string, string> = {};

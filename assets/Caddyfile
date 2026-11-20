@@ -7,6 +7,9 @@
 # strips that suffix from a revalidation. The sidecars themselves are no
 # content.
 (files) {
+  # Host MIME databases disagree on glTF; static assets have one type on every target.
+  header @gltfBinary Content-Type model/gltf-binary
+  header @gltfJson Content-Type model/gltf+json
   import files-{$PRONTO_FILE_MODE:release}
 }
 
@@ -71,6 +74,15 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
+  @gltfBinary path_regexp (?i)\.glb$
+  @gltfJson path_regexp (?i)\.gltf$
+  # A proxy's injected scripts would violate the released page's CSP.
+  @released expression `"{$PRONTO_FILE_MODE:release}" == "release"`
+  header @released {
+    match header Content-Type text/html*
+    +Cache-Control no-transform
+    defer
+  }
   # Every request is a span, the child of the traceparent it arrived with (the
   # gateway's), and every upstream is sent the span's own; the access log names
   # its traceID. The exporter reads the standard OTEL_* environment.
@@ -89,6 +101,13 @@
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link.
   encode zstd gzip
+  # Extend compression without copying Caddy's default MIME list.
+  encode zstd gzip {
+    match {
+      header Content-Type model/gltf-binary*
+      header Content-Type model/gltf+json*
+    }
+  }
   # Chromium probes /favicon.ico unsolicited; serve the file if present, or
   # answer 204 to prevent console errors that break Best Practices audits
   # without paying for an asset.
