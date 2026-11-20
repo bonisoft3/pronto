@@ -1,6 +1,6 @@
 // The database access model a program resolves to (the emit's `access`), which 001_roles.sql
 // and 002_grants.sql render: the roles, authenticator's reach, their bounds and the grants.
-import { assertEquals, assertMatch, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertMatch, assertNotMatch, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram, readProgram } from "./effects-fixtures.ts";
 
 const EMIT = "(pronto.#emit & {code: app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build})";
@@ -30,6 +30,7 @@ function cut(p: string, marker: string): string {
 
 const anonOnly = () => cut(cut(paymentProgram(), "    mecha: rows:"), "    effects: charge:");
 const declaring = (roles: string) => paymentProgram().replace("    effects: charge:", `    tokenRoles: ${roles}\n    effects: charge:`);
+const checked = (p: string) => p.replace("  state: {\n", `  state: {\n    provisioning: "checked"\n`);
 
 const dml = ["SELECT", "INSERT", "UPDATE", "DELETE"];
 const attrs = { superuser: false, createrole: false, createdb: false };
@@ -175,4 +176,96 @@ Deno.test("a role named for a keyword is quoted wherever 001 prints it", async (
     `ALTER ROLE "select" SET idle_in_transaction_session_timeout`,
   ]);
   assertMatch(roles, /ALTER ROLE service SET statement_timeout/);
+});
+
+// The check and what follows it in 001_roles.sql, which are the owner's statements and pronto's.
+const END = "END $access$;\n";
+const split = (t: string) => { const i = t.indexOf(END) + END.length; return { check: t.slice(0, i), rest: t.slice(i) }; };
+
+Deno.test("checked provisioning keeps the model", async () => {
+  for (const p of [paymentProgram(), anonOnly(), readProgram(), declaring(`{residual_bot: {note: "x"}}`)]) {
+    assertEquals(await access(checked(p)), await access(p));
+  }
+});
+
+Deno.test("checked 001 checks the database and creates no role, and 002 holds the table grants alone", async () => {
+  const files = await emitFiles(checked(paymentProgram()));
+  const { check, rest } = split(sql(files, "001_roles"));
+  assertMatch(check, /^-- The database against its access model \(state.provisioning: "checked"\)/);
+  assertStringIncludes(check, "DO $access$\nDECLARE\n");
+  assertStringIncludes(check, "RAISE EXCEPTION 'the database differs from the access model this release declares'");
+  // The statements that fix a difference are the check's data; none runs.
+  assertNotMatch(check, /^\s*(CREATE|ALTER) ROLE|^\s*GRANT /m);
+  assertStringIncludes(check, `'CREATE ROLE electric WITH LOGIN INHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB BYPASSRLS REPLICATION;'`);
+  assertStringIncludes(check, `'GRANT anon TO authenticator;'`);
+  assertEquals(rest, `GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
+`);
+  assertEquals(sql(files, "002_grants"), `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, service;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, service;
+`);
+});
+
+Deno.test("checked provisioning emits the owner's script, and generated provisioning does not", async () => {
+  const files = await emitFiles(checked(paymentProgram()));
+  assertEquals(unbound(files["services/database/provision.sql"].text), `CREATE ROLE anon WITH NOLOGIN INHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS NOREPLICATION;
+CREATE ROLE service WITH NOLOGIN INHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB BYPASSRLS NOREPLICATION;
+CREATE ROLE electric WITH LOGIN INHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB BYPASSRLS REPLICATION;
+CREATE ROLE authenticator WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS NOREPLICATION;
+GRANT anon TO authenticator;
+GRANT service TO authenticator;
+ALTER ROLE anon SET statement_timeout = '_';
+ALTER ROLE anon SET lock_timeout = '_';
+ALTER ROLE anon SET idle_in_transaction_session_timeout = '_';
+ALTER ROLE service SET statement_timeout = '_';
+ALTER ROLE service SET lock_timeout = '_';
+ALTER ROLE service SET idle_in_transaction_session_timeout = '_';
+GRANT USAGE ON SCHEMA public TO anon;
+GRANT USAGE ON SCHEMA public TO service;
+GRANT USAGE ON SCHEMA public TO electric;
+`);
+  assertEquals((await emitFiles(paymentProgram()))["services/database/provision.sql"], undefined);
+});
+
+Deno.test("a keyword-named role is quoted in the check and its fixes", async () => {
+  const files = await emitFiles(checked(declaring(`{select: {note: "x"}}`)));
+  const { check } = split(sql(files, "001_roles"));
+  assertStringIncludes(check, `'CREATE ROLE "select" WITH NOLOGIN INHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS NOREPLICATION;'`);
+  assertStringIncludes(check, `'GRANT "select" TO authenticator;'`);
+  assertMatch(check, /'ALTER ROLE "select" SET statement_timeout = ''\d+s'';'/);
+  assertMatch(unbound(files["services/database/provision.sql"].text), /^GRANT "select" TO authenticator;$/m);
+});
+
+async function reconcileRoles(program: string): Promise<string> {
+  const res = await cue(["export", "-", "-e", "roles", "--out", "json"], `${program}\nroles: _cluster.state.reconcile.roles\n`);
+  assertEquals(res.success, true, res.stderr);
+  return JSON.parse(res.stdout);
+}
+
+Deno.test("the cluster checks before the ledger on every release, and restates only what the owner did not provision", async () => {
+  // No token role and no migration: the check alone rides the migrate step.
+  const plain = await reconcileRoles(checked(anonOnly()));
+  assertEquals(typeof plain, "string");
+  assertEquals(plain.startsWith(split(sql(await emitFiles(checked(anonOnly())), "001_roles")).check), true);
+
+  const declared = checked(declaring(`{residual_bot: {note: "x"}}`));
+  const roles = await reconcileRoles(declared);
+  const { check, rest } = split(roles);
+  assertEquals(check, split(sql(await emitFiles(declared), "001_roles")).check);
+  assertStringIncludes(rest, "INSERT INTO mecha.token_role VALUES ('residual_bot') ON CONFLICT DO NOTHING;");
+  assertNotMatch(rest, /CREATE ROLE|TO authenticator;|ALTER ROLE|REVOKE %I FROM authenticator/);
+  // Generated provisioning is untouched: it creates and grants.
+  const generated = await reconcileRoles(declaring(`{residual_bot: {note: "x"}}`));
+  assertStringIncludes(generated, `CREATE ROLE "residual_bot" NOLOGIN;`);
+  assertStringIncludes(generated, `GRANT "residual_bot" TO authenticator;`);
+});
+
+Deno.test("checked provisioning needs a server tier", async () => {
+  const whole = (program: string) => cue(["vet", "-c", "-"], `${program}\n_whole: ${EMIT}\n`);
+  const tab = checked(anonOnly().replace('durability: "server"', 'durability: "tab"'));
+  const refused = await whole(tab);
+  assertEquals(refused.success, false);
+  assertStringIncludes(refused.stderr, "provisioning: checked needs the app's database, and the app has no server tier");
+  // A served app is refused for other reasons (_gated), never for this one.
+  assertNotMatch((await whole(checked(anonOnly()))).stderr, /provisioning: checked/);
 });

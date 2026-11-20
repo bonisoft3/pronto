@@ -161,12 +161,53 @@ CUE data. `001_roles.sql`, `002_grants.sql` and the grant in
 `008_publication.sql` render from this model in [[../emit.cue]]. It is derived
 from the program; it is not an operator-supplied access policy.
 
-The model is not a database-state audit or a complete provisioning contract.
-The SQL does not enforce every negative attribute on an existing built-in
-role, such as `superuser: false`. Membership options and grant ownership,
-function/column grants, the tenancy floor and token-role reconciliation are
-not fully represented. Inspecting this value therefore does not establish
-that an existing database conforms to Pronto's access requirements.
+### Generated or checked
+
+With `state.provisioning` omitted or set to `"generated"`, Pronto creates
+and grants the roles. Existing roles can retain attributes that differ from
+the model. For example, generated provisioning leaves an existing role's
+`SUPERUSER` attribute alone.
+
+Set `state.provisioning: "checked"` on a server program to generate a check
+for an owner-provisioned PostgreSQL database. The owner runs the emitted
+`services/database/provision.sql` once on a cluster with none of the runtime
+roles. Use a dedicated cluster for each checked app because roles and their
+memberships are cluster-wide.
+
+Run the check as the login that will migrate the database. Fresh initdb runs
+it at the start of `001_roles.sql`. Mecha's migration runner runs the same
+check in `reconcile.roles` before opening its ledger or reconciling token
+roles. On a difference, PostgreSQL reports repair statements in `DETAIL`.
+A database administrator reviews and applies the statements, then the migration
+login reruns the check. If a runtime role owns the database, the suggested
+repair transfers ownership to the migration login. If a runtime role owns
+`public`, the repair restores `pg_database_owner` as the schema owner.
+Migrations continue to manage tables, policies, table grants and default privileges.
+
+| What the check reads | What must hold |
+|---|---|
+| Role attributes and ownership | Each runtime role has the model's login, inheritance, superuser, role creation, database creation, RLS bypass and replication attributes. Database and application schema ownership stay separate from runtime roles. |
+| Memberships | Each declared membership permits `SET`, has the expected inheritance and lacks `ADMIN`. Runtime roles have only their declared memberships. Grants of `authenticator`, RLS-bypassing roles and replication roles are restricted to declared members. PostgreSQL's admin-only grants to a delegated database owner can remain when issued by a superuser. |
+| Role settings | Timeout values match the model's spelling and have no override for this database. |
+| Schema privileges | Roles hold the declared privileges on `public`. Neither runtime roles nor `PUBLIC` have a grant of `CREATE` there. |
+| Migration login | A separate login can bypass RLS, has `CREATE` on the database and has `USAGE` and `CREATE` on `public`, the first schema in its effective search path. |
+
+**Requirements.** Membership options require PostgreSQL 16 or later. The
+migration login needs ownership of the app's tables for subsequent migrations.
+Provisioning requires an administrator with permission to create roles with
+`BYPASSRLS` and `REPLICATION`. The owner supplies credentials and installs
+extensions that require elevated privileges. The check covers the catalog
+state listed above. Passwords, other settings, database-level grants,
+table and function ownership, object grants, and installed extensions require
+separate validation.
+
+**Release support.** Current release targets provision their own database.
+On a fresh cluster their initdb reaches the check before the owner can apply
+the provisioning script, and Mecha's password initialization still uses
+`ALTER ROLE`. Checked mode currently supports generating and running the SQL
+against a separately prepared database. On retained Kubernetes and GCP
+databases, the schema job replays policies before the migration runner, so a
+missing role can surface as a PostgreSQL policy error first.
 
 ## Declared token roles
 

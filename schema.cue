@@ -1889,6 +1889,12 @@ import (
 		rewrites?: [=~"^[a-z][a-z0-9-]*$"]: #Rewrite
 		// Each a role a token may name beside the cluster's own (#TokenRole).
 		tokenRoles?: [#TokenRoleName]: #TokenRole
+		// Who provisions the database's roles, their attributes, memberships and
+		// settings, and the schema's grants (docs/access.md#generated-or-checked):
+		// pronto's migrations ("generated", the default), or the instance's owner,
+		// which every release then checks before its migrations ("checked"),
+		// refusing any difference with the statements that fix it.
+		provisioning?: "generated" | "checked"
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's

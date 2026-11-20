@@ -2051,15 +2051,20 @@ _sqlType: {
 // rest, 002_grants.sql's.
 #grantsSql: {
 	access: #access
+	// False where the schema's grants are the instance owner's, which the
+	// check holds (#accessCheckSql).
+	schemas: *true | bool
 	let S = access.schema
 	let names = {for r, x in access.roles {(r): (#roleName & {role: r, declared: x.declared}).out}}
-	let gs = {for k, g in {schema: access.schemaGrants, table: access.tableGrants, default: access.defaultPrivileges, published: access.publishedGrants} {(k): [for x in g {
-		owned: len([for t in x.to if access.roles[t].token {t}]) == 0
-		privs: strings.Join(x.privileges, ", ")
-		to:    strings.Join([for t in x.to {names[t]}], ", ")
-	}]}}
+	let gs = {for k, g in {schema: access.schemaGrants, table: access.tableGrants, default: access.defaultPrivileges, published: access.publishedGrants} {
+		(k): [for x in g {
+			owned: len([for t in x.to if access.roles[t].token {t}]) == 0
+			privs: strings.Join(x.privileges, ", ")
+			to:    strings.Join([for t in x.to {names[t]}], ", ")
+		}]
+	}}
 	let stmts = list.Concat([
-		[for g in gs.schema {owned: g.owned, text: "GRANT \(g.privs) ON SCHEMA \(S) TO \(g.to);\n"}],
+		[for g in gs.schema if schemas {owned: g.owned, text: "GRANT \(g.privs) ON SCHEMA \(S) TO \(g.to);\n"}],
 		[for g in gs.table {owned: g.owned, text: "GRANT \(g.privs) ON ALL TABLES IN SCHEMA \(S) TO \(g.to);\n"}],
 		[for g in gs.default {owned: g.owned, text: "ALTER DEFAULT PRIVILEGES IN SCHEMA \(S) GRANT \(g.privs) ON TABLES TO \(g.to);\n"}],
 	])
@@ -2110,6 +2115,304 @@ _sqlType: {
 	publishedGrants: [...#accessGrant]
 }
 
+// The access model of a program, computed from its code alone so that the
+// emit (E._access) and the cluster (#DefaultCluster's `roles` reconcile) read
+// one value; the flags it follows are computed here, once.
+#accessModel: {
+	let M = self
+	code!: _
+	_appMigrations: #appMigrations & {"code": M.code}
+	// The auth plane switches on as one: declaring #App.auth or any entity
+	// access implies the roles and service-token plumbing.
+	_authOn: M.code.capabilities.auth != _|_ || len(M._appMigrations.accessed) > 0
+	// The `service` role alone also stands where a schedule or an effect is
+	// declared: the ticker writes its ticks as it.
+	_serviceOn: len((#TimedMachines & {code: M.code}).out) > 0 || M._authOn || len(M.code.state.schedules) > 0 || [if M.code.state.effects != _|_ {len(M.code.state.effects) > 0}, false][0]
+	_serverOn:  (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
+	// The roles a token may name beside the cluster's own, in one order
+	// (#TokenRole).
+	_declaredRoles: list.SortStrings([if M.code.state.tokenRoles != _|_ for n, _ in M.code.state.tokenRoles {n}])
+	_baseTables: [for _, e in M.code.state.entities if e.server if M._appMigrations.held[e.name] != _|_ {e.table}]
+	// Whether the database's owner provisions it (state.provisioning).
+	_checked: [if M.code.state.provisioning != _|_ if M.code.state.provisioning == "checked" {true}, false][0]
+	out: #access & {
+		schema: "public"
+		let base = list.Concat([["anon"], [if M._authOn {"app_user"}, if M._serviceOn {"service"}], [if M._serverOn {"electric"}]])
+		order: list.Concat([base, M._declaredRoles, ["authenticator"]])
+		for r in base if r != "electric" {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
+				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
+			}
+		}
+		for r in M._declaredRoles {
+			roles: (r): {
+				kind: "request"
+				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
+				settings: (#roleSettings & {tier: "client"}).out
+			}
+		}
+		if M._serverOn {
+			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
+		}
+		roles: authenticator: {
+			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
+			memberOf: [for r in order if roles[r].token {r}]
+		}
+		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+		let granted = [if M._authOn {["app_user", "service"]}, if M._serviceOn {["anon", "service"]}, ["anon"]][0]
+		let visible = [if M._authOn {["anon", "app_user", "service"]}, granted][0]
+		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if M._serverOn {to: ["electric"], privileges: ["USAGE"]}]
+		tableGrants: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		defaultPrivileges: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		publishedGrants: [if len(M._baseTables) > 0 {to: ["anon"], privileges: dml}]
+	}
+}
+
+// A role's seven attributes as CREATE ROLE and ALTER ROLE spell them, always
+// all of them: the check compares them all, so its fix sets them all.
+#roleAttrs: {
+	role: #accessRole
+	out: strings.Join([
+		[if role.login {"LOGIN"}, "NOLOGIN"][0],
+		[if role.inherit {"INHERIT"}, "NOINHERIT"][0],
+		[if role.superuser {"SUPERUSER"}, "NOSUPERUSER"][0],
+		[if role.createrole {"CREATEROLE"}, "NOCREATEROLE"][0],
+		[if role.createdb {"CREATEDB"}, "NOCREATEDB"][0],
+		[if role.bypassrls {"BYPASSRLS"}, "NOBYPASSRLS"][0],
+		[if role.replication {"REPLICATION"}, "NOREPLICATION"][0],
+	], " ")
+}
+
+// One row of an inline table, its values as SQL literals.
+#sqlRow: {
+	vs: [...]
+	out: "(" + strings.Join([for x in vs {(#sqlLit & {v: x}).out}], ", ") + ")"
+}
+
+// An inline table `e` of expected rows for the check to join the catalog to.
+// An empty VALUES list is a syntax error, so a table with no row is a select
+// of none.
+#valuesOr: {
+	let V = self
+	cols: [...{name: string, type: string}]
+	rows: [...string]
+	_names: strings.Join([for c in V.cols {c.name}], ", ")
+	out: [
+		if len(V.rows) > 0 {"(VALUES \(strings.Join(V.rows, ", "))) AS e(\(V._names))"},
+		"(SELECT \(strings.Join([for c in V.cols {"NULL::\(c.type)"}], ", ")) WHERE false) AS e(\(V._names))",
+	][0]
+}
+
+// What a database must hold for an access model: the rows the check compares
+// the catalogs with, and the statement that fixes a difference where it is
+// static. One value, so the check and the owner's script cannot disagree.
+#accessRows: {
+	let R = self
+	access: #access
+	let S = access.schema
+	roles: [for i, r in access.order {
+		ord:    i + 1
+		name:   r
+		a:      access.roles[r]
+		sql:    (#roleName & {role: r, declared: a.declared}).out
+		attrs:  (#roleAttrs & {role: a}).out
+		create: "CREATE ROLE \(sql) WITH \(attrs);"
+		alter:  "ALTER ROLE \(sql) WITH \(attrs);"
+	}]
+	_edges: [for r in access.order for m in access.roles[r].memberOf {member: r, role: m}]
+	edges: [for i, x in R._edges {
+		ord:    i + 1
+		member: x.member
+		role:   x.role
+		// What GRANT gives a member that does not inherit (authenticator) is
+		// SET alone; an admin option is never the model's.
+		inherit: access.roles[x.member].inherit
+		fix:    "GRANT \((#roleName & {role: x.role, declared: access.roles[x.role].declared}).out) TO \((#roleName & {role: x.member, declared: access.roles[x.member].declared}).out);"
+	}]
+	_settings: [for r in access.order for k in #settingKeys if access.roles[r].settings[k] != _|_ {
+		role:  r
+		sql:   (#roleName & {role: r, declared: access.roles[r].declared}).out
+		key:   k
+		value: access.roles[r].settings[k]
+	}]
+	settings: [for i, x in R._settings {
+		ord:   i + 1
+		role:  x.role
+		sql:   x.sql
+		key:   x.key
+		value: x.value
+		fix:   "ALTER ROLE \(x.sql) SET \(x.key) = \((#sqlLit & {v: x.value}).out);"
+	}]
+	_grants: [for g in access.schemaGrants for p in g.privileges for t in g.to {
+		role:      t
+		privilege: p
+		fix:       "GRANT \(p) ON SCHEMA \(S) TO \((#roleName & {role: t, declared: access.roles[t].declared}).out);"
+	}]
+	schema: [for i, x in R._grants {ord: i + 1, role: x.role, privilege: x.privilege, fix: x.fix}]
+}
+
+// The database against its access model, as the SQL a release runs before its
+// migrations (state.provisioning: "checked"): a DO block that compares
+// pg_roles, pg_auth_members, pg_db_role_setting and the schema's ACL with the
+// model, and on any difference raises with every statement that fixes it in
+// DETAIL, in an order an owner can run top to bottom. Every catalog it reads is
+// readable by any login, so the unprivileged login that migrates can run it.
+// Passwords are not compared: pg_roles hides them, and they are the
+// deployment's secrets.
+#accessCheckSql: {
+	access: #access
+	let rows = #accessRows & {"access": access}
+	let sname = (#sqlLit & {v: access.schema}).out
+	let names = "ARRAY[\(strings.Join([for r in access.order {(#sqlLit & {v: r}).out}], ", "))]::text[]"
+	// Membership in authenticator also reaches the roles that it can SET.
+	let privileged = "ARRAY[\(strings.Join([for r in access.order if access.roles[r].bypassrls || access.roles[r].replication || access.roles[r].kind == "authenticator" {(#sqlLit & {v: r}).out}], ", "))]::text[]"
+	let roleTable = (#valuesOr & {
+		cols: list.Concat([[{name: "ord", type: "int"}, {name: "name", type: "text"}], [for b in ["login", "inherit", "superuser", "createrole", "createdb", "bypassrls", "replication"] {name: b, type: "boolean"}], [{name: "create_fix", type: "text"}, {name: "alter_fix", type: "text"}]])
+		"rows": [for r in rows.roles {(#sqlRow & {vs: [r.ord, r.name, r.a.login, r.a.inherit, r.a.superuser, r.a.createrole, r.a.createdb, r.a.bypassrls, r.a.replication, r.create, r.alter]}).out}]
+	}).out
+	let edgeTable = (#valuesOr & {
+		cols: [{name: "ord", type: "int"}, {name: "member", type: "text"}, {name: "role", type: "text"}, {name: "inherit", type: "boolean"}, {name: "fix", type: "text"}]
+		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.ord, x.member, x.role, x.inherit, x.fix]}).out}]
+	}).out
+	let pairTable = (#valuesOr & {
+		cols: [{name: "member", type: "text"}, {name: "role", type: "text"}]
+		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.member, x.role]}).out}]
+	}).out
+	let settingTable = (#valuesOr & {
+		cols: [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "role_sql", type: "text"}, {name: "key", type: "text"}, {name: "value", type: "text"}, {name: "fix", type: "text"}]
+		"rows": [for x in rows.settings {(#sqlRow & {vs: [x.ord, x.role, x.sql, x.key, x.value, x.fix]}).out}]
+	}).out
+	let grantTable = (#valuesOr & {
+		cols: [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "privilege", type: "text"}, {name: "fix", type: "text"}]
+		"rows": [for x in rows.schema {(#sqlRow & {vs: [x.ord, x.role, x.privilege, x.fix]}).out}]
+	}).out
+	let phases = [
+		"""
+		SELECT 1 AS phase, e.ord, CASE WHEN r.oid IS NULL THEN e.create_fix ELSE e.alter_fix END AS fix
+		      FROM \(roleTable) LEFT JOIN pg_roles r ON r.rolname = e.name
+		      WHERE r.oid IS NULL OR ROW(r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls, r.rolreplication)
+		        IS DISTINCT FROM ROW(e.login, e.inherit, e.superuser, e.createrole, e.createdb, e.bypassrls, e.replication)
+		""",
+		"""
+		SELECT 2, 0, format('ALTER DATABASE %I OWNER TO %I;', current_database(), current_user)
+		      FROM pg_database WHERE datname = current_database() AND pg_get_userbyid(datdba)::text = ANY (\(names))
+		""",
+		"""
+		SELECT 2, 1, format('ALTER SCHEMA %I OWNER TO pg_database_owner;', nspname)
+		      FROM pg_namespace WHERE nspname = \(sname) AND pg_get_userbyid(nspowner)::text = ANY (\(names))
+		""",
+		"""
+		SELECT 3, e.ord, e.fix FROM \(edgeTable)
+		      WHERE NOT EXISTS (SELECT FROM pg_auth_members m WHERE m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role)))
+		""",
+		"""
+		SELECT 3, 1000 + e.ord, format('REVOKE ADMIN OPTION FOR %I FROM %I GRANTED BY %I;', e.role, e.member, pg_get_userbyid(m.grantor))
+		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+		      WHERE m.admin_option
+		""",
+		"""
+		SELECT 3, 2000 + e.ord, format('GRANT %I TO %I WITH INHERIT %s, SET TRUE GRANTED BY %I;', e.role, e.member, CASE WHEN e.inherit THEN 'TRUE' ELSE 'FALSE' END, pg_get_userbyid(m.grantor))
+		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+		      WHERE NOT (m.set_option AND m.inherit_option = e.inherit)
+		""",
+		"""
+		SELECT 4, 0, format('REVOKE %I FROM %I GRANTED BY %I;', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor))
+		      FROM pg_auth_members m
+		      WHERE (pg_get_userbyid(m.member)::text = ANY (\(names)) OR pg_get_userbyid(m.roleid)::text = ANY (\(privileged)))
+		        AND NOT (
+		          m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+		          AND pg_get_userbyid(m.member)::text <> ALL (\(names))
+		          AND EXISTS (SELECT FROM pg_database d JOIN pg_roles owner ON owner.oid = d.datdba
+		                      WHERE d.datname = current_database() AND owner.oid = m.member AND owner.rolcreaterole)
+		          AND EXISTS (SELECT FROM pg_roles grantor WHERE grantor.oid = m.grantor AND grantor.rolsuper)
+		        )
+		        AND NOT EXISTS (SELECT FROM \(pairTable) WHERE e.member = pg_get_userbyid(m.member)::text AND e.role = pg_get_userbyid(m.roleid)::text)
+		""",
+		"""
+		SELECT 5, e.ord, e.fix FROM \(settingTable)
+		      WHERE (SELECT substr(c, length(e.key) + 2) FROM pg_db_role_setting s, unnest(s.setconfig) c
+		             WHERE s.setdatabase = 0 AND s.setrole = to_regrole(quote_ident(e.role)) AND starts_with(c, e.key || '=')) IS DISTINCT FROM e.value
+		""",
+		"""
+		SELECT 6, e.ord, format('ALTER ROLE %s IN DATABASE %I RESET %s;', e.role_sql, current_database(), e.key) FROM \(settingTable)
+		      WHERE EXISTS (SELECT FROM pg_db_role_setting s, unnest(s.setconfig) c
+		                    WHERE s.setrole = to_regrole(quote_ident(e.role)) AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
+		                      AND starts_with(c, e.key || '='))
+		""",
+		"""
+		SELECT 7, e.ord, e.fix FROM \(grantTable)
+		      WHERE COALESCE(NOT has_schema_privilege(to_regrole(quote_ident(e.role)), \(sname), e.privilege), true)
+		""",
+		"""
+		SELECT DISTINCT 7, 1000, CASE WHEN a.grantor = n.nspowner THEN '' ELSE format('SET ROLE %I; ', pg_get_userbyid(a.grantor)) END
+		        || format('REVOKE CREATE ON SCHEMA %I FROM %s;', n.nspname, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)::text) END)
+		        || CASE WHEN a.grantor = n.nspowner THEN '' ELSE ' RESET ROLE;' END
+		      FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
+		      WHERE n.nspname = \(sname) AND a.privilege_type = 'CREATE'
+		        AND (a.grantee = 0 OR pg_get_userbyid(a.grantee)::text = ANY (\(names)))
+		""",
+		"""
+		SELECT 8, 1, format('ALTER ROLE %I IN DATABASE %I SET search_path = %I;', current_user, current_database(), \(sname))
+		      WHERE migration_schema IS DISTINCT FROM \(sname)
+		""",
+		"""
+		SELECT 8, 2, format('GRANT USAGE, CREATE ON SCHEMA %I TO %I;', \(sname), current_user)
+		      WHERE NOT (has_schema_privilege(current_user, \(sname), 'USAGE') AND has_schema_privilege(current_user, \(sname), 'CREATE'))
+		""",
+		"""
+		SELECT 8, 3, format('ALTER ROLE %I BYPASSRLS;', current_user)
+		      FROM pg_roles WHERE rolname = current_user AND NOT (rolbypassrls OR rolsuper)
+		""",
+		"""
+		SELECT 8, 4, format('GRANT CREATE ON DATABASE %I TO %I;', current_database(), current_user)
+		      WHERE NOT has_database_privilege(current_user, current_database(), 'CREATE')
+		""",
+	]
+	out: """
+		-- The database against its access model (state.provisioning: "checked"). Its owner
+		-- provisioned it; a difference refuses the release with the statements that fix it.
+		DO $access$
+		DECLARE
+		  fixes text;
+		  migration_schema pg_catalog.name := (pg_catalog.current_schemas(false))[1];
+		  migration_path pg_catalog.text := pg_catalog.current_setting('search_path');
+		BEGIN
+		  PERFORM pg_catalog.set_config('search_path', 'pg_catalog, pg_temp', true);
+		  IF current_setting('server_version_num')::int < 160000 THEN
+		    RAISE EXCEPTION 'checked provisioning requires PostgreSQL 16 or later';
+		  END IF;
+		  IF current_user::text = ANY (\(names)) THEN
+		    RAISE EXCEPTION 'checked provisioning requires a migration login separate from the runtime roles';
+		  END IF;
+		  SELECT string_agg(fix, E'\\n' ORDER BY phase, ord, fix) INTO fixes FROM (
+		    \(strings.Join(phases, "\n    UNION ALL\n    "))
+		  ) d;
+		  IF fixes IS NOT NULL THEN
+		    RAISE EXCEPTION 'the database differs from the access model this release declares'
+		      USING DETAIL = fixes,
+		            HINT = 'The database''s owner runs the statements in DETAIL, then the release runs again (docs/access.md#generated-or-checked).';
+		  END IF;
+		  PERFORM pg_catalog.set_config('search_path', migration_path, true);
+		END $access$;
+
+		"""
+}
+
+// The owner's script for a database with none of the model's roles: every
+// static statement the check names, in the order it names them.
+#accessProvisionSql: {
+	access: #access
+	let rows = #accessRows & {"access": access}
+	out: strings.Join(list.Concat([
+		[for r in rows.roles {r.create + "\n"}],
+		[for x in rows.edges {x.fix + "\n"}],
+		[for x in rows.settings {x.fix + "\n"}],
+		[for x in rows.schema {x.fix + "\n"}],
+	]), "")
+}
+
 // The declared token roles as 001_roles.sql leaves them, restated on every
 // release ahead of its migrations (the cluster's `roles` reconcile): initdb
 // runs 001 once, and a role may be declared after it did, with a migration
@@ -2119,12 +2422,16 @@ _sqlType: {
 // before it has neither.
 #tokenRolesSql: {
 	roles: [...string]
+	// Where the instance's owner provisions the roles (#accessCheckSql), which
+	// are then not created, granted or bounded here: the check refuses their
+	// absence, and the list, the floor and the prune are all this restates.
+	checked: *false | bool
 	out: mecha.#TenancySql + "\n" +
-		"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
-		"GRANT \(strings.Join([for r in roles {(#roleName & {role: r, declared: true}).out}], ", ")) TO authenticator;\n" +
-		strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "") +
+		[if !checked {"DO $$ BEGIN\n" + strings.Join([for r in roles {(#tokenRole & {role: r}).out}], "\n") + "END $$;\n" +
+			"GRANT \(strings.Join([for r in roles {(#roleName & {role: r, declared: true}).out}], ", ")) TO authenticator;\n" +
+			strings.Join([for r in roles {(#tokenRoleBounds & {role: r}).out}], "")}, ""][0] +
 		"INSERT INTO mecha.token_role VALUES \(strings.Join([for r in roles {"('\(r)')"}], ", ")) ON CONFLICT DO NOTHING;\n" +
-		(#tokenRolesPrune & {"roles": roles}).out
+		(#tokenRolesPrune & {"roles": roles, "checked": checked}).out
 }
 
 // A role the program no longer declares: out of `mecha.token_role`, so the
@@ -2143,6 +2450,7 @@ _sqlType: {
 // With `restate`, where no role is declared, the floor the marker is read by
 // is restated first, for a database that held a role under an older floor.
 #tokenRolesPrune: {
+	checked: *false | bool
 	roles:   *[] | [...string]
 	restate: *false | bool
 	_keep:   strings.Join(list.Concat([[for r in roles {"'\(r)'"}], ["''"]]), ", ")
@@ -2155,6 +2463,12 @@ _sqlType: {
 		END $mecha_floor$;
 
 		"""}, ""][0]
+	_revokes: [if !checked {"""
+		    FOR m IN SELECT DISTINCT grantor FROM pg_auth_members WHERE roleid = to_regrole(quote_ident(r)) AND member = to_regrole('authenticator') LOOP
+		      EXECUTE format('REVOKE %I FROM authenticator GRANTED BY %I', r, pg_get_userbyid(m.grantor));
+		    END LOOP;
+
+		"""}, ""][0]
 	out: _floor + """
 		DO $$ DECLARE
 		  r text;
@@ -2164,10 +2478,7 @@ _sqlType: {
 		  IF to_regclass('mecha.token_role') IS NULL THEN RETURN; END IF;
 		  FOR r IN SELECT role_name FROM mecha.token_role WHERE role_name <> ALL (ARRAY[\(_keep)]::text[]) LOOP
 		    IF to_regrole(quote_ident(r)) IS NULL OR to_regrole('authenticator') IS NULL THEN CONTINUE; END IF;
-		    FOR m IN SELECT DISTINCT grantor FROM pg_auth_members WHERE roleid = to_regrole(quote_ident(r)) AND member = to_regrole('authenticator') LOOP
-		      EXECUTE format('REVOKE %I FROM authenticator GRANTED BY %I', r, pg_get_userbyid(m.grantor));
-		    END LOOP;
-		    -- Through any role it belongs to, not its own grants alone: a role
+		\(_revokes)    -- Through any role it belongs to, not its own grants alone: a role
 		    -- authenticator reaches by way of another is one crud can switch to.
 		    held := pg_has_role('authenticator', to_regrole(quote_ident(r)), 'SET');
 		    IF held THEN
@@ -3610,8 +3921,11 @@ _pgrollDir: "services/database/pgroll"
 				// of its own for every server app would start one for each. The
 				// field comes as a struct the comprehension embeds: one it spelled
 				// with a reference read as incomplete in a cluster an app extends.
-				let rolesReconcile = {roles: [if len(declared) > 0 {(#tokenRolesSql & {roles: declared}).out}, (#tokenRolesPrune & {restate: true}).out][0]}
-				if len(declared) > 0 || ((#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out && (D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0)) {rolesReconcile}
+				let model = #accessModel & {code: D.code}
+				let isChecked = model._checked
+				let tokenSql = [if len(declared) > 0 {(#tokenRolesSql & {roles: declared, "checked": isChecked}).out}, (#tokenRolesPrune & {restate: true, "checked": isChecked}).out][0]
+				let rolesReconcile = {roles: [if isChecked {(#accessCheckSql & {access: model.out}).out}, ""][0] + tokenSql}
+				if len(declared) > 0 || (model._serverOn && (isChecked || D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0)) {rolesReconcile}
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
@@ -4649,54 +4963,25 @@ _pgrollDir: "services/database/pgroll"
 	// access implies the roles and service-token plumbing — policies without
 	// tokens (or vice versa) is not a supported state. The auth_uid() the
 	// policies call is the database image's (mecha's tenancy floor).
-	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
+	_authOn: E._model._authOn
 	// The `service` role alone also stands where a schedule or an effect is
 	// declared: the ticker writes its ticks as it, through crud, which mecha's
 	// cluster has verify the token wherever something wakes (its _serviceToken).
-	_serviceOn: len(E._timedMachines) > 0 || E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
+	_serviceOn: E._model._serviceOn
 	// The roles a token may name beside the cluster's own, in one order
 	// (#TokenRole). They are crud's to switch to, so crud takes the keys of
 	// the issuers a release trusts.
-	_declaredRoles: list.SortStrings([if E.code.state.tokenRoles != _|_ for n, _ in E.code.state.tokenRoles {n}])
+	_declaredRoles: E._model._declaredRoles
+	_model:         #accessModel & {code: E.code}
 	cluster: capabilities: issuers: len(E._declaredRoles) > 0
 	// The database access model (#access). A role no token names (electric) is
 	// granted with its attributes, in 001; the request roles' grants are 002's.
 	// `access` exposes it, only where there is a database, to tools outside
 	// this package, which cannot see hidden fields.
 	if E._serverOn {access: E._access}
-	_access: #access & {
-		schema: "public"
-		let base = list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
-		order: list.Concat([base, E._declaredRoles, ["authenticator"]])
-		for r in base if r != "electric" {
-			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
-				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
-			}
-		}
-		for r in E._declaredRoles {
-			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
-				settings: (#roleSettings & {tier: "client"}).out
-			}
-		}
-		if E._serverOn {
-			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
-		}
-		roles: authenticator: {
-			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
-			memberOf: [for r in order if roles[r].token {r}]
-		}
-		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
-		let granted = [if E._authOn {["app_user", "service"]}, if E._serviceOn {["anon", "service"]}, ["anon"]][0]
-		let visible = [if E._authOn {["anon", "app_user", "service"]}, granted][0]
-		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if E._serverOn {to: ["electric"], privileges: ["USAGE"]}]
-		tableGrants: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
-		defaultPrivileges: [{to: granted, privileges: dml}, if E._serverOn {to: ["electric"], privileges: ["SELECT"]}]
-		publishedGrants: [if len(E._baseTables) > 0 {to: ["anon"], privileges: dml}]
-	}
+	_access:              _model.out
+	_checked:             E._model._checked
+	_checkedServed:       [if E._checked if !E._serverOn {"provisioning: checked needs the app's database, and the app has no server tier"}, true][0] & true
 	_declaredRolesServed: [if len(E._declaredRoles) > 0 if !E._serverOn {"tokenRoles: a token role is a role of the app's database, and the app has no server tier"}, true][0] & true
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
@@ -5323,7 +5608,15 @@ _pgrollDir: "services/database/pgroll"
 				_timeouts: [for r in _a.order if len(_a.roles[r].settings) > 0 {
 					(#alterSettings & {role: r, quoted: _a.roles[r].declared, settings: _a.roles[r].settings}).out
 				}]
-				text: "DO $$ BEGIN\n" + strings.Join(_create, "\n") + "\n" + strings.Join(_declared, "") + _authenticator + "END $$;\n" + strings.Join(_login, "") + strings.Join(_bypass, "") + (#grantsSql & {access: _a}).owned + "\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" + strings.Join(_timeouts, "")
+				// Where the owner provisions the roles, they are checked, not created,
+				// and only the objects this schema's own login owns are granted here.
+				text: [if E._checked {(#accessCheckSql & {access: _a}).out + (#grantsSql & {access: _a, schemas: false}).owned}, "DO $$ BEGIN\n" + strings.Join(_create, "\n") + "\n" + strings.Join(_declared, "") + _authenticator + "END $$;\n" + strings.Join(_login, "") + strings.Join(_bypass, "") + (#grantsSql & {access: _a}).owned + "\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" + strings.Join(_timeouts, "")][0]
+			}
+			if E._checked {
+				"services/database/provision.sql": {
+					format: "sql"
+					text:   (#accessProvisionSql & {access: E._access}).out
+				}
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -5332,7 +5625,7 @@ _pgrollDir: "services/database/pgroll"
 				// gives anon a table right once something is synced). Without auth,
 				// the service role stands beside anon where only a wake brings it:
 				// the schedule tables, which anon never reaches, are its.
-				text: (#grantsSql & {access: E._access}).requested
+				text: (#grantsSql & {access: E._access, schemas: !E._checked}).requested
 			}
 			"services/database/migrations/008_publication.sql": {
 				format: "sql"

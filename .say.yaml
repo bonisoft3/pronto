@@ -42,6 +42,10 @@ say:
           - do: "deno test --parallel --no-config --allow-read --allow-write --allow-run=cue,nu,sh read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts host-postgres.test.ts"
           - do: "deno test --config deno.json --allow-read --allow-write --allow-run=cue,sh bridge-targets.test.ts isolate-hatches.test.ts"
           - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
+      access-check:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read --allow-run=cue,docker access-check.integration.test.ts"
       rls-installation:
         priority: -1
         cmds:
