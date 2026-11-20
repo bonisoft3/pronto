@@ -78,11 +78,13 @@ out: toml.Marshal((distribution.#Project & terminal.#Project & mecha.#Project & 
     const env: Record<string, string> = {
       MISE_TRUSTED_CONFIG_PATHS: work,
       MISE_GLOBAL_CONFIG_FILE: join(work, "none.toml"),
+      // mise-versions.jdx.dev lags fresh tags; ask GitHub directly so just-released pins resolve.
+      MISE_USE_VERSIONS_HOST: "false",
     };
     const args = [tools, "mise", ...(miseEnv ? ["-E", miseEnv] : []), "lock", "--platform", platforms.join(",")];
     await run("nu", args, { cwd: work, env });
 
-    let lock = (await Deno.readTextFile(join(work, lockFile))).replace(/^provenance = .*\n/gm, "");
+    let lock = (await Deno.readTextFile(join(work, lockFile))).replace(/^(?:provenance|checksum_source) = .*\n/gm, "");
     const blocks = lock.split(/^(?=\[)/m);
     for (const [i, block] of blocks.entries()) {
       if (!/^\[tools\."[^"]+"\."platforms\.[^"]+"\]\n/.test(block) || /^checksum = /m.test(block)) continue;
@@ -100,6 +102,10 @@ out: toml.Marshal((distribution.#Project & terminal.#Project & mecha.#Project & 
   } finally {
     await Deno.remove(work, { recursive: true });
   }
+}
+
+if (!Deno.env.get("GITHUB_TOKEN") && !Deno.env.get("GH_TOKEN")) {
+  throw new Error("GITHUB_TOKEN is required (run with GITHUB_TOKEN=$(gh auth token))");
 }
 
 await lockConfig("mise", ".mise.toml", "mise.lock", PLATFORMS);
