@@ -256,6 +256,14 @@ open-ended values without requiring wildcard transitions:
 `missing` names the event for confirmed absence; an unconfirmed local cache miss
 is not deletion. Delivery rechecks attachment identity, discards stale reads and
 acknowledges accepted snapshots. Fixed event names retain those same guarantees.
+
+An observer restarted by the turn of its own source's delivery — a state that
+re-enters itself, leaves and returns through an `always` hop, or moves to
+another state invoking the same source — begins having said that snapshot, so
+what a source says cannot restart it without end. What that cannot settle, such
+as two sources whose deliveries move each other's identity, ends in a named
+error once one unchanged snapshot is delivered eight times with nothing else
+happening to the chart.
 These bindings are source configuration; the machine remains XState grammar.
 
 ## Durable work
