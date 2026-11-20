@@ -20,7 +20,7 @@ WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions [m]ise.local.toml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then { w=$(pwd); mkdir -p /.bayt-clamp && find "$w" -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a "$w" /.bayt-clamp/w && rm -rf "$w" && mv /.bayt-clamp/w "$w"; fi && rm -rf /.bayt-clamp; } && find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS setup_srcs
 COPY --from=setup_ctxs /monorepo /monorepo
 
@@ -30,6 +30,6 @@ WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents .bayt/compose.setup.yaml .bayt/Dockerfile.setup .bayt/bayt.setup.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.setup.yaml .bayt/process-compose.yaml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then { w=$(pwd); mkdir -p /.bayt-clamp && find "$w" -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a "$w" /.bayt-clamp/w && rm -rf "$w" && mv /.bayt-clamp/w "$w"; fi && rm -rf /.bayt-clamp; } && find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS setup_bayt
 COPY --from=setup_bayt_ctxs /monorepo /monorepo

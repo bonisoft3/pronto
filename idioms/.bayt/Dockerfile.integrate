@@ -17,7 +17,7 @@ WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents shell/shell.yaml shell/screens/counter.html shell/screens/counter.css shell/screens/todo.html shell/screens/todo.css shell/screens/grid.html shell/screens/grid.css shell/screens/timer.html shell/screens/timer.css ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then { w=$(pwd); mkdir -p /.bayt-clamp && find "$w" -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a "$w" /.bayt-clamp/w && rm -rf "$w" && mv /.bayt-clamp/w "$w"; fi && rm -rf /.bayt-clamp; } && find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS integrate_srcs
 COPY --from=integrate_ctxs /monorepo /monorepo
 
@@ -28,6 +28,6 @@ COPY --parents .bayt/compose.integrate.yaml .bayt/Dockerfile.integrate .bayt/bay
 COPY --from=idioms-launch_bayt /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then { w=$(pwd); mkdir -p /.bayt-clamp && find "$w" -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a "$w" /.bayt-clamp/w && rm -rf "$w" && mv /.bayt-clamp/w "$w"; fi && rm -rf /.bayt-clamp; } && find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS integrate_bayt
 COPY --from=integrate_bayt_ctxs /monorepo /monorepo

@@ -16,7 +16,7 @@ WORKDIR /monorepo/plugins/pronto
 COPY --parents *.ts mecha*.js scales/*.ts deno.json deno.lock [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/plugins/pronto -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/plugins; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then mkdir -p /.bayt-clamp && find /monorepo/plugins/pronto -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a /monorepo/plugins/pronto /.bayt-clamp/w && rm -rf /monorepo/plugins/pronto && mv /.bayt-clamp/w /monorepo/plugins/pronto; fi && rm -rf /.bayt-clamp && find /monorepo/plugins/pronto -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/plugins; fi
 FROM scratch AS setup_srcs
 COPY --from=setup_ctxs /monorepo /monorepo
 
@@ -25,6 +25,6 @@ WORKDIR /monorepo/plugins/pronto
 COPY --parents .bayt/compose.setup.yaml .bayt/Dockerfile.setup .bayt/bayt.setup.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.setup.yaml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/plugins/pronto -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/plugins; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then mkdir -p /.bayt-clamp && find /monorepo/plugins/pronto -exec getfattr -dh {} + > /.bayt-clamp/x && if [ ! -s /.bayt-clamp/x ]; then cd / && cp -a /monorepo/plugins/pronto /.bayt-clamp/w && rm -rf /monorepo/plugins/pronto && mv /.bayt-clamp/w /monorepo/plugins/pronto; fi && rm -rf /.bayt-clamp && find /monorepo/plugins/pronto -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/plugins; fi
 FROM scratch AS setup_bayt
 COPY --from=setup_bayt_ctxs /monorepo /monorepo
