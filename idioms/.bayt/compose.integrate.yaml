@@ -5,7 +5,7 @@ services:
       additional_contexts:
         idioms-launch: service:idioms-launch
         plugins_omnishell-runtime-image: >-
-          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.27.0@sha256:b0e8f5f28cf3369130511092211151e0fb1c5b5f65890458b0ad62118648966a}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
+          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.28.0@sha256:3a2ca6b49eefc5e9b2111ee9fc3c6525c56bc7ed13c8f0d251667e539ad043f0}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
       context: ..
       dockerfile: .bayt/Dockerfile.integrate
       target: integrate

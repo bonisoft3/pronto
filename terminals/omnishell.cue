@@ -14,7 +14,7 @@ import (
 	toolchain "github.com/bonisoft3/omnishell/toolchain"
 )
 
-#Version: "0.27.0"
+#Version: "0.28.0"
 
 #Tools: {
 	...
@@ -40,7 +40,7 @@ import (
 // as pronto pins it: the consumer pins what it builds on, as with mecha's
 // images (clusters/mecha.cue). From the pin line an omnishell release prints.
 published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
-published: runtime: "bonitao/omnishell:0.27.0@sha256:b0e8f5f28cf3369130511092211151e0fb1c5b5f65890458b0ad62118648966a"
+published: runtime: "bonitao/omnishell:0.28.0@sha256:3a2ca6b49eefc5e9b2111ee9fc3c6525c56bc7ed13c8f0d251667e539ad043f0"
 
 // The build context an app's images copy omnishell's runtime tree from: that
 // image, or in the monorepo the target building it.
