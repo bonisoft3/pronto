@@ -125,13 +125,14 @@ that is a Decisions entry.
 ## Identity
 
 The terminal owns sign-in, and its doctrine is published data (the terminal
-module's `auth` block): one-tap passkey ceremonies with a server-generated
-display handle — users never type identifiers, passwords, or emails. The
+module's `auth` block): passkeys, offered as "this device" — one way in,
+with setting the device up offered only when it comes back empty — with a
+server-generated display handle — users never type identifiers, passwords, or emails. The
 terminal always offers guest sign-in beside the passkey: one click, no
 ceremony, origin-independent, minting the same generated identity; the
 passkey remains the durable identity. An app may also offer the providers the
-terminal lists (`auth.providers`, Google first): a way in at the gate and in a
-guest's strip, run by the cluster's auth service by redirect, so no provider
+terminal lists (`auth.providers`, Google first): a way in at the gate and
+behind the nav's one Sign in, run by the cluster's auth service by redirect, so no provider
 script runs in the app's pages. A person signed in through a provider and one
 holding a passkey are two people. Briefs speak of people and names; they never
 design login screens. An app whose program demands an auth mode or a provider

@@ -55,9 +55,10 @@ verbs are green:
    broker for release targets; `signin: broker: "https://id.example.com"` uses
    the remote broker everywhere and runs no local broker.
 2. Add a decision for the sign-in to `ir.html` (and `code.decisions` in CUE); `saytw generate` re-pins `meta.ir.sha256` automatically.
-3. The terminal's strip offers each provider to a guest. An app that hides the
-   strip presses its `.shell-provider[data-provider=<name>]` link from its own
-   bar, as it presses the passkey.
+3. The nav's Sign in opens in place onto each provider beside the passkey. An
+   app that hides the nav places `data-auth-provider="<name>"` and
+   `data-auth-action="device"` controls in its own markup
+   (omnishell's GUIDE.md#signing-in).
 4. `mise x -- ./saytw generate && mise x -- ./saytw lint && mise x -- ./saytw test && mise x -- ./saytw integrate`.
 
 The broker's pins move with pronto's version: nothing to refresh.

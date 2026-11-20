@@ -937,7 +937,7 @@ Deno.test("airlock rollback cannot seed discovery with links to removed fixtures
   assertEquals(visited, ["/fixture", "/", "/team/live"]);
 });
 
-Deno.test("verifyBrowser preserves tab-local pronto-token between screen journeys", async () => {
+Deno.test("verifyBrowser preserves the device's pronto-token between screen journeys", async () => {
   const initScriptsCalled: any[] = [];
   let simulatedStorageToken: string | null = null;
   const tokensReceivedInCtx: (string | undefined)[] = [];

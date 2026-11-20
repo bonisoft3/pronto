@@ -46,6 +46,10 @@ export async function front(p: {
   resolveTxt?: TxtResolver;
   /** Routes served beside the broker's own: a stand-in provider's (fake.ts). */
   extra?: (req: Request, url: URL) => Promise<Response> | null;
+  /** Whether an app on this machine (a localhost origin) is verified as a
+   * DNS TXT record verifies one elsewhere: a broker signing in test people,
+   * whose profiles are no one's to withhold. */
+  trustLocal?: boolean;
   /** The secret Hydra's token hook sends as its bearer; without it there is no hook. */
   hookSecret?: string;
 }) {
@@ -153,16 +157,17 @@ export async function front(p: {
       return go(redirect_to as string);
     }
     const pn = randomToken(16);
-    const trusted = await isTrusted(tenant);
+    const host = new URL(tenant).hostname;
+    const trusted = (p.trustLocal === true && (host === "localhost" || host.endsWith(".localhost"))) || await isTrusted(tenant);
     const requested = ((r.requested_scope as string[]) ?? []).filter((s): s is OptionalScope => s === "profile" || s === "email");
     const scopes = trusted ? requested : [];
     const leg = await seal(stateKey, { c: challenge, t: tenant, p: name, pn, scopes, exp: Math.floor(Date.now() / 1000) + 600 });
     if (trusted) return toProvider(provider, leg, pn, scopes);
-    const host = new URL(tenant).host;
-    return page(`Sign in to ${host}`, `<h1>Sign in to <span class="origin">${esc(host)}</span></h1>
+    const shown = new URL(tenant).host;
+    return page(`Sign in to ${shown}`, `<h1>Sign in to <span class="origin">${esc(shown)}</span></h1>
 <p>You'll continue with ${esc(provider.label)}. Only <span class="origin">${esc(tenant)}</span> learns that it's you, and it can't tell you apart in any other app.</p>
 <p><a class="go" href="${esc(`${issuer}/login/continue?leg=${encodeURIComponent(leg)}`)}">Continue with ${esc(provider.label)}</a></p>
-<p><small>If you didn't start this from ${esc(host)}, close this page.</small></p>`);
+<p><small>If you didn't start this from ${esc(shown)}, close this page.</small></p>`);
   }
 
   async function proceed(url: URL): Promise<Response> {
@@ -338,5 +343,5 @@ if (import.meta.main) {
   }
   if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or APPLE_CLIENT_ID/APPLE_CLIENT_SECRET");
   const hydra = { public: env("HYDRA_PUBLIC") ?? "http://127.0.0.1:28453", admin: env("HYDRA_ADMIN") ?? "http://127.0.0.1:28455" };
-  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
+  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, trustLocal: extra !== undefined, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
 }

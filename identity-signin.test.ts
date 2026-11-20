@@ -104,3 +104,12 @@ Deno.test("cloudflare, gcp, k8s and docker targets admit social sign-in provider
     assertEquals(res.success, true, res.stderr);
   }
 });
+
+Deno.test("a native host offers Sign in with Apple beside any other provider, as Apple's App Store requires", async () => {
+  const native = (settings: string) => signin(settings).replace("capabilities: {auth: required: false,", "capabilities: {native: true, auth: required: false,");
+  const refused = await cue(["export", "-", "-e", "out", "--out", "json"], native(`providers: ["google"]`));
+  assertEquals(refused.success, false, "expected a native host with Google alone to fail");
+  assertStringIncludes(refused.stderr, "App Store requires Sign in with Apple");
+  const admitted = await cue(["export", "-", "-e", "out", "--out", "json"], native(`providers: ["google", "apple"]`));
+  assertEquals(admitted.success, true, admitted.stderr);
+});

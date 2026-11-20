@@ -2037,7 +2037,9 @@ import (
 		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
 		// chrome, keyed on `required`, and calls the auth service at `service`.
-		// Presence also switches the cluster's auth plane on (#emit).
+		// Presence also switches the cluster's auth plane on (#emit), and puts
+		// one Sign in in the nav for anyone not signed in as a person, opening
+		// in place onto the ways in (omnishell's GUIDE.md#signing-in).
 		// `self` names the signed-in person's own page for the strip the
 		// terminal draws: `route` is a route's screen name, whose :params the
 		// terminal fills from the session user and whose localized pattern it
@@ -2050,13 +2052,9 @@ import (
 			service:  string
 			mode:     *"passkey" | string
 			self?:    {route: string, name?: {table: string, column: string}}
-			// Where sign-in is not required, the strip offers a guest a passkey:
-			// one gesture that signs in, or keeps the guest's identity under a
-			// new passkey.
-			promote: *false | bool
 			// The providers a person may sign in through besides a passkey,
-			// each one the terminal offers (#emit): a way in at the gate and in
-			// a guest's strip, run by the cluster's auth service. A provider's
+			// each one the terminal offers (#emit): a way in at the gate and
+			// among the nav's, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()
 			// A named provider's settings, the cluster's defaults for what the
@@ -2786,6 +2784,11 @@ import (
 	_authTargetViolations: list.Concat([
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
+		}],
+		// A native host ships on iOS, whose App Store requires Sign in with Apple
+		// beside any other provider (App Review Guideline 4.8).
+		[if (A.capabilities & null) == _|_ if A.capabilities.native if len(_authProviders) > 0 if !list.Contains(_authProviders, "apple") {
+			"a native host ships on iOS, where the App Store requires Sign in with Apple beside \(_authProviders[0]) (App Review Guideline 4.8): add apple to capabilities.auth.providers"
 		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true

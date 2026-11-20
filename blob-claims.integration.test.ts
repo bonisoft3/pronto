@@ -28,7 +28,7 @@ async function run(cmd: string, args: string[], stdin?: string) {
 
 async function token(sub: string): Promise<string> {
   const b64 = (t: string | Uint8Array) => btoa(typeof t === "string" ? t : String.fromCharCode(...t)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-  const body = `${b64(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64(JSON.stringify({ role: "app_user", sub, guest: true }))}`;
+  const body = `${b64(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64(JSON.stringify({ role: "app_user", sub, acr: "0" }))}`;
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return `${body}.${b64(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))))}`;
 }

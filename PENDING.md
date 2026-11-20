@@ -362,8 +362,8 @@ fields, and read a region's own `data-filter` against the enclosing row.
 **A route over private or folder reads cannot be rendered on request**, and
 `#emit` refuses `ssr: "ssr"` there and in an app behind a sign-in
 ([screens](docs/screens.md#how-a-routes-first-document-is-rendered)). A document
-request carries no credential: the token lives in one tab's sessionStorage, by
-design one guest per tab. Rendering per session needs a cookie session — a new
+request carries no credential: the token lives in the browser's localStorage,
+one account per device. Rendering per session needs a cookie session — a new
 auth concept, with CSRF, cross-tab sign-out and changed guest semantics — and
 `private, no-store` would give it no offline value.
 

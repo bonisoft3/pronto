@@ -19,6 +19,7 @@ Deno.test("the fake Google signs in the test person picked, once", async () => {
   const shown = await call(`${provider.authUrl}?${q}`);
   const html = await shown.text();
   assertEquals(html.includes("This is not Google"), true, "says what it is");
+  assertEquals(html.includes("Continue as Tester Two"), true, "offers each test person by name");
   const approve = html.match(/href="([^"]+who=tester-2)"/)![1].replace(/&#38;/g, "&");
   const back = new URL((await call(approve)).headers.get("location")!);
   assertEquals([`${back.origin}${back.pathname}`, back.searchParams.get("state")], [REDIRECT, state]);
@@ -30,6 +31,8 @@ Deno.test("the fake Google signs in the test person picked, once", async () => {
   assertEquals(t.status, 200);
   const claims = await verifyIdToken((await t.json()).id_token, { alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce, keys: provider.keys });
   assertEquals(claims.sub, "tester-2");
+  assertEquals([claims.given_name, claims.name, claims.email, claims.email_verified], ["Tester-2", "Tester Two", "tester-2@example.test", true],
+    "named and addressed as a Google account is, so a first sign-in is named");
   assertEquals((await redeem()).status, 400, "a code redeems once");
   const again = await call(approve);
   assertEquals(again.status, 400, "an approval is spent once");

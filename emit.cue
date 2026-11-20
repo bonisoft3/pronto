@@ -4480,7 +4480,7 @@ _pgrollDir: "services/database/pgroll"
 				/* Route pills and the session cluster hold their own width (`flex: none`) so
 				   neither breaks mid-word nor collapses below its controls when the bar
 				   scrolls horizontally on narrow viewports (preserving `nav`'s inline-end
-				   padding past `.shell-signout`), while `.shell-who` caps at `--shell-who-max`
+				   padding past the chip), while `.shell-chip-who` caps at `--shell-who-max`
 				   and ellipsises long handles. `--control-h-sm` (32px) clears check-visual's
 				   24px touch floor. */
 				:where(body > nav > a) { white-space: nowrap; flex: none;
@@ -4500,18 +4500,18 @@ _pgrollDir: "services/database/pgroll"
 				/* The signed-in person at the bar's inline end, separated by a rule only
 				   when route links precede it (`> a ~ .shell-me`). */
 				:where(body > nav .shell-me) { margin-inline-start: auto; flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
-				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav .shell-chip-who) { max-width: var(--shell-who-max, 24ch); }
 				:where(body > nav > a ~ .shell-me) {
 				  padding-inline-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
 				  border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) {
 				  flex: none; display: inline-flex; align-items: center; justify-content: center;
 				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
 				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
 				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-sm, 4px);
 				  font-weight: 500;
 				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider):hover) {
 				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
 				  text-decoration: none; }
 				@media print { :where(body > nav) { display: none; } }
@@ -4533,15 +4533,15 @@ _pgrollDir: "services/database/pgroll"
 				  color: var(--shell-nav-active-fg, inherit);
 				  font-weight: var(--shell-nav-active-weight, 600);
 				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
-				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				:where(body > nav .shell-chip-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) {
 				  flex: none; display: inline-flex; align-items: center; justify-content: center;
 				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
 				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
 				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-full, 999px);
 				  font-weight: 500;
 				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider):hover) {
 				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
 				  text-decoration: none; }
 				@media (min-width: 640px) {
@@ -4625,14 +4625,14 @@ _pgrollDir: "services/database/pgroll"
 				  color: var(--shell-nav-active-fg, inherit);
 				  font-weight: var(--shell-nav-active-weight, 600);
 				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) {
 				  flex: none; display: inline-flex; align-items: center; justify-content: center;
 				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
 				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
 				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-sm, 4px);
 				  font-weight: 500;
 				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider):hover) {
 				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
 				  text-decoration: none; }
 				@media (min-width: 860px) {
@@ -4664,7 +4664,7 @@ _pgrollDir: "services/database/pgroll"
 				  :where(body > nav > a ~ .shell-me) {
 				    padding-block-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
 				    border-block-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
-				  :where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				  :where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) {
 				    width: 100%; min-height: var(--control-h-sm, 32px); }
 				  :where(body:has(> nav:not([hidden])) > #app) {
 				    margin-inline-start: var(--shell-nav-width, var(--size-13));
@@ -4693,7 +4693,7 @@ _pgrollDir: "services/database/pgroll"
 				    padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 12px);
 				    border-radius: var(--shell-nav-radius, var(--r-md, 8px)); }
 				  :where(body > nav .shell-me) { margin-inline-start: auto; flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
-				  :where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				  :where(body > nav .shell-chip-who) { max-width: var(--shell-who-max, 24ch); }
 				  :where(body > nav > a ~ .shell-me) {
 				    padding-inline-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
 				    border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
@@ -4748,18 +4748,18 @@ _pgrollDir: "services/database/pgroll"
 				  font-weight: var(--shell-nav-active-weight, 600);
 				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
 				:where(body > nav .shell-me) { flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); padding-inline-end: 4px; }
-				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav .shell-chip-who) { max-width: var(--shell-who-max, 24ch); }
 				:where(body > nav > a ~ .shell-me) {
 				  padding-inline-start: var(--shell-nav-me-pad, var(--sp-sm, 10px));
 				  border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) {
 				  flex: none; display: inline-flex; align-items: center; justify-content: center;
 				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
 				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
 				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-full, 999px);
 				  font-weight: 500;
 				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
-				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider):hover) {
 				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
 				  text-decoration: none; }
 				:where(body:has(> nav:not([hidden])) > #app) {
@@ -4775,6 +4775,173 @@ _pgrollDir: "services/database/pgroll"
 			   the container geometry; only the link, icon, and control resets apply. */
 			""",
 	][0]
+	// The nav's Sign in, or a kept guest's chip, opens one panel in place
+	// (omnishell's signinBox): a card anchored to it, never over the page, that
+	// opens downward from a bar at the top and upward from one at the bottom or
+	// from a rail's foot. A phone's bar scrolls sideways, which would carry a
+	// card anchored to its end out of sight, so there the open bar wraps and
+	// the card is a row of its own, pushing the page rather than covering it —
+	// above the chip on a bar at the bottom. Every posture, `custom` included, keeps `[hidden]`
+	// hidden, which a posture's `display` would otherwise undo.
+	_signinAbove: [
+		if E._design.shell.nav == "dock" {"all"},
+		if E._design.shell.nav == "sidebar" {"(min-width: 860px)"},
+		if E._design.shell.nav == "tabbar" {"not all and (min-width: 640px)"},
+		"",
+	][0]
+	_signinPhoneOrder: [
+		if E._design.shell.nav == "dock" || E._design.shell.nav == "tabbar" {"-1"},
+		"1",
+	][0]
+	_signinCss: """
+		body > nav .shell-me [hidden] { display: none; }
+		:where(body > nav .shell-me) { position: relative; }
+		@media (min-width: 640px) {
+		  :where(body > nav:has(.shell-signin-panel:not([hidden]))) { overflow: visible; }
+		}
+		:where(body > nav :is(.shell-signin, .shell-person)[aria-expanded="true"]) {
+		  background: var(--shell-nav-active-bg, color-mix(in srgb, currentColor 9%, transparent)); }
+		/* The chip is the one this device is: a guest's in the guest's colour, a
+		   person's in the bar's. */
+		:where(body > nav .shell-signin.shell-guest) { border-color: var(--shell-guest, light-dark(#b45309, #f59e0b)); }
+		:where(body > nav .shell-signin.shell-guest :is(.shell-avatar, .shell-lock)) { color: var(--shell-guest, light-dark(#b45309, #f59e0b)); }
+		:where(body > nav .shell-person) { border-color: var(--shell-fg); }
+		:where(body > nav .shell-person :is(.shell-avatar, .shell-lock)) { color: var(--shell-fg); }
+		:where(body > nav :is(.shell-signin.shell-guest, .shell-person)) { gap: var(--sp-sm, 8px); padding-inline-start: 4px; border-radius: 999px;
+		  max-width: 100%; min-width: 0; justify-content: flex-start; }
+		:where(body > nav :is(.shell-signin.shell-guest, .shell-person) .shell-lock) { margin-inline-start: auto; }
+		:where(body > nav .shell-avatar) { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+		  font-weight: 700; font-size: 0.8em;
+		  background: color-mix(in srgb, currentColor 7%, transparent); }
+		:where(body > nav .shell-chip-who) { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.2; }
+		:where(body > nav .shell-chip-who .handle) { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+		:where(body > nav .suffix) { font-weight: 400; opacity: 0.7; }
+		:where(body > nav .shell-chip-label) { font-size: 0.85em; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+		:where(body > nav .shell-chip-label:empty) { display: none; }
+		:where(body > nav .shell-lock) { flex: none; width: 14px; height: 14px; }
+		/* The account's panel is a menu: one row per thing to do. */
+		:where(body > nav .shell-account) { gap: 2px; padding: var(--sp-sm, 8px); }
+		:where(body > nav .shell-signin-panel :is(.shell-account-page, .shell-rename, .shell-signout, .shell-guest-signout, .shell-delete)) { font: inherit; color: inherit; background: none;
+		  border: 0; border-radius: var(--r-md, 8px); cursor: pointer; text-align: start; text-decoration: none;
+		  display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px;
+		  min-height: 44px; padding: 6px var(--sp-sm, 12px); box-sizing: border-box; font-weight: 600; white-space: normal; }
+		:where(body > nav .shell-signin-panel :is(.shell-account-page, .shell-rename, .shell-signout, .shell-guest-signout, .shell-delete):hover) {
+		  background: color-mix(in srgb, currentColor 7%, transparent); text-decoration: none; }
+		:where(body > nav .shell-signin-panel .shell-signout) { border-block-start: 1px solid var(--shell-rule); border-radius: 0; }
+		/* Deleting is quiet until asked, and then says what it will do in the danger colour. */
+		:where(body > nav .shell-delete) { font-weight: 400; color: color-mix(in srgb, currentColor 60%, transparent); }
+		:where(body > nav .shell-delete[data-confirm]) { font-weight: 600; color: var(--danger, #b91c1c); }
+		:where(body > nav .shell-delete:not([data-confirm]) .shell-delete-confirm, body > nav .shell-delete[data-confirm] .shell-delete-ask) { display: none; }
+		/* Asking a name in place of the ways in, and renaming in place of the chip. */
+		:where(body > nav .shell-name-form) { display: flex; flex-direction: column; gap: var(--sp-sm, 10px); }
+		:where(body > nav .shell-name-back) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
+		  width: 32px; height: 32px; margin-block: -6px; padding: 0; display: grid; place-items: center; border-radius: var(--r-md, 8px); }
+		:where(body > nav .shell-back-icon) { width: 16px; height: 16px; }
+		:where(body > nav .shell-name-label) { font-size: 1.05em; font-weight: 700; }
+		:where(body > nav :is(.shell-name-form, .shell-rename-form) input) { font: inherit; color: inherit; min-width: 0; box-sizing: border-box; }
+		:where(body > nav .shell-name-form input) { min-height: 44px; padding: 8px 12px; border: 2px solid var(--shell-fg);
+		  border-radius: var(--r-md, 10px); background: var(--shell-bg); }
+		:where(body > nav .shell-name-continue) { display: flex; align-items: center; justify-content: center; gap: 10px;
+		  min-height: 48px; border: 0; border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; cursor: pointer;
+		  background: var(--shell-fg); color: var(--shell-bg); }
+		:where(body > nav .shell-rename-form) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%;
+		  min-height: 44px; padding: 4px 4px 4px 12px; box-sizing: border-box; border: 2px solid var(--shell-fg); border-radius: 999px; }
+		:where(body > nav .shell-rename-form input) { flex: 0 1 12ch; width: 12ch; border: 0; padding: 0; background: transparent; font-weight: 700; }
+		:where(body > nav .shell-rename-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+		:where(body > nav .shell-rename-save) { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; cursor: pointer;
+		  display: grid; place-items: center; background: var(--shell-fg); color: var(--shell-bg); }
+		:where(body > nav .shell-rename-save svg) { width: 16px; height: 16px; }
+		:where(body > nav .shell-rename-form .shell-auth-error) { flex: 1 0 100%; font-size: var(--type-caption, 0.875rem); }
+		:where(body > nav .shell-signin-panel) { position: absolute; z-index: 20;
+		  inset-block-start: calc(100% + var(--sp-sm, 8px)); inset-inline-end: 0;
+		  width: min(22rem, calc(100vw - 2 * var(--sp-md, 16px))); box-sizing: border-box;
+		  display: flex; flex-direction: column; gap: 10px; padding: var(--sp-md, 16px);
+		  background: var(--shell-panel-bg, var(--shell-bg)); color: var(--shell-fg);
+		  border: 1px solid var(--shell-rule); border-radius: var(--r-lg, 16px);
+		  box-shadow: 0 8px 24px color-mix(in srgb, var(--shell-fg) 12%, transparent);
+		  font-size: var(--type-body, 1rem); font-weight: 400; white-space: normal; text-align: start; }
+		\([if E._signinAbove != "" {"""
+			@media \(E._signinAbove) {
+			  :where(body > nav .shell-signin-panel) { inset-block: auto calc(100% + var(--sp-sm, 8px)); }
+			}
+			"""}, ""][0])
+		\([if E._design.shell.nav == "sidebar" {"""
+			@media (min-width: 860px) {
+			  :where(body > nav .shell-signin-panel) { inset-inline: 0; width: auto; }
+			}
+			"""}, ""][0])
+		@media not all and (min-width: 640px) {
+		  :where(body > nav:has(.shell-signin-panel:not([hidden]))) { flex-wrap: wrap; overflow-x: visible; }
+		  :where(body > nav .shell-me:has(> .shell-signin-panel:not([hidden]))) { flex: 1 0 100%; flex-wrap: wrap; justify-content: flex-end;
+		    margin-inline-start: 0; padding-inline-start: 0; border-inline-start: 0; }
+		  :where(body > nav .shell-signin-panel) { position: static; flex: 1 0 100%; width: 100%; order: \(E._signinPhoneOrder); box-shadow: none; }
+		}
+		:where(body > nav .shell-signin-head) { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm, 8px); }
+		:where(body > nav .shell-signin-title) { font-size: 1.05em; font-weight: 700; }
+		:where(body > nav .shell-signin.shell-guest ~ .shell-signin-panel .shell-signin-title) { font-size: var(--type-caption, 0.875rem);
+		  font-weight: 600; color: var(--shell-guest, light-dark(#b45309, #f59e0b)); }
+		:where(body > nav .shell-signin-close) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
+		  width: 32px; height: 32px; margin: -6px; display: grid; place-items: center; border-radius: var(--r-md, 8px); }
+		:where(body > nav .shell-signin-close:hover) { background: color-mix(in srgb, currentColor 7%, transparent); }
+		:where(body > nav .shell-close-icon) { width: 16px; height: 16px; }
+		:where(body > nav .shell-signin-with) { margin: 0; font-size: var(--type-caption, 0.875rem); font-weight: 600; opacity: 0.8; }
+		:where(body > nav .shell-signin-ways) { display: flex; flex-direction: column; gap: var(--sp-sm, 8px); }
+		:where(body > nav .shell-signin-ways :is(.shell-provider, .shell-passkey)) { display: flex; align-items: center; justify-content: flex-start; gap: 10px;
+		  width: 100%; min-height: 48px; box-sizing: border-box; padding: 0 var(--sp-md, 16px);
+		  border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; text-decoration: none; }
+		:where(body > nav .shell-signin-ways .shell-provider) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
+		:where(body > nav .shell-signin-ways .shell-provider:hover) { background: color-mix(in srgb, currentColor 6%, transparent); text-decoration: none; }
+		:where(body > nav .shell-provider-mark) { width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center;
+		  border: 1.8px solid currentColor; font-size: 0.7em; font-weight: 800; line-height: 1; }
+		:where(body > nav .shell-signin-ways .shell-passkey) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
+		:where(body > nav .shell-signin-ways .shell-passkey:hover) { background: color-mix(in srgb, currentColor 6%, transparent); }
+		:where(body > nav .shell-device-icon) { width: 20px; height: 20px; }
+		:where(body > nav .shell-signin-panel .shell-guest-signout) { border-block-start: 1px solid var(--shell-rule); border-radius: 0;
+		  margin-block-start: 4px; opacity: 0.8; }
+		:where(body > nav .shell-auth-feedback) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-sm, 8px);
+		  font-size: var(--type-caption, 0.875rem); }
+		:where(body > nav .shell-auth-error) { margin: 0; }
+		:where(body > nav .shell-signin-panel .shell-auth-error) { flex: 1 0 100%; }
+		:where(body > nav .shell-auth-taken) { margin: 0; flex: 1 0 100%; font-size: var(--type-body, 1rem); font-weight: 700; overflow-wrap: anywhere; }
+		:where(body > nav .shell-signin-panel .shell-auth-choice) { flex: 1 0 100%; min-height: 44px; padding: 0 var(--sp-sm, 8px);
+		  border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; cursor: pointer;
+		  background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
+		:where(body > nav .shell-signin-panel .shell-auth-choice[data-auth-choice="switch"]) { background: var(--shell-fg); color: var(--shell-bg); border: 0; }
+		/* Passkey: a row of faces, the most recent first and as many as fit,
+		   then one field holding the browser's passkey autofill, with → to
+		   make a passkey under the name typed in it. */
+		:where(body > nav .shell-accounts) { display: flex; flex-direction: column; gap: var(--sp-sm, 8px); }
+		:where(body > nav .shell-accounts-head) { display: flex; align-items: center; gap: 4px; }
+		:where(body > nav .shell-accounts-back) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
+		  width: 32px; height: 32px; margin-block: -6px; padding: 0; display: grid; place-items: center; border-radius: var(--r-md, 8px); }
+		:where(body > nav .shell-accounts-title) { font-size: var(--type-caption, 0.875rem); font-weight: 600; opacity: 0.8; }
+		:where(body > nav .shell-faces) { display: flex; gap: 6px; overflow: hidden; padding: 10px 4px 4px; margin: -4px; }
+		:where(body > nav .shell-face) { position: relative; flex: none; width: 48px; }
+		:where(body > nav .shell-face[hidden]) { display: none; }
+		:where(body > nav .shell-face-pick) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
+		  width: 48px; display: flex; flex-direction: column; align-items: center; gap: 4px; border-radius: var(--r-md, 10px); }
+		:where(body > nav .shell-face-pick:focus-visible) { outline-offset: 2px; }
+		:where(body > nav .shell-face-mark) { width: 40px; height: 40px; box-sizing: border-box;
+		  border-radius: 50%; display: grid; place-items: center; font-weight: 800;
+		  background: color-mix(in srgb, hsl(var(--shell-face-hue, 30) 62% 48%) 22%, transparent); border: 1px solid color-mix(in srgb, hsl(var(--shell-face-hue, 30) 62% 48%) 45%, transparent);
+		  color: light-dark(hsl(var(--shell-face-hue, 30) 60% 32%), hsl(var(--shell-face-hue, 30) 75% 74%)); }
+		:where(body > nav .shell-face-pick:hover .shell-face-mark) { background: color-mix(in srgb, hsl(var(--shell-face-hue, 30) 62% 48%) 34%, transparent); }
+		:where(body > nav .shell-face-name) { max-width: 48px; font-size: 0.75em; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		:where(body > nav .shell-face-forget) { position: absolute; inset-block-start: -3px; inset-inline-end: 2px; width: 18px; height: 18px; padding: 0;
+		  display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--shell-rule); background: var(--shell-bg);
+		  color: color-mix(in srgb, currentColor 60%, transparent); cursor: pointer; }
+		:where(body > nav .shell-face-forget:hover) { color: inherit; }
+		:where(body > nav .shell-face-forget svg) { width: 7px; height: 7px; }
+		:where(body > nav .shell-passkey-form) { display: flex; flex-wrap: wrap; gap: 6px; }
+		:where(body > nav .shell-passkey-form input) { flex: 1 1 0; min-width: 0; min-height: 48px; box-sizing: border-box; padding: 0 12px;
+		  font: inherit; color: inherit; border: 1px solid var(--shell-rule); border-radius: var(--r-md, 10px); background: var(--shell-bg); }
+		:where(body > nav .shell-passkey-go) { flex: none; width: 48px; min-height: 48px; border: 0; border-radius: var(--r-md, 10px); cursor: pointer;
+		  display: grid; place-items: center; background: var(--shell-fg); color: var(--shell-bg); }
+		:where(body > nav .shell-passkey-go svg) { width: 18px; height: 18px; }
+		:where(body > nav .shell-passkey-form .shell-auth-error) { flex: 1 0 100%; font-size: var(--type-caption, 0.875rem); }
+		:where(body > nav :is(.shell-passkey-icon, .shell-guest-icon)) { width: 20px; height: 20px; }
+		:where(body > nav .shell-avatar .shell-guest-icon) { width: 14px; height: 14px; }
+		"""
 	_designCss: """
 
 		\(E._scaleCss)
@@ -4834,22 +5001,18 @@ _pgrollDir: "services/database/pgroll"
 		:where(body > nav > a[data-display="icon-only"] > .shell-nav-label) {
 		  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
 		  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-		:where(body > nav .shell-who) { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
-		:where(body > nav .shell-who .name) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		:where(body > nav .shell-who .name:empty) { display: none; }
-		:where(body > nav .shell-who .name:not(:empty))::after { content: " ·"; }
-		:where(body > nav .shell-who .handle) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
 		   lands below 4.5:1 contrast on both themes' nav ground. */
 		/* A short word is still a target: "sair" sets 23px of text, under the
 		   24px minimum a finger needs, so the box keeps the floor the label
 		   does not. */
-		:where(body > nav :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) { font: inherit; font-weight: 400;
+		:where(body > nav :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider)) { font: inherit; font-weight: 400;
 		  color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
 		  flex: none; white-space: nowrap;
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }
 		\(E._navCss)
+		\(E._signinCss)
 		:where(body > nav > a[data-display="icon-only"]) { padding-inline: var(--shell-nav-icon-pad-x, 6px); justify-content: center; gap: 0; }
 		:where(body > nav[hidden]) { display: none; }
 

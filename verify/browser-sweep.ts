@@ -474,8 +474,8 @@ export async function verifyBrowser(
         if (currentProntoToken && typeof page.addInitScript === "function") {
           await page.addInitScript((token: string) => {
             try {
-              if (!sessionStorage.getItem("pronto-token")) {
-                sessionStorage.setItem("pronto-token", token);
+              if (!localStorage.getItem("pronto-token")) {
+                localStorage.setItem("pronto-token", token);
               }
             } catch {
               // Ignore storage initialization failure
@@ -594,7 +594,7 @@ export async function verifyBrowser(
           const hadSessionBefore = isAuthenticatedSession(currentProntoToken);
           if (typeof page.evaluate === "function") {
             try {
-              const token = await page.evaluate(() => sessionStorage.getItem("pronto-token"));
+              const token = await page.evaluate(() => localStorage.getItem("pronto-token"));
               currentProntoToken = token ?? null;
             } catch {
               // Retain current session token if evaluate fails

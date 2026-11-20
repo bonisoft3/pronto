@@ -360,9 +360,10 @@ if (withEffects) {
 
 // The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
 // cron reader croner reaches wrangler's bundler through node_modules beside
-// the ticker, installed from its lock; mecha-edge's node_modules provides the
-// pinned WebAuthn server dependency.
+// the ticker, installed from its lock; the auth routes (services/auth/core.ts)
+// reach the pinned WebAuthn server through node_modules beside auth.
 await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/auth'))
 await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'), { DENO_NO_PACKAGE_JSON: '1' })
 await run(Deno.execPath(), ['install', '--frozen', '--config', path.join(mecha, 'services/airlock/deno.json')], path.join(mecha, 'services/airlock'))
 // The clock outside the object: a Cron Trigger poking hourly where anything

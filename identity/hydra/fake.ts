@@ -9,8 +9,12 @@ import { esc, json, page, type Provider } from "../broker/main.ts";
 const enc = new TextEncoder();
 
 /** The test people a reader may sign in as: two, so "a stranger to another
- * person" can be tried by hand. */
-export const PEOPLE = ["tester", "tester-2"];
+ * person" can be tried by hand. Each has the name and verified address a
+ * Google account has, so a first sign-in is named as a real one is. */
+export const PEOPLE: Record<string, { name: string; given_name: string; email: string }> = {
+  tester: { name: "Tester One", given_name: "Tester", email: "tester@example.test" },
+  "tester-2": { name: "Tester Two", given_name: "Tester-2", email: "tester-2@example.test" },
+};
 
 export async function fakeProvider(
   issuer: string,
@@ -38,7 +42,7 @@ export async function fakeProvider(
     }
     const id = randomToken(16);
     asked.set(id, { nonce: q.get("nonce")!, state: q.get("state")!, redirect: q.get("redirect_uri")!, expires: Date.now() + 600_000 });
-    const links = PEOPLE.map((who) => `<p><a class="go" href="${esc(`${base}/approve?id=${id}&who=${who}`)}">Continue as ${esc(who)}</a></p>`).join("\n");
+    const links = Object.entries(PEOPLE).map(([who, p]) => `<p><a class="go" href="${esc(`${base}/approve?id=${id}&who=${who}`)}">Continue as ${esc(p.name)}</a></p>`).join("\n");
     const displayName = name === "apple" ? "Apple" : "Google";
     return page("Test sign-in", `<h1>Test sign-in</h1>
 <p>This is not ${displayName}: the broker on this machine has no ${displayName} client, so it signs in a test person instead.</p>
@@ -48,7 +52,7 @@ ${links}`);
   function approve(url: URL): Response {
     const a = live(asked, url.searchParams.get("id"));
     const who = url.searchParams.get("who") ?? "";
-    if (!a || !PEOPLE.includes(who)) return page("Test sign-in expired", `<h1>This test sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
+    if (!a || !Object.hasOwn(PEOPLE, who)) return page("Test sign-in expired", `<h1>This test sign-in expired</h1><p>Go back to the app and start again.</p>`, 400);
     const code = randomToken(16);
     codes.set(code, { nonce: a.nonce, sub: who, redirect: a.redirect, expires: Date.now() + 60_000 });
     const to = new URL(a.redirect);
@@ -65,7 +69,7 @@ ${links}`);
     }
     const now = Math.floor(Date.now() / 1000);
     const head = base64url(enc.encode(JSON.stringify({ alg: "RS256", kid: jwk.kid })));
-    const body = base64url(enc.encode(JSON.stringify({ iss: providerIssuer, aud: clientId, sub: c.sub, nonce: c.nonce, iat: now, exp: now + 300 })));
+    const body = base64url(enc.encode(JSON.stringify({ iss: providerIssuer, aud: clientId, sub: c.sub, nonce: c.nonce, iat: now, exp: now + 300, ...PEOPLE[c.sub], email_verified: true })));
     const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, enc.encode(`${head}.${body}`)));
     return json(200, { id_token: `${head}.${body}.${base64url(sig)}`, token_type: "Bearer", expires_in: 300 });
   }

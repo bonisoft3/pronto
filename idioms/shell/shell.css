@@ -1,7 +1,8 @@
 /* The terminal ships no style. Its chrome and login markup carry stable
    classes (nav, .shell-brand, .shell-nav-icon, .shell-nav-label, .shell-me,
-   .shell-who, .shell-signout, .shell-signin, .shell-register,
-   .shell-provider, .shell-screen, .shell-login, .login-provider) and the
+   .shell-chip-who, .shell-signout, .shell-signin, .shell-signin-ways,
+   .shell-passkey, .shell-auth-choice, .shell-provider, .shell-auth-feedback,
+   .shell-screen, .shell-login, .login-provider) and the
    interpreter stamps lifecycle attributes
    (data-enter, data-exit, data-entering) at moments no screen can
    observe — that vocabulary is the whole contract. The design layer
