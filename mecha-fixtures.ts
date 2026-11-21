@@ -7,7 +7,7 @@ import ses from "../omnishell/interpreter/vendor/ses.umd.min.js" with { type: "t
 export const terminal = { instrument, ses };
 
 export const ROOT = new URL("../../", import.meta.url);
-export const DATABASE = "bonitao/mecha-database:0.30.0@sha256:a21ebf69ba724351f1a4afa8f17b1e392a4ada10ea44ad45fef14159f4464203";
+export const DATABASE = "bonitao/mecha-database:0.31.0@sha256:f400b9cf5728f4eb692c409654e35929c51585f11b0788af0476f9ea39b757fb";
 export const uuid = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 export const quote = (value: unknown) => `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`;
 export const initial = () => ({ phase: "playing", turn: "a", a: [0, 1, 2], b: [3, 4, 5], plays: [], deadline: 9007199254740000 });
