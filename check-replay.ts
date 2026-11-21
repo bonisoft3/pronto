@@ -240,14 +240,33 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
 }
 
 export async function main(appDir: string): Promise<number> {
-  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string };
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string; rowMachines?: Record<string, unknown> };
   if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
   const fixtures = await loadFixtures(appDir);
-  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors });
+  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors, rowMachines: facts.rowMachines });
   console.log(JSON.stringify(found, null, 2));
   return found.some((f) => f.severity === "error") ? 1 : 0;
+}
+
+/** Each SQL text a row machine's author wrote: a guard, a `raw` expression,
+ * a `rawWhere` or a lock's `when`, named by the machine and its path. */
+export function authoredSql(machines: Record<string, unknown>): { where: string; sql: string }[] {
+  const out: { where: string; sql: string }[] = [];
+  const walk = (node: unknown, path: string) => {
+    if (Array.isArray(node)) return node.forEach((n, i) => walk(n, `${path}[${i}]`));
+    if (node === null || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node)) {
+      const at = `${path}.${key}`;
+      const texts = typeof value === "string" ? [value] : Array.isArray(value) && value.every((v) => typeof v === "string") ? value : [];
+      if (["guard", "raw", "rawWhere", "when"].includes(key) && texts.length > 0) {
+        texts.forEach((sql, i) => out.push({ where: texts.length > 1 ? `${at}[${i}]` : at, sql }));
+      } else walk(value, at);
+    }
+  };
+  for (const [name, machine] of Object.entries(machines)) walk(machine, `machine ${name}`);
+  return out;
 }
 
 export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record<string, string> };
@@ -255,9 +274,12 @@ export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record
  * migrations run and run again, and its retained-data fixtures. `actors` is
  * the machines' migration (services/database/migrations/<actors>), whose SQL
  * reads time and randomness only as recorded input (sql-recorded.ts), judged
- * against the catalog of the database it just bootstrapped. */
-export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors }: {
+ * against the catalog of the database it just bootstrapped. `rowMachines` are
+ * the program's row machines, whose guards and expressions are held to the
+ * same rule, their time read through machine_clock(). */
+export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors, rowMachines }: {
   appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[]; actors?: string;
+  rowMachines?: Record<string, unknown>;
 }): Promise<Finding[]> {
   const settings = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_INITDB_ARGS"];
   const missing = settings.filter((k) => env[k] === undefined);
@@ -317,11 +339,33 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       return true;
     };
     if (!await bootstrap(REPLAY_DB)) return finish(findings);
-    if (actors !== undefined) {
-      const path = `services/database/migrations/${actors}`;
+    if (actors !== undefined || rowMachines !== undefined) {
       const catalog = JSON.parse(await sql(REPLAY_DB, CATALOG_SQL)) as Catalog;
-      for (const read of await unrecorded(await Deno.readTextFile(`${appDir}/${path}`), catalog)) {
-        findings.push({ severity: "error", path, message: `${read}: a machine reads time and randomness only through its clock and draw` });
+      if (actors !== undefined) {
+        const path = `services/database/migrations/${actors}`;
+        for (const read of await unrecorded(await Deno.readTextFile(`${appDir}/${path}`), catalog)) {
+          findings.push({ severity: "error", path, message: `${read}: a machine reads time and randomness only through its clock and draw` });
+        }
+      }
+      for (const { where, sql: fragment } of authoredSql(rowMachines ?? {})) {
+        let reads: string[];
+        try {
+          reads = await unrecorded(`SELECT ${fragment};`, catalog);
+        } catch (err) {
+          reads = [`is SQL Postgres's parser cannot read (${(err as Error).message.slice(0, 80)})`];
+        }
+        // Time, not randomness: an action mints its rows' ids. A cast reads
+        // the clock only into a type whose input takes 'now'; an interval's
+        // input reads the session's style, never its time.
+        const clock = /the transaction's clock|casts to (timestamptz|timestamp|date|time|timetz), |calls (pg_catalog\.)?(clock_timestamp|statement_timestamp|timeofday)\(\)|cannot read/;
+        // A date or time column compared with 'now' reads it through a cast
+        // the text never spells, so the clock's literals are refused as text.
+        const literal = /'\s*(now|today|tomorrow|yesterday)\s*'/i.exec(fragment);
+        const found = reads.filter((r) => clock.test(r));
+        if (literal && found.length === 0) found.push(`compares with '${literal[1]}', which a date or time reads as the transaction's clock`);
+        for (const read of found) {
+          findings.push({ severity: "error", path: "program.cue", message: `${where} ${read.replace(/^SelectStmt: /, "")}: a row machine reads time only through machine_clock()` });
+        }
       }
     }
     if (!published.pgroll) {

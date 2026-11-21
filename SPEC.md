@@ -429,7 +429,27 @@ field default is refused, as is a generated or retired state field. If the field
 has no CEL, the emitter supplies a
 CHECK admitting exactly the machine's states; a parsed closed CEL enum must
 include every state. State values in inline and held seeds must name one of
-those states.
+those states. A seed restores its row standing in the state it names: entering
+nothing, it runs no entry action, so it may not stand in a later state whose
+`after` or `invoke` entering would start. Any other writer's row starts in the
+initial state (the machine's trigger refuses it otherwise; `900_seed.sql`
+marks its session as seeding only when a row stands elsewhere).
+
+**A field states its behaviour in AIP-203's words.** `outputOnly: true` is
+set by the server: a client's value is cleared, never refused, so a client
+insert takes the default and a client update keeps the value.
+`immutable: true` is set when the row is created: a client update stating the
+same value passes, and one changing it is refused with SQLSTATE 22023, which
+PostgREST answers 400. A client is any role `authenticator` may switch to
+but `service`; machines, lifecycle actions, computations, seeds, migrations
+and the service write both. Either word on a key, a generated or a retired
+field or a (non-Cortex) row machine's state field, which a client moves the
+machine by writing, and both on one field, are refused, as are a form naming an output-only field and an update form naming
+an immutable one. Each server entity stating one gets the trigger
+`0_<table>_field_behavior` in `799_field_behavior.sql`, first of its
+table's, and the terminal's markup check, battery and store apply the same
+words to charts, handlers and optimistic rows
+([access](docs/access.md#field-behaviour)).
 
 A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
@@ -460,11 +480,27 @@ stopped. The former keeps predicate function identities and removes the old
 validation-only trigger; the latter installs guarded lifecycle interpreters.
 Changing declarations alone does not upgrade an initialized volume.
 
-**A server machine's `after` is a durable timer.** Each nonnegative integer
-millisecond delay arms a one-shot schedule on state entry, in the row's
-transaction. The existing ticker inserts a private `machine_timer_tick`; its
+**A server machine's `after` is a durable timer.** As in XState, a key is a
+nonnegative integer of milliseconds or a name the machine's `delays` gives; a
+named delay is milliseconds or the name of the row's `duration` field. A delay
+is a duration, never a date: a field of another type is refused at `cue vet`.
+Each delay arms a one-shot schedule on state entry, in the row's transaction,
+due at the entry's `machine_clock()` plus the delay. A field is read once, at
+entry, as XState reads a delay: a later write to it moves nothing, and
+re-entering the state reads it again. A null duration refuses the entering
+write. The existing ticker inserts a private `machine_timer_tick`; its
 interpreter locks the owner, verifies that the same visit is still active,
 selects the first true guard, and performs exit, transition and entry actions.
+The tick's instant is the only time a fire reads: the ticker found it due, and
+no database clock is consulted again, so a deadline already past fires on the
+next sweep.
+
+**A row machine reads time through `machine_clock()`.** It is the
+transaction's time, the same on every read in one step, and the one function a
+test database replaces to move time. `pronto check replay` refuses a guard, a
+`raw` expression, a `rawWhere` or a lock's `when` that reads the clock any other
+way (`now()`, `CURRENT_TIMESTAMP`, `clock_timestamp()`, a cast of `'now'`), as
+it refuses a reducer's step reading time outside its `clock()`.
 A timed self-transition creates another visit. An earlier `AFTER` trigger
 that rewrites or recreates the owner during the same row event is refused;
 it cannot silently replace the visit being armed. A false or null guard consumes
@@ -491,6 +527,17 @@ the new program. Airlock's automatic interpreter upgrade checks a timed
 machine's signature before replacing it, so it cannot adopt timer changes.
 The compiler never guesses elapsed time or resets deadlines
 during startup.
+
+**A Mecha machine's `after` is the same timer**, kept by its step rather than
+by a row's trigger: XState's own `after`, whose delays are milliseconds or
+names in `setup.delays`, each a number or the context field holding one. The
+step returns the delayed raises and cancels XState leaves to its host; the
+host arms a schedule per raise, due its delay after the step's time, and
+deletes the state's schedules on a cancel. The tick delivers
+`xstate.after.<delay>.<state>` at the later of its instant and the fire's
+`clock()`. Its first adoption is held to the same check: every instance in a
+state with an `after` has a schedule for each of the state's delays
+([Mecha's machines](https://github.com/bonisoft3/mecha/blob/v0.30.0/docs/machines.md#timers)).
 
 **A terminal chart is closed over the entity's row.** `context` is refused:
 other columns start from the entity's field defaults. The emitted

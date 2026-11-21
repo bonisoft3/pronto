@@ -29,6 +29,7 @@
       "mecha*.js",
       "scales/*.ts",
       "testdata/*.ts",
+      "bundle/held-clock.ts",
       "deno.json",
       "deno.lock"
     ],
@@ -131,6 +132,7 @@
           "mecha*.js",
           "scales/*.ts",
           "testdata/*.ts",
+          "bundle/held-clock.ts",
           "deno.json",
           "deno.lock",
           "[m]ise.toml",
@@ -353,6 +355,7 @@
           "mecha*.js",
           "scales/*.ts",
           "testdata/*.ts",
+          "bundle/held-clock.ts",
           "deno.json",
           "deno.lock"
         ],

@@ -30,6 +30,7 @@ import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } f
 import { databaseScript, writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
 import { type Reducers, renderMachines } from './edge-machines.ts'
+import { type MechaReducerMachine, timed } from '../mecha-reducer.ts'
 import { computationPackages } from './compute.ts'
 import { writeEdgeCompute } from './edge-compute.ts'
 import { writeEdgeReader } from './edge-reader.ts'
@@ -364,7 +365,7 @@ await run(Deno.execPath(), ['install', '--frozen', '--config', path.join(mecha, 
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
-const armed = Object.values(reducers).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
+const armed = Object.values(reducers).some((h) => timed(h.reducer as MechaReducerMachine))
 const pokes = !!compute || clock !== 'disabled' && (crons.length > 0 || armed || withEffects || hatches.length > 0)
 const POKE_CRON = '0 * * * *'
 

@@ -46,10 +46,23 @@ say:
         priority: -1
         cmds:
           - do: "deno test --no-config --allow-read --allow-run=cue,docker access-check.integration.test.ts"
+          - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=docker,cue seeds.integration.test.ts"
       rls-installation:
         priority: -1
         cmds:
           - do: "deno test --no-config --allow-read --allow-run=cue,docker rls-installation.integration.test.ts"
+      # Server timers in PostgreSQL, delivered as the ticker delivers them, and
+      # in a page's own cluster on its real and its held clock.
+      machine-timers:
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-env --allow-run=docker,cue,deno --allow-net=127.0.0.1,0.0.0.0 machine-timers.integration.test.ts"
+      # Field behaviour in PostgreSQL, under the roles a client's write runs as
+      # and under a SECURITY DEFINER machine.
+      field-behavior:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read --allow-run=cue,docker field-behavior.integration.test.ts"
       # pronto's published isolates, built as every release builds them (their
       # packages fetched by the build's own process) and served by the host
       # that serves them outside Cloudflare, on loopback.
@@ -122,7 +135,7 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue mecha-xstate.test.ts xstate-host.integration.test.ts"
-          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts reads.test.ts token-roles.test.ts access-model.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts rewrites.test.ts drive-access.test.ts lifecycle-machine.test.ts field-behavior.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts reads.test.ts token-roles.test.ts access-model.test.ts"
           # The sealing the page does, through omnishell's bundled client, whose
           # debug module reads DEBUG as it loads.
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue --allow-env=DEBUG secret-seal.test.ts"
@@ -130,7 +143,6 @@ say:
           # PGlite: claims, captures, publication and materialization.
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-env mecha-snapshot.test.ts mecha-snapshot-materialize.test.ts"
           - do: "mise exec -- deno test --parallel --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
-          - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
       endowments:

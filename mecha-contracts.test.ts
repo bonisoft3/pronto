@@ -18,6 +18,9 @@ Deno.test("an input a rule reads must be carried by every event that reaches it"
   // The guard runs before the action on both events, and each is a finding.
   assertEquals(carries(contract(spec, "isDue", ["_time", "card"])), ["isDue reads card, which timeout (a mecha event) does not carry into playing"]);
   assertEquals(carries(contract(spec, "finish", ["_entropy"], [])), ["finish reads _entropy, which finish (a mecha event) does not carry into playing"]);
+  // A timer's event is the machine's own, and carries no sender either.
+  const timed: MechaReducerMachine = {...spec, states: {...spec.states, playing: {...spec.states.playing, after: {"1000": [{guard: ["yourTurn"], reduce: "finish"}]}}}};
+  assertEquals(carries(timed), ["yourTurn reads _origin, which xstate.after.1000.playing (a mecha event) does not carry into playing"]);
 });
 
 Deno.test("the rules an event reaches include every automatic transition after it", async () => {
@@ -75,8 +78,7 @@ Deno.test("a rule is handed only the inputs it reads, and refused a write it did
   await assertRejects(() => step(contract(spec, "play", ["_time", "card"], ["a", "b", "plays", "deadline"])), Error, "play writes turn outside its contract");
 });
 
-// A wake phase that did not take the wake's event had its delivery refused on
-// every tick, and a waiting state with no way out held its instance for good.
+// A waiting state with no way out held its instance for good.
 Deno.test("a machine cannot stop where nothing moves it on", async () => {
   const {spec} = await fixture();
   assertEquals(moving(spec), []);
@@ -88,7 +90,6 @@ Deno.test("a machine cannot stop where nothing moves it on", async () => {
   assertEquals(moving({...stuck, states: {...stuck.states, parked: {final: false, on: {timeout: {guard: ["isDue"], reduce: "timeout"}}}}}), ["parked is not final and nothing leaves it"]);
   // Unreachable, it holds nothing.
   assertEquals(moving({...spec, states: {...spec.states, parked: {final: false, on: {}}}}), []);
-  assertEquals(moving({...spec, ports: {wake: {phases: ["playing"], deadline: "deadline", event: "expire"}}}),
-    ["the ticker wakes playing with expire, which playing does not take"]);
-  assertEquals(moving({...spec, ports: {wake: {phases: ["playing"], deadline: "deadline", event: "timeout"}}}), []);
+  // A timer that leaves it moves it on.
+  assertEquals(moving({...stuck, states: {...stuck.states, parked: {final: false, on: {}, after: {"1000": [{target: "finished"}]}}}}), []);
 });

@@ -11,9 +11,13 @@ export type Row = Record<string, unknown>;
 export type Held = Record<string, Row[]>;
 
 /** The emission's `seed-sql` entry (emit.cue #seedData). */
+/** A row machine over a seeded entity: a seed row may stand in any of its
+ * states but those whose timer or invocation entering would start. */
+export type SeedMachine = { name: string; field: string; initial: string; starts: string[] };
+
 export type SeedData = {
   src?: string;
-  entities: { name: string; table: string; columns: { name: string; type?: string; from?: string }[]; rows: Row[] }[];
+  entities: { name: string; table: string; columns: { name: string; type?: string; from?: string }[]; rows: Row[]; machines?: SeedMachine[] }[];
 };
 
 /** A seed file, as {"<Entity>": [row, ...]}; anything else is refused. */
@@ -66,9 +70,22 @@ export function seedSql(data: SeedData, held: Held): string {
   }
   oneHome(src, Object.fromEntries(data.entities.map((e) => [e.name, { seed: e.rows }])), held);
   const blocks: string[] = [];
+  // Whether a row stands in a machine state other than its first: the file
+  // then marks its session as seeding, which the machine's trigger reads.
+  let restores = false;
   for (const e of data.entities) {
     const rows = e.rows.length > 0 ? e.rows : held[e.name] ?? [];
     if (rows.length === 0) continue;
+    for (const m of e.machines ?? []) {
+      rows.forEach((row, i) => {
+        const state = row[m.field];
+        if (state === undefined || state === m.initial) return;
+        if (m.starts.includes(state as string)) {
+          throw new Error(`${src || "seed"}: machine ${m.name} seed ${e.name}[${i}] stands in ${state}, whose after or invoke a seed does not start: seed it in a state without either`);
+        }
+        restores = true;
+      });
+    }
     const columns = new Map(e.columns.map((c) => [c.name, c]));
     blocks.push(rows.map((row, i) => {
       const where = `${e.name}[${i}]`;
@@ -94,7 +111,10 @@ export function seedSql(data: SeedData, held: Held): string {
       return `INSERT INTO ${identifier(e.table)} (${present.map((c) => identifier(c.name)).join(", ")}) VALUES (${values.join(", ")}) ON CONFLICT ("id") DO NOTHING;`;
     }).join("\n"));
   }
-  return blocks.join("\n") + "\n";
+  const body = blocks.join("\n") + "\n";
+  return restores
+    ? `SELECT set_config('pronto.seed', 'on', false);\n${body}SELECT set_config('pronto.seed', '', false);\n`
+    : body;
 }
 
 /** The inputs a held seed's verdict depends on: its bytes, the entities that

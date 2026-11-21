@@ -57,7 +57,9 @@ Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#S
   The emitter cannot inspect its writes, so loop prevention is the author's.
 - **A scheduled pipeline** (`trigger: "schedule"`): every `interval`, delete
   or patch the sink rows a filter matches, with `{cutoff}` (now minus
-  `window`) and `{nowts}` resolved at run time. It is level-triggered, for work whose job is
+  `window`) and `{nowts}` resolved at run time. Both periods are ISO 8601
+  durations in whole hours, minutes and seconds (`PT1H`, `PT30M`), as the
+  `duration` type spells one. It is level-triggered, for work whose job is
   to make a predicate false repeatedly — retention, expiry — and needs no
   identity, watermark or lateness.
 - **A drain** (`#Drain`, [below](#drains)): a database function called

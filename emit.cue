@@ -237,11 +237,13 @@ _sqlType: {
 	}]
 }
 
-// Go-style duration composed of h/m/s integer units ("168h", "30m", "1h30m").
+// A #PipelineDuration in seconds, and as the Go duration Redpanda Connect
+// reads (PT1H30M is 1h30m).
 #durationSeconds: {
 	let D = self
 	d:      string
-	_m:     regexp.FindNamedSubmatch(#"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"#, D.d)
+	go:     strings.ToLower(strings.TrimPrefix(D.d, "PT"))
+	_m:     regexp.FindNamedSubmatch(#"^PT(?:(?P<h>\d+)H)?(?:(?P<m>\d+)M)?(?:(?P<s>\d+)S)?$"#, D.d)
 	_hours: [if D._m.h != "" {strconv.Atoi(D._m.h)}, 0][0]
 	_mins:  [if D._m.m != "" {strconv.Atoi(D._m.m)}, 0][0]
 	_secs:  [if D._m.s != "" {strconv.Atoi(D._m.s)}, 0][0]
@@ -416,8 +418,9 @@ _sqlType: {
 
 // What the writer renders 900_seed.sql from (seed.ts): a seeded server entity's
 // columns, each with its type and, for a domain type, the function that reads
-// a JSON literal into it, and the rows the program states; the rows state.seed
-// holds the writer reads from `src` itself. Every server entity is listed
+// a JSON literal into it, the rows the program states, and the row machines
+// over it (their state field, initial state, and the states a seed may not
+// stand in); the rows state.seed holds the writer reads from `src` itself. Every server entity is listed
 // where a seed file is declared, because which of them it holds rows for is
 // the file's to say.
 #seedData: {
@@ -439,6 +442,12 @@ _sqlType: {
 				}
 			}]
 			rows: e.seed
+			machines: [if S.code.state.mecha.rows != _|_ for mn, m in S.code.state.mecha.rows if m.states != _|_ if m.field != _|_ if m.initial != _|_ if m.entity == e.name || m.entity == e.table {
+				name:    mn
+				field:   m.field
+				initial: m.initial
+				starts: [for sn, st in m.states if sn != m.initial if st.after != _|_ || st.invoke != _|_ {sn}]
+			}]
 		}]
 	}
 }
@@ -1096,6 +1105,15 @@ _sqlType: {
 
 			  IF TG_OP = 'INSERT' THEN
 			    IF NEW."\(_field)" <> '\(S.machine.initial)' THEN
+			      -- A seed restores its row in the state it names, entering
+			      -- nothing (900_seed.sql marks its session as seeding). Any
+			      -- session may set the mark, so it counts only where the session
+			      -- logged in as the table's owner, as the seed's runner does; a
+			      -- client logs in as authenticator.
+			      IF coalesce(current_setting('pronto.seed', true), '') = 'on'
+			        AND pg_has_role(session_user, (SELECT c.relowner FROM pg_class c WHERE c.oid = TG_RELID), 'MEMBER') THEN
+			        RETURN NEW;
+			      END IF;
 			      RAISE EXCEPTION 'new % must start in initial state % (got %)', '\(_table)', '\(S.machine.initial)', NEW."\(_field)" USING ERRCODE = 'check_violation';
 			    END IF;
 			\(strings.Join(_initialActions, ""))\(_initialEnter)    RETURN NEW;
@@ -2535,6 +2553,99 @@ _sqlType: {
 	], "\n")
 }
 
+// An entity's field behaviour (#Field.outputOnly, #Field.immutable), as
+// AIP-203 states it, held for the clients alone: a write PostgREST makes as
+// a role a token names, which is any role authenticator may switch to
+// (001_roles.sql) but the service, whose token is the server's own. Asked of
+// the membership rather than of a list, so a token role declared later is held
+// by a trigger emitted before it. The function is the invoker's, so
+// `current_user` is the role the statement runs as; a write a SECURITY
+// DEFINER machine or lifecycle trigger makes runs as its owner, which no
+// token names, and a computation, a seed and a migration are no client either.
+// Where there is no authenticator, no write comes through PostgREST. Named
+// to fire first, as a table's triggers fire in the order of their names and
+// a digit sorts before every name the program gives one: a machine's
+// interpreter reads NEW after it.
+// An output-only value a client sends is replaced, never refused: an insert
+// takes the column's default, an update keeps the column's value. An
+// immutable change is refused as an invalid argument, which PostgREST
+// answers 400; the same value passes. A json value has no equality operator,
+// and is compared as the value it states, as jsonb: an object restated with
+// its keys in another order or other whitespace is the same object.
+#fieldBehaviorSql: {
+	let F = self
+	e:        _
+	columns!: #machineColumns
+	_t:       F.e.table
+	_fn:      "trg_\(F._t)_field_behavior"
+	_outputOnly: [for f in F.e.fields if f.outputOnly != _|_ if f.outputOnly {
+		let column = #machineColumn & {columns: F.columns, entityName: F.e.name, fieldName: f.name}
+		name: f.name
+		default: [
+			if f.default != _|_ {f.default},
+			if column.initial != _|_ {(#sqlLit & {v: column.initial}).out},
+			"NULL",
+		][0]
+	}]
+	_immutable: [for f in F.e.fields if f.immutable != _|_ if f.immutable {
+		name: f.name
+		cast: [if f.type == "json" || f.type == "geojson" {"::jsonb"}, ""][0]
+	}]
+	out: """
+		CREATE OR REPLACE FUNCTION "\(_fn)"() RETURNS trigger
+		LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
+		BEGIN
+		  IF current_user = 'service' OR to_regrole('authenticator') IS NULL THEN
+		    RETURN NEW;
+		  END IF;
+		  IF NOT pg_has_role('authenticator', current_user, 'SET') THEN
+		    RETURN NEW;
+		  END IF;
+		  IF TG_OP = 'INSERT' THEN
+		\(strings.Join([for f in _outputOnly {"    NEW.\"\(f.name)\" := \(f.default);\n"}], ""))    RETURN NEW;
+		  END IF;
+		\(strings.Join([for f in _outputOnly {"  NEW.\"\(f.name)\" := OLD.\"\(f.name)\";\n"}], ""))\(strings.Join([for f in _immutable {
+			"  IF NEW.\"\(f.name)\"\(f.cast) IS DISTINCT FROM OLD.\"\(f.name)\"\(f.cast) THEN\n" +
+			"    RAISE EXCEPTION '\(F._t).\(f.name) is immutable: it is set when the row is created and never changed' USING ERRCODE = 'invalid_parameter_value';\n" +
+			"  END IF;\n"
+		}], ""))  RETURN NEW;
+		END $$;
+
+		DROP TRIGGER IF EXISTS "0_\(F._t)_field_behavior" ON "\(F._t)";
+		CREATE TRIGGER "0_\(F._t)_field_behavior"
+		  BEFORE INSERT OR UPDATE ON "\(F._t)"
+		  FOR EACH ROW
+		  EXECUTE FUNCTION "\(_fn)"();
+		"""
+}
+
+// The field behaviour of tables that state none, taken off a database that
+// held it. A table's lock is taken only where its trigger stands, so a release
+// pays nothing for a table that never had one; a table not yet created has
+// none.
+#fieldBehaviorDropSql: {
+	tables: [...string]
+	out: """
+		DO $$
+		DECLARE
+		  t text;
+		BEGIN
+		  FOREACH t IN ARRAY ARRAY[\(strings.Join([for t in tables {(#sqlLit & {v: t}).out}], ", "))]::text[] LOOP
+		    IF EXISTS (SELECT FROM pg_trigger WHERE tgrelid = to_regclass(format('public.%I', t)) AND tgname = '0_' || t || '_field_behavior') THEN
+		      EXECUTE format('DROP TRIGGER %I ON public.%I', '0_' || t || '_field_behavior', t);
+		    END IF;
+		    EXECUTE format('DROP FUNCTION IF EXISTS public.%I()', 'trg_' || t || '_field_behavior');
+		  END LOOP;
+		END $$;
+		"""
+}
+
+// The server entities that state a field behaviour.
+#behaved: {
+	e!:  _
+	out: len([for f in e.fields for b in ["outputOnly", "immutable"] if f[b] != _|_ if f[b] {f}]) > 0
+}
+
 // A publication over a table list, brought up to the list and its options
 // whoever made it: a database outliving its volume would publish every table
 // but the newest, and a WAL reader that arrives first makes it without the
@@ -2733,7 +2844,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"{nowts}", "${! meta(\"nowts\") }", -1,
 	)
 	out: {
-		input: generate:      {interval: R.p.interval, mapping: "root = {}"}
+		input: generate:      {interval: (#durationSeconds & {d: R.p.interval}).go, mapping: "root = {}"}
 		pipeline: processors: [{bloblang: strings.Join(list.Concat([R._metaLines, [R._rootLine]]), "\n")}]
 		output: retry: {
 			max_retries: 3
@@ -2918,6 +3029,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// Sealed to the airlock's key at the form (omnishell's
 				// screen.js), never written in the clear.
 				if f.secret != _|_ {secret: true}
+				// AIP-203's field behaviour, which the store applies to a
+				// client's write before its optimistic row stands (omnishell's
+				// data-sync.js) and the markup check holds a chart's writes to.
+				if f.outputOnly != _|_ if f.outputOnly {outputOnly: true}
+				if f.immutable != _|_ if f.immutable {immutable: true}
 				let column = #machineColumn & {entityName: e.name, fieldName: f.name, columns: S.code._machineColumns}
 				if f.default != _|_ {
 					defaulted: true
@@ -3397,6 +3513,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_seedFile:         len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed:          [for _, e in M._base if e.access != _|_ {e}]
 	updateOnly:        [for e in M.accessed if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
+	behaved:           [for _, e in M._base if e.server if (#behaved & {"e": e}).out {e}]
 	machines:          [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M._base if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw:               [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	_steps:            #steps & {code: M.code}
@@ -3424,6 +3541,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if M.code.capabilities.blobs {"services/database/migrations/803_blob_claims.sql"},
 		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == M._steps.actors {r}]) == 0 {"services/database/migrations/\(M._steps.actors)"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
+		if len(M.behaved) > 0 {"services/database/migrations/799_field_behavior.sql"},
 		if len(M.updateOnly) > 0 {"services/database/migrations/799_write_permissions.sql"},
 		if M.code.state.cortex != _|_ for migration, _ in {
 			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
@@ -3485,6 +3603,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			["-- tier: container\n" + (#publication & {name: L._pub, tables: [e.table]}).out + [if L._capture {"\n" + (#txnMarker & {pub: L._pub, tables: [e.table]}).out}, ""][0] + "\n" +
 				(#publication & {name: "electric_publication_default", tables: [e.table]}).out + "\nALTER TABLE \(e.table) REPLICA IDENTITY FULL;\n-- tier: any"],
 			["GRANT SELECT, INSERT, UPDATE, DELETE ON \(e.table) TO anon;"],
+			[if e.server if (#behaved & {"e": e}).out {(#fieldBehaviorSql & {"e": e, columns: L.code._machineColumns}).out}],
 			[for m in machines {(#mechaMachineSql & {machine: m, entities: L.code.state.entities, effects: L._effects, signals: [if L.code.state.signals != _|_ {L.code.state.signals}, {}][0], runtime: false}).out}],
 		]), "\n\n") + "\n"
 	}}
@@ -3944,6 +4063,21 @@ _pgrollDir: "services/database/pgroll"
 				if len(updateOnly) > 0 {
 					public_access: strings.Join([for e in updateOnly {(#publicUpdateSql & {"e": e}).out}], "\n\n")
 				}
+				// Field behaviour, reapplied on every release as the update-only
+				// restrictions are, so a database whose initdb ran before a field
+				// stated it holds it too. Every server entity's, a later one's included:
+				// the runner reconciles after the pending migrations. A table that
+				// states none has its trigger dropped, so a database that held one
+				// agrees with a fresh one; that rides a step the release runs anyway,
+				// as the roles' prune below does.
+				let behaved = [for _, e in D.code.state.entities if e.server if (#behaved & {"e": e}).out {e}]
+				let plain = [for _, e in D.code.state.entities if e.server if !(#behaved & {"e": e}).out {e.table}]
+				// Embedded as a struct, as the roles' are below, for the same reason.
+				let fieldBehaviorReconcile = {field_behavior: strings.Join(list.Concat([
+					[for e in behaved {(#fieldBehaviorSql & {"e": e, columns: D.code._machineColumns}).out}],
+					[if len(plain) > 0 {(#fieldBehaviorDropSql & {tables: plain}).out}],
+				]), "\n\n")}
+				if migrating if len(behaved)+len(plain) > 0 {fieldBehaviorReconcile}
 				let declared = list.SortStrings([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}])
 
 				// Where none is declared, the prune rides a migrate step the
@@ -3956,7 +4090,8 @@ _pgrollDir: "services/database/pgroll"
 				let isChecked = model._checked
 				let tokenSql = [if len(declared) > 0 {(#tokenRolesSql & {roles: declared, "checked": isChecked}).out}, (#tokenRolesPrune & {restate: true, "checked": isChecked}).out][0]
 				let rolesReconcile = {roles: [if isChecked {(#accessCheckSql & {access: model.out}).out}, ""][0] + tokenSql}
-				if len(declared) > 0 || (model._serverOn && (isChecked || D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0)) {rolesReconcile}
+				let migrating = len(declared) > 0 || (model._serverOn && (isChecked || D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len(behaved) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0))
+				if migrating {rolesReconcile}
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
@@ -5549,7 +5684,8 @@ _pgrollDir: "services/database/pgroll"
 		// what the page's and the edge's clusters call (mecha-browser's
 		// drains.ts), where no stream runs them. The database image is the
 		// one a test runs the app's migrations in; the actors migration is
-		// the machines' SQL, which the replay holds to recorded time.
+		// the machines' SQL, which the replay holds to recorded time, as it
+		// holds the row machines' guards and expressions.
 		".pronto/cluster.json": {
 			format: "json"
 			data: {
@@ -5558,6 +5694,9 @@ _pgrollDir: "services/database/pgroll"
 					schema:   E.cluster.surface.schema
 					database: mecha.published.database
 					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
+					// The row machines, whose authored SQL the replay holds to
+					// machine_clock() as it holds the actors to clock().
+					if E.code.state.mecha.rows != _|_ if len(E.code.state.mecha.rows) > 0 {rowMachines: E.code.state.mecha.rows}
 					tokenRoles: E._access.roles.authenticator.memberOf
 					if len(E._declaredRoles) > 0 {declaredRoles: E._declaredRoles}
 
@@ -5908,6 +6047,17 @@ _pgrollDir: "services/database/pgroll"
 					}], "\n\n") + "\n"
 				}
 			}
+			// Field behaviour shares the write permissions' prefix: after the
+			// authored schema migrations, before schedules and seeds, and a step
+			// of its own, so no database's applied 799_write_permissions.sql changes.
+			if len(E._appMigrations.behaved) > 0 {
+				"services/database/migrations/799_field_behavior.sql": {
+					format: "sql"
+					text: strings.Join([for ent in E._appMigrations.behaved {
+						(#fieldBehaviorSql & {e: ent, columns: E.code._machineColumns}).out
+					}], "\n\n") + "\n"
+				}
+			}
 			if len(E._appMigrations.updateOnly) > 0 {
 				"services/database/migrations/799_write_permissions.sql": {
 					format: "sql"
@@ -5955,13 +6105,13 @@ _pgrollDir: "services/database/pgroll"
 				"services/database/migrations/\(E._steps.actors)": {format: "mecha-reducer-sql", data: {
 					reducers: {for n, h in E.code.state.mecha.reducers {(n): {machine: h.reducer, rules: h.rules}}}
 					entities: E.code.state.entities
-					timers:   [if len([for _, h in E.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
+					timers:   [if len((#TimedReducers & {code: E.code}).out) > 0 {mecha.#MachineTimersSql}, ""][0]
 				}}
 			}
 			if len(_machines) > 0 if len([for r in E._raw if r.name == E._steps.machines {r}]) == 0 {
 				"services/database/migrations/\(E._steps.machines)": {
 					format: "sql"
-					text:   [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], signals: [if E.code.state.signals != _|_ {E.code.state.signals}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
+					text:   #machineClockSql + "\n\n" + [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], signals: [if E.code.state.signals != _|_ {E.code.state.signals}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
 				}
 			}
 

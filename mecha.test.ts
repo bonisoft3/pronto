@@ -3,7 +3,7 @@ import { compileMechaReducer } from "./mecha-reducer.ts";
 import { moving } from "./mecha-contracts.ts";
 import { walk } from "../omnishell/test/mecha-battery.ts";
 import { executeMecha } from "../omnishell/test/mecha-local.ts";
-import { fixture, initial, request, run, terminal } from "./mecha-fixtures.ts";
+import { fixture, initial, nestedFixture, request, run, terminal, timerFixture } from "./mecha-fixtures.ts";
 
 Deno.test("mecha chart dispatches internal events, validates ownership, and projects private hands", async () => {
   const { spec, compiled } = await fixture();
@@ -139,4 +139,62 @@ Deno.test("the runtime holds under any input a step can be given", async () => {
     }
     assertEquals([...visited].sort(), ["finished", "playing"], "the walks play a hand out, where the action that hands back its state runs");
   }
+});
+
+// XState v5's `after`: entering a state starts its timers, measured from the
+// step; leaving it cancels them; a step that stays without re-entering moves
+// nothing, and `reenter: true` starts them again. The step leaves them to its
+// host as XState's actions.
+Deno.test("a state's after starts its timers at entry and cancels them at exit", async () => {
+  const { spec, compiled } = await timerFixture();
+  type Answer = { kind: string; reason?: string; state: { phase: string; count: number; turn_ms: number; expired_at: number }; actions?: unknown[] };
+  const step = async (state: unknown, kind: string, tier = "omnishell", now = 1000) =>
+    await executeMecha(compiled.source, spec.fuel, { state, event: { kind, payload: {} }, context: { actor: "a", tier, now }, viewers: ["a"] }) as Answer;
+  const raise = (ms: number) => ({ type: "xstate.raise", params: { event: { type: "xstate.after.turn.running" }, id: "xstate.after.turn.running", delay: ms } });
+  const cancel = { type: "xstate.cancel", params: { sendId: "xstate.after.turn.running" } };
+  const created = await executeMecha(compiled.source, spec.fuel, { initialize: true, payload: { turn_ms: 20000 }, context: { tier: "mecha", now: 0 }, viewers: [] }) as Answer;
+  assertEquals(created.actions, [raise(20000)], "creation enters the initial state");
+  const running = created.state;
+  for (const kind of ["nudge", "stay"]) {
+    const stayed = await step(running, kind);
+    assertEquals([stayed.kind, stayed.state.count, stayed.actions], ["accepted", 1, undefined], `${kind} moves no timer`);
+  }
+  assertEquals((await step(running, "restart")).actions, [cancel, raise(20000)]);
+  assertEquals((await step({ ...running, turn_ms: 5 }, "restart")).actions, [cancel, raise(5)], "the delay is read at entry");
+  const idle = await step(running, "stop");
+  assertEquals([idle.state.phase, idle.actions], ["idle", [cancel]]);
+  assertEquals((await step(idle.state, "start")).actions, [raise(20000)]);
+  // The timer's event takes the delay's first arrow whose guard holds, at the
+  // time the host delivered it.
+  const expired = await step(running, "xstate.after.turn.running", "mecha", 7000);
+  assertEquals([expired.state.phase, expired.state.expired_at, expired.actions], ["expired", 7000, [cancel]]);
+  await assertRejects(() => step(running, "xstate.after.turn.running"), Error, "another tier");
+  assertEquals((await step(idle.state, "xstate.after.turn.running", "mecha")).reason, "illegal_event");
+  assertEquals((await step(running, "xstate.after.other.running", "mecha")).reason, "illegal_event");
+  // A named delay is a duration the context holds when the state is entered.
+  await assertRejects(() => compileMechaReducer({ ...spec, delays: {} }, "", terminal), Error, "delays does not declare");
+  await assertRejects(() => compileMechaReducer({ ...spec, delays: { turn: "phase" } }, "", terminal), Error, "no integer the context holds");
+});
+
+// XState's nested states: a phase is the atomic state's path, a child takes
+// the events its parent does, and the parent's timer keeps running while a
+// child is entered and left, so the earlier of the two decides.
+Deno.test("a compound state's timer runs on across its children, and its own events reach them", async () => {
+  const { spec, compiled } = await nestedFixture();
+  assertEquals(moving(spec), []);
+  type Answer = { kind: string; reason?: string; state: { phase: string; lifts: number; timeouts: number }; actions?: { type: string; params: { id?: string; sendId?: string } }[] };
+  const step = async (state: unknown, kind: string, tier = "omnishell") =>
+    await executeMecha(compiled.source, spec.fuel, { state, event: { kind, payload: {} }, context: { actor: "a", tier, now: 1000 }, viewers: ["a"] }) as Answer;
+  const timers = (answer: Answer) => (answer.actions ?? []).map((a) => `${a.type === "xstate.raise" ? "raise" : "cancel"} ${a.params.id ?? a.params.sendId}`);
+  const started = await step({ phase: "waiting", lifts: 0, timeouts: 0 }, "start");
+  assertEquals([started.state.phase, timers(started)], ["racing.open", ["raise xstate.after.150000.racing"]], "entering the parent enters its initial child");
+  const closing = await step(started.state, "lift");
+  assertEquals([closing.state.phase, timers(closing)], ["racing.closing", ["raise xstate.after.15000.racing.closing"]], "the parent's event reaches the child, which moves on without the parent's timer");
+  for (const timer of ["xstate.after.15000.racing.closing", "xstate.after.150000.racing"]) {
+    const ended = await step(closing.state, timer, "mecha");
+    assertEquals([ended.state.phase, ended.state.timeouts], ["abandoned", 1], `${timer}: either clock abandons the race`);
+    assertEquals(timers(ended), ["cancel xstate.after.15000.racing.closing", "cancel xstate.after.150000.racing"]);
+  }
+  assertEquals((await step(started.state, "xstate.after.15000.racing.closing", "mecha")).reason, "illegal_event", "a child's timer runs only in the child");
+  await assertRejects(() => step({ phase: "racing", lifts: 0, timeouts: 0 }, "lift"), Error, "state.phase: invalid string");
 });

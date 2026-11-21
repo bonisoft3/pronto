@@ -1165,6 +1165,26 @@ Deno.test("a machine refuses a conflicting default, a closed enum missing a stat
   }
 });
 
+Deno.test("a seed may stand in a later state, which its trigger lets only a seeding session insert", async () => {
+  const files = await emitFiles(challengeProgram("ensure").replace('durability: "server"', 'durability: "server"\n seed: [{status: "accepted"}, {status: "pending"}]'));
+  const sql = Object.values(files).map((f) => f.text).join("\n");
+  assertStringIncludes(sql, "IF coalesce(current_setting('pronto.seed', true), '') = 'on'\n");
+  // The mark counts only for a session logged in as the table's owner.
+  assertStringIncludes(sql, "AND pg_has_role(session_user, (SELECT c.relowner FROM pg_class c WHERE c.oid = TG_RELID), 'MEMBER') THEN");
+  assertStringIncludes(sql, "new % must start in initial state % (got %)");
+});
+
+Deno.test("a seed cannot stand in a later state whose timer or invocation entering would start", async () => {
+  const timed = challengeProgram("ensure")
+    .replace('accepted: {type: "final"}', 'accepted: {after: {"1000": "expired"}}')
+    .replace('durability: "server"', 'durability: "server"\n seed: [{status: "accepted"}]');
+  const res = await cue(["export", "-", "-e", "app", "--out", "json"], timed);
+  assertEquals(res.success, false);
+  assertStringIncludes(res.stderr, "stands in accepted, whose after or invoke a seed does not start");
+  const initial = challengeProgram("ensure").replace('durability: "server"', 'durability: "server"\n seed: [{status: "pending"}]');
+  assertEquals((await cue(["export", "-", "-e", "app", "--out", "json"], initial)).success, true);
+});
+
 Deno.test("a matching default and CEL check remain the column's one declared constraint", async () => {
   const source = challengeProgram("ensure").replace('{name: "status", type: "string"}', `{name: "status", type: "string", default: "'pending'", cel: "this in ['pending', 'accepted', 'declined', 'expired']"}`)
     .replace('durability: "server"', `durability: "server"
@@ -1328,6 +1348,38 @@ app: state: mecha: reducers: bounded: {rules: "bounded.js", machine: {
   const listed = await cue(["export", "-", "-e", "app"], paymentProgram() + machine("{}", 'on: run: [{target: "done", guard: "mayRun"}, {target: "ready"}],'));
   assertEquals(listed.success, false);
   assertStringIncludes(listed.stderr, "bounded.on.run: an event names one transition");
+});
+
+// A compound state's children were never checked: a child's list of
+// transitions, its invoke or its named delay passed where a top-level
+// state's were refused.
+Deno.test("a Mecha machine holds a compound state's children to the rules a state's are", async () => {
+  const machine = (child: string, parent = "") => `
+app: state: mecha: reducers: nested: {rules: "nested.js", machine: {
+  config: {id: "nested", initial: "ready", states: {ready: {initial: "open", ${parent} states: {open: ${child}, closing: {}}}, done: type: "final"}}
+  setup: {
+    version: 1
+    types: {
+      context: {type: "object", fields: {}}
+      view: {type: "object", fields: {}}
+      events: run: {tier: "omnishell", payload: {type: "object", fields: {}}}
+    }
+  }
+}}
+`;
+  for (const [child, parent, reason] of [
+    ['{on: run: [{target: "closing", guard: "mayRun"}, {target: "#nested.done"}]}', "", "nested.ready.open.on.run: an event names one transition"],
+    ['{invoke: {src: "child"}}', "", "nested.ready.open: a Mecha machine invokes nothing"],
+    ['{after: turn: "closing"}', "", "nested.ready.open.after.turn: no delay turn in setup.delays"],
+    ['{on: run: {guard: "mayRun", target: "closing"}}', 'on: run: "done",', "nested.ready.open.on.run: the state it is a child of takes run"],
+    ["{initial: \"deep\", states: deep: {}}", "", "nested.ready.open: a child state holds no states of its own"],
+  ]) {
+    const result = await cue(["export", "-", "-e", "app"], paymentProgram() + machine(child, parent));
+    assertEquals(result.success, false, child);
+    assertStringIncludes(result.stderr, reason);
+  }
+  const valid = await cue(["export", "-", "-e", "app"], paymentProgram() + machine('{after: "15000": "#nested.done", always: {target: "closing"}}', 'on: run: "done",'));
+  assertEquals(valid.success, true, valid.stderr);
 });
 
 Deno.test("native Mecha spawn and send resolve declared bounded targets and authority", async () => {

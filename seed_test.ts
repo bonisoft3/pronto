@@ -121,3 +121,17 @@ code: pronto.#App & {
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+Deno.test("a seed standing a row in a later machine state marks the file as seeding, and only then", () => {
+  const machine = { name: "Pay", field: "status", initial: "draft", starts: ["sending"] };
+  const payment = { name: "Payment", table: "payment", columns: [{ name: "id", type: "uuid" }, { name: "status", type: "string" }], machines: [machine] };
+  const first = seedSql({ entities: [{ ...payment, rows: [{ id: "00000000-0000-4000-8000-000000000001", status: "draft" }] }] }, {});
+  assert.equal(first.includes("pronto.seed"), false);
+  const later = seedSql({ entities: [{ ...payment, rows: [{ id: "00000000-0000-4000-8000-000000000001", status: "paid" }] }] }, {});
+  assert.ok(later.startsWith("SELECT set_config('pronto.seed', 'on', false);\n"));
+  assert.ok(later.endsWith("SELECT set_config('pronto.seed', '', false);\n"));
+  assert.throws(
+    () => seedSql({ src: "seed.json", entities: [{ ...payment, rows: [] }] }, { Payment: [{ id: "00000000-0000-4000-8000-000000000001", status: "sending" }] }),
+    /seed Payment\[0\] stands in sending, whose after or invoke a seed does not start/,
+  );
+});

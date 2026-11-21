@@ -4,7 +4,7 @@
 // the machines edge-machines.ts renders, in a Durable Object under wrangler
 // dev. Needs libraries/mecha/packages/pglite-workerd/dist.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { compileMechaReducer } from "./mecha-reducer.ts";
+import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { executeMecha } from "../omnishell/test/mecha-local.ts";
 import { renderMachines } from "./bundle/edge-machines.ts";
@@ -19,7 +19,10 @@ const mecha = `${root}libraries/mecha`;
 
 Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
-  const { spec, rules, compiled } = await fixture();
+  const { spec: untimed, rules } = await fixture();
+  // The turn times out as XState's after: due its delay after playing is entered.
+  const spec: MechaReducerMachine = { ...untimed, states: { ...untimed.states, playing: { ...untimed.states.playing, after: { "1500": [{ guard: ["hasCards"], reduce: "timeout" }] } } } };
+  const compiled = await compileMechaReducer(spec, rules, terminal);
   const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"), terminal);
   const schema = "hybrid_proof_turn";
   const tmp = await Deno.makeTempDir({ prefix: "pronto-mecha-edge-" });
@@ -31,10 +34,10 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
 
   // The data directory, as pgdata.ts builds one: PostgreSQL's roles and
   // tenancy floor, the ticker's tables a timed machine shares, the surface,
-  // the migration with its container-tier engine fenced away, and the wake
-  // port a deadline arms through.
+  // the migration with its container-tier engine fenced away, and the timers
+  // its after arms through.
   const timers = (await Deno.readTextFile(`${mecha}/services/ticker/schedule.sql`)) + "\n" + (await Deno.readTextFile(`${mecha}/services/ticker/machine-timers.sql`));
-  const ports = compileMechaPorts({ proof_turn: { ...spec, ports: { wake: { phases: ["playing"], deadline: "deadline", event: "timeout" } } } });
+  const ports = compileMechaPorts({ proof_turn: spec });
   const seedSql = `CREATE ROLE anon; CREATE ROLE app_user; CREATE ROLE service NOLOGIN BYPASSRLS;
     GRANT USAGE ON SCHEMA public TO anon, app_user, service;
     ${await Deno.readTextFile(`${mecha}/services/database/rls/rls.sql`)}
@@ -283,10 +286,13 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       assertEquals(Number(await one("SELECT 1")), 1);
     });
 
-    await t.step("a deadline a machine arms is the object's alarm, and the tick it fires wakes the instance", async () => {
-      const deadline = Date.now() + 1500;
-      await seed(17, deadline);
-      await sql(`SELECT ${schema}.arm(i) FROM ${schema}.instance i WHERE i.id = '${uuid(17)}';`);
+    await t.step("a timer a machine arms is the object's alarm, and the tick it fires steps the instance", async () => {
+      const entered = Date.now();
+      const deadline = entered + 1500;
+      await seed(17);
+      // As the step that entered playing leaves it to its host.
+      const raise = { type: "xstate.raise", params: { event: { type: "xstate.after.1500.playing" }, id: "xstate.after.1500.playing", delay: 1500 } };
+      await sql(`SELECT ${schema}.arm('${uuid(17)}', 0, ${quote([raise])}, ${entered});`);
       assertEquals(Number(await one(`SELECT count(*) FROM public.schedule WHERE emits_entity = 'machine_timer_tick';`)), 1);
       const { alarm } = await (await fetch(at("/test/rearm"))).json() as { alarm: number | null };
       assert(alarm !== null && alarm >= deadline && alarm < deadline + 1000, `the alarm stands at the deadline: ${alarm} for ${deadline}`);

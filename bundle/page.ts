@@ -6,10 +6,13 @@ import { decodeBase64 } from '@std/encoding/base64'
 import { createCluster, type Cluster } from 'mecha-browser/cluster.ts'
 import type { Drain } from 'mecha-browser/drains.ts'
 import { createPageDatabase, type DatabaseAssets } from './database.ts'
+import { heldClock } from './held-clock.ts'
 // @ts-ignore untyped interpreter module
 import { createShell } from 'omnishell/shell.js'
 // @ts-ignore untyped interpreter module
 import { ensureSes } from 'omnishell/jessie.js'
+// @ts-ignore untyped interpreter module
+import { heldTime } from 'omnishell/screen.js'
 import { installSes } from 'pronto-bundle-ses'
 import { browserCompute, type BrowserCompute } from 'mecha-browser/compute.ts'
 import type { Computation } from 'mecha-browser/../compute-snapshot/src/index.ts'
@@ -78,9 +81,11 @@ if (typeof OrigWorker === 'function') {
     const db = await createPageDatabase(a)
     const executor = compute ? await browserCompute(compute) : undefined
     // A change the cluster lost leaves a table no read can trust again, so
-    // the page dies of it where its boot would.
+    // the page dies of it where its boot would. Under ?clock=manual the
+    // cluster and its row machines run on the terminal's held clock: the page
+    // keeps one clock.
     cluster = await createCluster({
-      db, sql, tables, schema, drains, clock, log: console.error,
+      db, sql: heldTime ? heldClock(sql) : sql, tables, schema, drains, clock, time: heldTime, log: console.error,
       compute: compute ? { computations: compute.computations, machine: computeMachines.compute_batch, execute: executor!.execute } : undefined,
       fail: (e) => {
         document.body.textContent = `page failed: ${e.message}`

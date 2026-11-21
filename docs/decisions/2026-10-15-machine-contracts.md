@@ -24,8 +24,8 @@ checked, without a language to replace SQL and without simulating backends.
 ## Steps hold their players
 
 Built, replacing serializable steps (below). Every entry point of a machine
-(`dispatch`, `deliver`, `wake`, an admission, `join`, and the `open`, `lease`
-and `fire` triggers) first takes a transaction-scoped advisory lock on each
+(`dispatch`, `deliver`, an admission, `join`, and the `open`, `lease` and
+`fire` triggers) first takes a transaction-scoped advisory lock on each
 player of its instance (`hold`, keyed by the player and the same in every
 machine's schema), in key order and in one call, before it locks any row. Two
 steps that share a player then run one after the other, and a check reading
@@ -83,11 +83,13 @@ lost.
 
 - `clock()` is the transaction's time, the same on every read in it, so every
   check in one step agrees on it, and no session can set it.
-- A timer's fire meets the deadline by the instant the ticker found due, so the
-  database's clock decides no deadline, and runs the step it delivers at the
-  later of that instant and the fire's own `clock()` (`deliver` and `dispatch`
-  take it as `at`). A tick the ticker sent late therefore sets the next
-  deadline from when it was decided, never in the past.
+- A machine's timers are XState's `after`: entering a state arms a one-shot
+  schedule per delay, due that delay after the step's time, and leaving it
+  deletes them. A timer fires when the ticker finds it due, so the database's
+  clock decides no deadline, and runs the step it delivers at the later of
+  that instant and the fire's own `clock()` (`deliver` and `dispatch` take it
+  as `at`). A tick the ticker sent late therefore starts the next state's
+  timers from when it was decided, never in the past.
 - `dispatch` records the time and draw it gave a step on the step's receipt,
   and an admission its time on the admission receipt, so a step replays from
   its rows.
@@ -157,13 +159,12 @@ chart or a comparison of declared domains:
 - a rule reads only inputs every event reaching it carries (`carries` in
   `mecha-contracts.ts`). The rules an event reaches are the transition's guard
   and action and those of every `always` arrow reachable from where it lands; a
-  machine-tier event carries no `_origin`. Truco's timeout ran the envido refusal
-  with the wake's event and logged a null seat; its contract reads no
-  `_origin`, so that read is refused at the step, and a contract claiming it is
-  a finding here;
-- every non-final state the chart reaches has a transition to another, and
-  every phase the ticker wakes takes the wake's event, whose delivery would
-  otherwise be refused on every tick (`moving`);
+  machine-tier event, a timer's (`xstate.after.<delay>.<state>`) among them,
+  carries no `_origin`. Truco's timeout ran the envido refusal with the timer's
+  event and logged a null seat; its contract reads no `_origin`, so that read
+  is refused at the step, and a contract claiming it is a finding here;
+- every non-final state the chart reaches has a transition, an event's, an
+  `always` or an `after`, to another (`moving`);
 - every value a projection's shape admits fits the surface column it fills: its
   type, and every range, length, set or pattern its CEL states (`fitting` in
   `mecha-surface.ts`). The CEL is read by `exactBounds` (`bounds.ts`), which
@@ -216,7 +217,8 @@ machine does not take (another tier's event, a payload outside its shape) as a
 `RefusedError`; any other throw is a finding: a rule reading what is not there,
 a state outside its shape or invariant, a write outside a contract, a step out
 of fuel. It found presence's invariant demanding 36-character lease ids that
-the payload's shape never promised. Truco's integration test ticks every timed
-machine early, with its deadline cleared, and when due; each tick times the
-instance out or arms it again, and none aborts. A tick sent a minute late runs
-its step when it was decided, and the next turn's deadline is still ahead.
+the payload's shape never promised. Pronto's `mecha-timers.integration.test.ts`
+holds a state's `after` to XState's: armed at entry, unmoved by a step that
+stays without re-entering, armed again by `reenter: true`, cancelled at exit;
+a tick for a cancelled timer delivers nothing, and one sent ten minutes late
+runs its step when it was decided.

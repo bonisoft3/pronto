@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1.0.13";
 import { createActor, createMachine } from "../omnishell/interpreter/vendor/xstate.js";
 import { analyzeWorkflow } from "./check-workflows.ts";
+import { reducerChart } from "./check-outcomes.ts";
 
 const finite = () => ({ id: "job", initial: "waiting", states: {
   waiting: { on: { start: "running", cancel: "done" } },
@@ -116,7 +117,8 @@ Deno.test("real application workflow inventory keeps opaque semantics unchecked"
   const summaries: Record<string, { applicable: number; unchecked: number; violations: number }> = {};
   for (const app of ["snapcards", "truco", "apexrun", "golaberto"]) {
     const input = JSON.parse(await Deno.readTextFile(new URL(`../../apps/${app}/.pronto/check-inputs.json`, import.meta.url)));
-    const report = Object.entries({ ...input.cortex, ...input.reducers }).flatMap(([name, chart]) => analyzeWorkflow(chart, name, { entry: "persisted" }));
+    const charts = { ...input.cortex, ...Object.fromEntries(Object.entries(input.reducers ?? {}).map(([name, spec]) => [name, reducerChart(spec)])) };
+    const report = Object.entries(charts).flatMap(([name, chart]) => analyzeWorkflow(chart, name, { entry: "persisted" }));
     summaries[app] = {
       applicable: report.filter((o) => o.property === "workflow-option-to-complete").length,
       unchecked: report.filter((o) => o.status === "unchecked").length,

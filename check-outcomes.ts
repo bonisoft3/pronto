@@ -26,6 +26,40 @@ export type OutcomeInputs = {
   mounts?: { path: string; table: string; chart: Node; index: number; family?: string; screen?: string; declaration?: Node | Node[] }[];
 };
 type Status = "satisfied" | "violation" | "unchecked";
+
+/** A reducer's chart as XState nests it. Its declaration names a child state
+ * by its path (`racing.closing`, a compound state's `initial` included) and
+ * every target by the path it lands on, so each child moves under its parent
+ * and each target becomes that path's id, `#workflow.<path>`. */
+export function reducerChart(spec: unknown): unknown {
+  const root = spec !== null && typeof spec === "object" && !Array.isArray(spec) ? spec as Record<string, unknown> : undefined;
+  const states = root?.states as Record<string, Record<string, unknown>> | undefined;
+  if (!root || !states || typeof states !== "object") return spec;
+  const id = (path: string) => `#workflow.${path}`;
+  const target = (arrow: unknown) => {
+    if (typeof arrow === "string") return { target: id(arrow) };
+    const value = arrow as Record<string, unknown>;
+    return typeof value?.target === "string" ? { ...value, target: id(value.target) } : arrow;
+  };
+  const arrows = (value: unknown) => Array.isArray(value) ? value.map(target) : target(value);
+  const parentOf = (name: string) => name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : undefined;
+  const node = (name: string): Record<string, unknown> => {
+    const state = states[name];
+    const children = Object.keys(states).filter((child) => parentOf(child) === name);
+    return {
+      ...state,
+      ...(state.on === undefined ? {} : { on: Object.fromEntries(Object.entries(state.on as Record<string, unknown>).map(([event, value]) => [event, arrows(value)])) }),
+      ...(state.always === undefined ? {} : { always: arrows(state.always) }),
+      ...(state.after === undefined ? {} : { after: Object.fromEntries(Object.entries(state.after as Record<string, unknown>).map(([delay, value]) => [delay, arrows(value)])) }),
+      ...(typeof state.initial === "string" ? { initial: state.initial.slice(name.length + 1) } : {}),
+      ...(children.length ? { states: Object.fromEntries(children.map((child) => [child.slice(name.length + 1), node(child)])) } : {}),
+    };
+  };
+  const top = Object.keys(states).filter((name) => parentOf(name) === undefined);
+  const initial = typeof root.initial === "string" ? root.initial.split(".")[0] : root.initial;
+  return { ...root, initial, states: Object.fromEntries(top.map((name) => [name, node(name)])) };
+}
+
 export type OutcomeObligation = {
   id: string; path: string; property: string; status: Status; reason: string; evidence: string[];
   oracleClass: "consistency" | "completeness" | "policy" | "domain";
@@ -233,7 +267,7 @@ export function evaluateOutcomes(inputs: OutcomeInputs, runtime: Pick<WorkflowOp
   }
   for (const [family, charts] of Object.entries({ cortex: inputs.cortex, machines: inputs.machines, reducers: inputs.reducers })) {
     for (const [name, chart] of Object.entries(charts ?? {})) {
-      obligations.push(...analyzeWorkflow(chart, `.pronto/check-inputs.json#${family}.${name}`, {
+      obligations.push(...analyzeWorkflow(family === "reducers" ? reducerChart(chart) : chart, `.pronto/check-inputs.json#${family}.${name}`, {
         ...runtime, entry: family === "cortex" && rec(rec(chart)?.meta)?.host !== "mecha" ? "declared" : "persisted",
         actors: inputs.cortexImplementations?.[name]?.actors, effects: inputs.effects,
         host: family === "cortex" && rec(rec(chart)?.meta)?.host !== "mecha" ? "omnishell" : "mecha",

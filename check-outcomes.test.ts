@@ -1,7 +1,7 @@
 import { assertEquals, assert } from "jsr:@std/assert@1.0.13";
 import { expandTemplates } from "../omnishell/expand-templates.ts";
 import { resolveMachineMarkup } from "../omnishell/interpreter/lint.ts";
-import { checkApp, evaluateOutcomes, loadOutcomeInputs, machineDeclarations, type OutcomeInputs } from "./check-outcomes.ts";
+import { checkApp, evaluateOutcomes, loadOutcomeInputs, machineDeclarations, type OutcomeInputs, reducerChart } from "./check-outcomes.ts";
 
 const app = new URL("../../apps/snapcards/", import.meta.url);
 const read = (path: string) => Deno.readTextFile(new URL(path, app));
@@ -297,4 +297,22 @@ Deno.test("fixed observation events need no producer state vocabulary", () => {
   assertEquals(outcomes().map((o) => o.status), ["violation"]);
   on.result = { guard: "valid", target: "done" };
   assertEquals(outcomes().map((o) => o.status), ["unchecked"]);
+});
+
+// A reducer names a child state by its path, and XState threw on apexrun's
+// duel: `racing.open`'s target `racing.closing` read as a child of `racing`
+// that the flat declaration never nested.
+Deno.test("a reducer's compound state is explored as XState nests it", () => {
+  const spec = { name: "race", initial: "waiting", states: {
+    waiting: { final: false, on: { start: { target: "racing" } } },
+    racing: { final: false, initial: "racing.open", on: {}, after: { "150000": [{ target: "abandoned" }] } },
+    "racing.open": { final: false, on: {}, always: [{ target: "racing.closing", guard: ["finishing"] }] },
+    "racing.closing": { final: false, on: {}, after: { "15000": [{ target: "abandoned" }] } },
+    abandoned: { final: true, on: {} },
+  } };
+  const nested = reducerChart(spec) as { states: Record<string, { initial?: string; states?: Record<string, unknown> }> };
+  assertEquals([nested.states.racing.initial, Object.keys(nested.states.racing.states!)], ["open", ["open", "closing"]]);
+  const report = evaluateOutcomes({ entities: {}, types: { types: {}, aliases: {} }, reducers: { race: spec } } as OutcomeInputs, {});
+  const reached = report.obligations.filter((o) => o.property === "workflow-control-completion").map((o) => o.id.slice(o.id.indexOf("#reducers.race:") + "#reducers.race:".length)).sort();
+  assertEquals(reached, ['"abandoned"', '"waiting"', '{"racing":"closing"}', '{"racing":"open"}']);
 });

@@ -29,8 +29,21 @@ export type MechaReducerMachine = {
   contracts?: Record<string, { reads: string[]; writes?: string[]; reason?: string }>;
   events: Record<string, { tier: "omnishell" | "mecha"; payload: Shape }>;
   mecha?: {ports?: MechaPortSql; locks: string; transitions: {phase: string; event: string; requires?: {sql: string; reason: string}[]; sql: string}[]};
-  states: Record<string, { final: boolean; always?: { target: string; guard?: string[]; reduce?: string }[]; on: Record<string, { target?: string; guard?: string[]; reduce?: string; requires?: { sql: string; reason: string }[] }> }>;
+  /** XState's `delays`: milliseconds, or the context field holding them. */
+  delays?: Record<string, number | string>;
+  /** A state named `a.b` is the child `b` of the compound state `a`, whose
+   * `initial` names the child (`a.b`) its entry lands in. */
+  states: Record<string, {
+    final: boolean;
+    initial?: string;
+    always?: { target: string; guard?: string[]; reduce?: string }[];
+    after?: Record<string, { target?: string; guard?: string[]; reduce?: string; reenter?: boolean; requires?: unknown; actions?: unknown }[]>;
+    on: Record<string, { target?: string; reenter?: boolean; guard?: string[]; reduce?: string; requires?: { sql: string; reason: string }[] }>;
+  }>;
 };
+
+/** Whether a machine starts timers: some state declares XState's `after`. */
+export const timed = (m: MechaReducerMachine) => Object.values(m.states).some(state => Object.keys(state.after ?? {}).length > 0);
 
 const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
@@ -61,8 +74,11 @@ export async function compileMechaReducer(
   if (!Number.isInteger(entropy) || entropy < 0 || entropy > 1024) throw new Error("invalid mecha entropy");
   if (spec.state.type !== "object" || spec.state.fields.phase?.type !== "string") throw new Error("mecha state requires a phase string");
   if (spec.view.type !== "object") throw new Error("mecha view requires an object");
-  if (!Object.hasOwn(spec.states, spec.initial)) throw new Error("mecha initial state is missing");
+  if (!Object.hasOwn(spec.states, spec.initial) || spec.states[spec.initial].initial !== undefined) throw new Error("mecha initial state is missing");
   for (const [name, state] of Object.entries(spec.states)) {
+    const parent = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : undefined;
+    if (parent !== undefined && !Object.hasOwn(spec.states, parent)) throw new Error(`mecha state ${name} has no parent ${parent}`);
+    if (state.initial !== undefined && (!Object.hasOwn(spec.states, state.initial) || !state.initial.startsWith(`${name}.`) || state.initial.slice(name.length + 1).includes("."))) throw new Error(`mecha state ${name} enters no child ${state.initial}`);
     if (state.final && (Object.keys(state.on).length || state.always?.length)) throw new Error(`mecha final state ${name} has transitions`);
     for (const arrow of state.always ?? []) {
       if (!Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
@@ -70,6 +86,19 @@ export async function compileMechaReducer(
     for (const [event, arrow] of Object.entries(state.on)) {
       if (!Object.hasOwn(spec.events, event)) throw new Error(`mecha undeclared event ${event}`);
       if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
+    }
+    for (const [delay, arrows] of Object.entries(state.after ?? {})) {
+      if (state.final) throw new Error(`mecha final state ${name} starts a timer`);
+      if (!/^(0|[1-9][0-9]{0,11})$/.test(delay)) {
+        const value = spec.delays?.[delay];
+        if (value === undefined) throw new Error(`mecha ${name} waits on delay ${delay}, which delays does not declare`);
+        if (typeof value === "string" && (spec.state.type !== "object" || spec.state.fields[value]?.type !== "integer")) throw new Error(`mecha delay ${delay} names ${value}, which is no integer the context holds`);
+        if (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`mecha delay ${delay} is not a duration`);
+      }
+      for (const arrow of arrows) {
+        if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
+        if (arrow.requires !== undefined || arrow.actions !== undefined) throw new Error(`mecha ${name}.after.${delay}: a timer's transition runs the rules' guards and actions, not the database's`);
+      }
     }
   }
   for (const event of Object.values(spec.events)) {
@@ -115,7 +144,11 @@ return JSON.parse(run(JSON.stringify(input)));
   const mecha = spec.mecha ?? {locks: "", transitions: []};
   const branches = mecha.transitions.map(t => {
     if (!spec.states[t.phase]?.on[t.event]) throw new Error("Mecha effect names an undeclared transition");
-    return `IF game.state->>'phase' = ${literal(t.phase)} AND request->'event'->>'kind' = ${literal(t.event)} THEN
+    // A compound state's transition is taken from any of its children that
+    // does not take the event itself.
+    if (Object.entries(spec.states).some(([name, state]) => name.startsWith(`${t.phase}.`) && state.on[t.event])) throw new Error(`mecha ${t.phase}.${t.event}: a child takes the event too, so its database guard or action cannot tell which ran`);
+    const phase = spec.states[t.phase].initial === undefined ? `game.state->>'phase' = ${literal(t.phase)}` : `starts_with(game.state->>'phase', ${literal(`${t.phase}.`)})`;
+    return `IF ${phase} AND request->'event'->>'kind' = ${literal(t.event)} THEN
       ${t.requires?.length ? `${t.requires.map((r, i) => `${i ? "ELSIF" : "IF"} (${r.sql}) IS NOT TRUE THEN
         reduced := jsonb_build_object('kind', 'rejected', 'reason', ${literal(r.reason)});
       `).join("")}ELSE
@@ -266,7 +299,6 @@ ${spec.public ? `  IF projected->'public' = 'null'::jsonb THEN
       FROM jsonb_populate_record(NULL::public.${spec.name}_public, (projected->'public') || jsonb_build_object('id', game.id::text)) r
       ON CONFLICT (id) DO UPDATE SET ${upsert(publicColumns) || `"id" = EXCLUDED."id"`};
   END IF;
-` : ""}${spec.ports?.wake ? `  PERFORM ${schema}.arm(game);
 ` : ""}END;
 $settle$;
 REVOKE ALL ON FUNCTION ${schema}.settle(${schema}.instance, jsonb) FROM PUBLIC;
@@ -336,7 +368,10 @@ BEGIN
       ${options.afterTransitionSql}
       game.state := reduced->'state';` : `RETURNING i.* INTO STRICT game;`}
 ${options.serverOnly ? "" : `      PERFORM ${schema}.settle(game, reduced);`}
-      answer := jsonb_build_object('kind', 'accepted');
+${timed(spec) ? `      -- The timers the step's entries started and its exits cancelled, each
+      -- measured from the step's time.
+      PERFORM ${schema}.arm(game.id, game.revision, reduced->'actions', now_ms);
+` : ""}      answer := jsonb_build_object('kind', 'accepted');
     ELSIF reduced->>'kind' = 'rejected' THEN
       answer := reduced;
     ELSE

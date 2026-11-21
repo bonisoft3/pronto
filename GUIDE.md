@@ -127,6 +127,33 @@ Only an owner deletes a shared row or names another owner, and is then its
 writer. A writer edits its grants unless `shared: {writersCanShare: false}`.
 What each mode compiles to, and why, is [access](docs/access.md).
 
+### Field behaviour
+
+Which fields any client may write is the field's, in Google's
+[AIP-203](https://google.aip.dev/203) words, as Drive marks a file's
+`modifiedTime` "Output only": the same for every caller, beside the roles
+that decide who writes a row.
+
+```cue
+fields: [
+	{name: "quote", type: "decimal", precision: 12, scale: 6, outputOnly: true},
+	{name: "currency", type: "string", immutable: true},
+]
+```
+
+`outputOnly` is set by the server alone: a value a client sends is cleared,
+never refused, so a client's insert takes the default and its update keeps
+the value. `immutable` is set when the row is created and never changed: an
+update stating the same value passes, and one changing it is refused as an
+invalid argument (400). A client is any role a token names but the
+service's; machines, computations, seeds, migrations and the service write
+both. A form, a chart's assign or effect, and a handler's
+update that would write either against its behaviour are refused at
+generate, and the store applies both before its optimistic row stands.
+Neither is a key's, a generated field's, a retired one's or a row machine's
+state field's, which a client moves the machine by writing, and a field is
+not both ([access](docs/access.md#field-behaviour)).
+
 ### Validations
 
 A rule a field or row CEL cannot state and a unique cannot encode is a

@@ -240,9 +240,9 @@ A command's id is derived from what it says (`instance/revision/kind`), as the
 arena's intents are, so the same gesture twice is one row and a gesture on a
 stale view is a stale-revision receipt, not a second effect. A domain refusal
 is a receipt on the row; a protocol violation is a 4xx and arrives as
-`refused`. Deadlines leave the client: a step that sets a machine's deadline
-arms the ticker's `machine_timer_tick` row, so a timeout and a lapsed presence
-lease fire on the server whether anyone polls or not.
+`refused`. Deadlines leave the client: a step that enters a state with an
+`after` arms the ticker's `machine_timer_tick` row, so a timeout and a lapsed
+presence lease fire on the server whether anyone polls or not.
 
 A Cortex state is hosted by a screen: navigating to it mounts the child's
 regions and leaving unmounts them, which is Cortex's lifetime rule, so the

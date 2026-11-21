@@ -13,6 +13,7 @@ export function declaredMachine(
     view,
     public: shown,
     contracts,
+    delays,
     events,
     states,
   }: Record<string, unknown>,
@@ -28,6 +29,7 @@ export function declaredMachine(
     view,
     public: shown,
     contracts,
+    delays,
     events,
     states,
   };

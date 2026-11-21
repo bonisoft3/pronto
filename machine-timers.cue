@@ -11,13 +11,15 @@ import (
 	out:  [if T.code.state.mecha.rows != _|_ for _, m in T.code.state.mecha.rows if m._timed {m}]
 }
 
-// A Mecha machine whose phases hold a deadline arms the ticker as they are
-// entered (mecha-ports.ts); one already waiting in such a phase when timers
-// are adopted has no schedule yet.
+// A Mecha machine some state of which starts XState timers (`after`): its
+// steps arm the ticker as they enter such a state (mecha-ports.ts), so an
+// instance already waiting in one when timers are adopted has no schedule yet.
+// Only adoption is checked, before the machine's arm is installed: once a
+// timer fired, as XState's one-shot, its state holds none until entered again.
 #TimedReducers: {
 	let T = self
 	code: _
-	out:  [if T.code.state.mecha.reducers != _|_ for _, h in T.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h.reducer}]
+	out:  [if T.code.state.mecha.reducers != _|_ for _, h in T.code.state.mecha.reducers if len([for _, st in h.reducer.states if st.after != _|_ {st}]) > 0 {h.reducer}]
 }
 
 #MachineTimerState: {
@@ -30,15 +32,13 @@ import (
 		if len(timers) > 0 {
 			timerCheck: strings.Join(list.Concat([[for m in C._timed {
 				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0], signals: [if C.code.state.signals != _|_ {C.code.state.signals}, {}][0], step: (#steps & {code: C.code}).machines})._timerCheck
-			}], [for m in C._reducers {
-				let w = m.ports.wake
+			}], [for m in C._reducers for sn, st in m.states if st.after != _|_ for delay, _ in st.after {
 				"""
 					DO $$ BEGIN
-					  IF EXISTS (SELECT FROM hybrid_\(m.name).instance i
-					    WHERE i.state->>'phase' IN (\(strings.Join([for ph in w.phases {(#sqlLit & {v: ph}).out}], ", "))) AND (i.state->>\((#sqlLit & {v: w.deadline}).out))::bigint > 0
+					  IF to_regprocedure('hybrid_\(m.name).arm(uuid, bigint, jsonb, bigint)') IS NULL AND EXISTS (SELECT FROM hybrid_\(m.name).instance i WHERE \([if st.initial != _|_ {"starts_with(i.state->>'phase', \((#sqlLit & {v: sn + "."}).out))"}, "i.state->>'phase' = \((#sqlLit & {v: sn}).out)"][0])
 					      AND NOT EXISTS (SELECT FROM public.schedule s WHERE s.emits_entity = 'machine_timer_tick'
-					        AND s.emits_values @> jsonb_build_object('machine', '\(m.name)', 'row', jsonb_build_object('id', i.id::text)))) THEN
-					    RAISE EXCEPTION 'machine \(m.name) has instances waiting on a deadline the ticker was never given';
+					        AND s.emits_values @> jsonb_build_object('machine', '\(m.name)', 'row', jsonb_build_object('id', i.id::text), 'state', \((#sqlLit & {v: sn}).out), 'delay', \((#sqlLit & {v: delay}).out)))) THEN
+					    RAISE EXCEPTION 'machine \(m.name) has instances in \(sn) whose \(delay) timer the ticker was never given';
 					  END IF;
 					END $$;
 					"""
@@ -71,6 +71,37 @@ import (
 		"""
 }
 
+// A row machine's time: the transaction's, the same on every read in it, so
+// an entry, its actions and the timers it arms agree on it. It is the one
+// place a machine reads the clock; a test database replaces it to move time.
+#machineClockSql: """
+	CREATE OR REPLACE FUNCTION machine_clock() RETURNS timestamptz
+	LANGUAGE sql STABLE SET search_path = pg_catalog AS $clock$
+	SELECT transaction_timestamp();
+	$clock$;
+	REVOKE ALL ON FUNCTION machine_clock() FROM PUBLIC;
+	"""
+
+// The instant a delay entered at `entered_at` is due: milliseconds, or the
+// duration the entered row holds, read once as XState reads a delay.
+#TimerDueSql: {
+	let D = self
+	machine: _
+	state:   string
+	delay:   string
+	_value: [if (D.delay & =~"^[0-9]+$") != _|_ {D.delay}, D.machine.delays[D.delay]][0]
+	_field: [if (D._value & string) != _|_ if (D._value & =~"^[0-9]+$") == _|_ {D._value}, null][0]
+	guard: [if D._field != null {"""
+			    IF NEW."\(D._field)" IS NULL THEN
+			      RAISE EXCEPTION 'machine % state % waits after %, whose duration % is null', \((#sqlLit & {v: D.machine.name}).out), '\(D.state)', '\(D.delay)', '\(D._field)';
+			    END IF;
+			"""}, ""][0]
+	// The ticker names an instant in milliseconds, so a duration finer than
+	// one is due at the next: never earlier than it asks, and an instant a
+	// tick can name exactly.
+	out: [if D._field != null {"date_trunc('milliseconds', entered_at + NEW.\"\(D._field)\" + interval '999 microseconds')"}, "entered_at + interval '\(D._value) milliseconds'"][0]
+}
+
 #MachineTimerSql: {
 	let T = self
 	machine:      _
@@ -93,9 +124,12 @@ import (
 	_arms: [for state, delays in _delays {
 		"""
 			  IF NEW."\(_field)" = '\(state)' THEN
-			\(strings.Join([for delay, _ in delays {"""
+			\(strings.Join([for delay, _ in delays {
+				let due = #TimerDueSql & {machine: _m, "state": state, "delay": delay}
+				"""
+				\(due.guard)
 				    INSERT INTO public.schedule (name, due_at, max_lateness_seconds, emits_entity, emits_values)
-				      VALUES ('machine:' || gen_random_uuid()::text, entered_at + interval '\(delay) milliseconds',
+				      VALUES ('machine:' || gen_random_uuid()::text, \(due.out),
 				        2147483647, 'machine_timer_tick', jsonb_build_object('machine', \(_name), 'row', \(_newKey), 'state', '\(state)', 'delay', '\(delay)'));
 				"""}], "\n"))
 			  END IF;
@@ -155,7 +189,7 @@ import (
 		DECLARE
 		  timer_delay text;
 		  timer_branch integer;
-		  entered_at timestamptz := date_trunc('milliseconds', clock_timestamp());
+		  entered_at timestamptz := date_trunc('milliseconds', machine_clock());
 		BEGIN
 		  -- A nested AFTER write cannot silently replace the visit being armed.
 		  IF TG_OP = 'DELETE' THEN
@@ -195,8 +229,10 @@ import (
 		  SELECT r.* INTO held FROM "\(T.table)" r WHERE \(_match) FOR UPDATE;
 		  IF NOT FOUND OR held."\(_field)" IS DISTINCT FROM NEW.state THEN RETURN NEW; END IF;
 		  -- Lock the owner before rechecking cancellation, as transitions do.
+		  -- The tick's instant is the only time a fire reads: the ticker found
+		  -- it due.
 		  PERFORM 1 FROM public.schedule s WHERE s.name = NEW.schedule AND s.emits_entity = 'machine_timer_tick'
-		    AND s.due_at = NEW.tick_at AND s.due_at <= clock_timestamp()
+		    AND s.due_at = NEW.tick_at
 		    AND s.emits_values = jsonb_build_object('machine', NEW.machine, 'row', NEW."row", 'state', NEW.state, 'delay', NEW.delay);
 		  IF NOT FOUND THEN RETURN NEW; END IF;
 		\(strings.Join(_choices, "\n"))

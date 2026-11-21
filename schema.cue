@@ -488,6 +488,19 @@ import (
 	// SQL expression; DDL: GENERATED ALWAYS AS (<expr>) STORED. Generated
 	// fields emit no NOT NULL/DEFAULT and never appear in forms.
 	generated?: string
+	// Field behaviour, in Google AIP-203's words (https://google.aip.dev/203),
+	// the same for every client whatever its role, as Drive marks a file's
+	// modifiedTime "Output only". An output-only field is set by the server
+	// alone: a value a client sends is cleared, never refused, so a client
+	// insert takes the default and a client update keeps the value. An
+	// immutable field is set when its row is created and never changed: a
+	// client update stating the same value passes, and one changing it is
+	// refused as an invalid argument. The server's writers (machines,
+	// computations, seeds, migrations, the service) write both. Neither is a
+	// key's, a generated field's, a retired one's or a row machine's state
+	// field's, and a field is not both.
+	outputOnly?: bool
+	immutable?:  bool
 	// The one statement of the field's constraint, `this` bound to the field
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
@@ -891,12 +904,11 @@ import (
 	// Scheduled pipelines: a generate input ticks every `interval` and the
 	// action mutates `to` rows matched by `filter` (PostgREST fragment;
 	// tokens {cutoff} and {nowts} resolve to bloblang metadata at runtime).
-	interval?: string
+	interval?: #PipelineDuration
 	action?:   "delete" | "update"
 	filter?:   string
-	// Go-style duration of h/m/s units (e.g. "168h", "30m"); required when
-	// filter uses {cutoff}: cutoff = now - window.
-	window?: string
+	// Required when filter uses {cutoff}: cutoff = now - window.
+	window?: #PipelineDuration
 	set?:    {[string]: bool | int | string} // PATCH body for action "update"
 	// A cdc pipeline's browser twin of its bloblang: a pure ES module, rows →
 	// sink row, declared and served. The page's cluster runs no stream, so
@@ -907,6 +919,11 @@ import (
 		shim: *"pipelines/\(name).browser.js" | string
 	}
 }
+
+// A pipeline's period: ISO 8601's duration in whole hours, minutes and
+// seconds (PT1H, PT30M, PT1H30M), as the duration type spells one; a day or a
+// month is refused, having no fixed length.
+#PipelineDuration: =~"^PT([0-9]+H)?([0-9]+M)?([0-9]+S)?$" & !="PT"
 
 // The columns mecha writes on a tick, for the entity a #Schedule emits into.
 // Spelled here rather than injected at emit so the entity a reviewer reads is
@@ -1081,7 +1098,9 @@ import (
 #MechaState: {
 	type?: "final" | "normal"
 	on?: [string]~(Event,_):              #MechaTransitionValue
-	after?: [=~"^(0|[1-9][0-9]{0,11})$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
+	// XState's after: a key is milliseconds, or a name the machine's delays
+	// gives.
+	after?: [=~"^(0|[1-9][0-9]{0,11}|[a-z][a-zA-Z0-9_]*)$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
 	// XState's invoke, whose actor is an external effect's handler: entering
 	// the state claims the effect, and only its outcome leaves.
 	invoke?: {
@@ -1112,9 +1131,12 @@ import (
 		[for _, tr in M._on for act in tr.actions {act}],
 		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
-		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		// A lone arrow's actions are asked of the arrow itself: wrapped in a
+		// list first, a missing `actions` stalls CUE 0.18.0-rc.4 without end
+		// when the machine is read under an inline (#emit & {...}).files.
+		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for acts in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {[for t in tr if t.actions != _|_ {t.actions}]}, if tr.actions != _|_ {[tr.actions]}, []][0] for a in [if (acts & [...]) != _|_ {acts}, [acts]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for acts in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {[for t in tr if t.actions != _|_ {t.actions}]}, if tr.actions != _|_ {[tr.actions]}, []][0] for a in [if (acts & [...]) != _|_ {acts}, [acts]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for _, tr in {done: st.invoke.onDone, failed: st.invoke.onError} for acts in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {[for t in tr if t.actions != _|_ {t.actions}]}, if tr.actions != _|_ {[tr.actions]}, []][0] for a in [if (acts & [...]) != _|_ {acts}, [acts]][0] {a}],
 	])
 	hatches: list.SortStrings([for hn, _ in {
 		for a in M._actions if a.hatch != _|_
@@ -1140,6 +1162,10 @@ import (
 		if t.guard != _|_ {guard: t.guard}
 	}]
 	_timed: len(_timers) > 0
+
+	// XState's delays: a named delay is milliseconds, or the row's duration
+	// field read as the state is entered. A delay is never a date.
+	delays?: [=~"^[a-z][a-zA-Z0-9_]*$"]: (int & >=0 & <=999999999999) | string
 
 	timing?:  "BEFORE" | "AFTER"
 	field?:   string
@@ -2663,14 +2689,32 @@ import (
 	// The XState a Mecha machine cannot run is refused rather than read as
 	// something else: its step is its reducer's, so it invokes nothing, and an
 	// event names one transition.
-	_mechaViolations: list.Concat([[if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers for sName, st in h.machine.config.states for v in list.Concat([
+	// Each state is checked where it stands: a compound state's children by
+	// their path (`racing.closing`), beside the parent whose events they take.
+	_mechaViolations: list.Concat([[if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers for sName, node in {
+		for n, s in h.machine.config.states {
+			(n): {st: s, parent: {}}
+			if s.states != _|_ for c, cs in s.states {"\(n).\(c)": {st: cs, parent: s}}
+		}
+	}
+	let st = node.st for v in list.Concat([
 		[if st.invoke != _|_ {"mecha \(hName).\(sName): a Mecha machine invokes nothing"}],
 		[if st.on != _|_ for ev, tv in st.on if (tv & [...]) != _|_ if len(tv) != 1 {"mecha \(hName).\(sName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"}],
 		// XState takes the machine's transition when the state's own guard
 		// refuses; one event names one transition here, so it is the state's
 		// or the machine's.
 		[if h.machine.config.on != _|_ if st.on != _|_ for ev, _ in st.on if h.machine.config.on[ev] != _|_ {"mecha \(hName).\(sName).on.\(ev): the machine takes \(ev) in every state; a state does not take it as well"}],
-	]) {v}], [if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
+		// Nor does a child take an event the state it is a child of takes.
+		[if node.parent.on != _|_ if st.on != _|_ for ev, _ in st.on if node.parent.on[ev] != _|_ {"mecha \(hName).\(sName).on.\(ev): the state it is a child of takes \(ev); a child does not take it as well"}],
+		// XState reads a delay that is not a number as a name in `delays`.
+		[if st.after != _|_ for delay, _ in st.after if !(delay =~ "^[0-9]+$") if h.machine.setup.delays == _|_ || h.machine.setup.delays[delay] == _|_ {"mecha \(hName).\(sName).after.\(delay): no delay \(delay) in setup.delays"}],
+		[if st.after != _|_ if st.type != _|_ if st.type == "final" {"mecha \(hName).\(sName): a final state starts no timer"}],
+		// One level of XState's nesting: a compound state's children, atomic.
+		[if st.states != _|_ for cName, ct in st.states if ct.states != _|_ {"mecha \(hName).\(sName).\(cName): a child state holds no states of its own"}],
+		[if st.type != _|_ if st.type == "parallel" {"mecha \(hName).\(sName): a Mecha machine has no parallel states"}],
+	]) {v}], [if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.setup.ports != _|_ if h.machine.setup.ports.wake != _|_ {
+		"mecha \(hName).setup.ports.wake: a timer is a state's after, its delay a number of milliseconds or a name in setup.delays"
+	}],[if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
 		"mecha \(hName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"
 	}]])
 	_mechaRefusal: [if len(_mechaViolations) == 0 {true}, _mechaViolations[0]][0] & true
@@ -2739,6 +2783,13 @@ import (
 				[for f in e.fields if f.name == m.field if f.retired {
 					"machine \(mn) field \(en).\(m.field) is retired and cannot hold transitions"
 				}],
+				// A client moves the machine by writing its state field, which the
+				// interpreter reads as the target: a field a client's value is cleared
+				// from, or may not change, would make every such move a silent no-op
+				// or a refusal. A Cortex machine's events arrive as command rows.
+				[if m.cortex == _|_ for f in e.fields if f.name == m.field for b in ["outputOnly", "immutable"] if f[b] != _|_ if f[b] {
+					"machine \(mn) field \(en).\(m.field) is \(b) and cannot hold transitions: a client moves the machine by writing it"
+				}],
 				[for f in e.fields if f.name == m.field if f.default != _|_ if strings.TrimSpace(f.default) != "'"+strings.Replace(m.initial, "'", "''", -1)+"'" {
 					"machine \(mn) initial \(m.initial) disagrees with \(en).\(m.field) default \(f.default)"
 				}],
@@ -2747,6 +2798,12 @@ import (
 				}],
 				[for i, row in e.seed if row[m.field] != _|_ if !list.Contains([for state, _ in m.states {state}], row[m.field]) {
 					"machine \(mn) seed \(en)[\(i)].\(m.field) value \(row[m.field]) is not a state"
+				}],
+				// A seed restores its row standing in a state, entering nothing:
+				// a timer or an invocation the state would start, nothing starts.
+				[for i, row in e.seed if row[m.field] != _|_ if row[m.field] != m.initial if m.states[row[m.field]] != _|_
+				if m.states[row[m.field]].after != _|_ || m.states[row[m.field]].invoke != _|_ {
+					"machine \(mn) seed \(en)[\(i)] stands in \(row[m.field]), whose after or invoke a seed does not start: seed it in a state without either"
 				}],
 			])
 		},
@@ -2771,6 +2828,17 @@ import (
 		}],
 		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.states != _|_ for sn, st in m.states if st.type != _|_ if st.type == "final" if st.after != _|_ {
 			"machine \(mn) final state \(sn) cannot declare after"
+		}],
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for t in m._timers if (t.delay & =~"^[0-9]+$") == _|_ if m.delays == _|_ || m.delays[t.delay] == _|_ {
+			"machine \(mn) state \(t.state) waits after \(t.delay), which its delays does not name"
+		}],
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.delays != _|_ for dn, d in m.delays if (d & string) != _|_
+		for en, e in A.state.entities if en == m.entity || e.table == m.entity
+		let found = [for f in e.fields if f.name == d {f}]
+		for f in [if len(found) > 0 {found[0]}, {name: d, type: "absent"}][:1]
+		if f.type != "duration" {
+			[if f.type == "absent" {"machine \(mn) delay \(dn) reads \(d), which \(en) does not declare"},
+				"machine \(mn) delay \(dn) reads \(d), a \(f.type): a delay is a duration field, never a date"][0]
 		}],
 		[if len(A._timedMachines) > 0 for en, e in A.state.entities if e.table == "schedule" || e.table == "machine_timer_tick" {
 			"timed machines reserve table \(e.table), declared by \(en)"
@@ -3339,6 +3407,34 @@ import (
 		}],
 	])
 	_secretRefusal: [if len(_secretViolations) == 0 {true}, _secretViolations[0]][0] & true
+
+	// Field behaviour (#Field.outputOnly, #Field.immutable, AIP-203). A key is
+	// the name a client creates its row by, a generated or retired field is
+	// written by nobody already, and output-only already admits no client
+	// write, immutable or not. A form is a client's write: it names no
+	// output-only field, and an update form no immutable one.
+	_behaviorFields: [for en, e in A.state.entities for f in e.fields
+		for b in ["outputOnly", "immutable"] if f[b] != _|_ if f[b] {entity: en, field: f, behavior: b}]
+	_behaviorViolations: list.Concat([
+		[for s in _behaviorFields for k in ["pk", "retired"] if s.field[k] {
+			"entity \(s.entity) field \(s.field.name) is \(s.behavior), and is \([if k == "pk" {"a primary key: a client names the key it creates its row by"}, "retired: nothing writes it"][0])"
+		}],
+		[for s in _behaviorFields if s.field.generated != _|_ {
+			"entity \(s.entity) field \(s.field.name) is \(s.behavior), and is generated: PostgreSQL computes it, and nobody writes it"
+		}],
+		[for s in _behaviorFields if s.behavior == "outputOnly" if s.field.immutable != _|_ if s.field.immutable {
+			"entity \(s.entity) field \(s.field.name) is outputOnly and immutable: a field no client writes has no change of a client's to refuse"
+		}],
+		[for sn, s in A.surface.screens for fm in s.forms for en, e in A.state.entities if en == fm.entity || e.table == fm.entity
+		for ff in fm.fields for f in e.fields if f.name == ff.name if f.outputOnly != _|_ if f.outputOnly {
+			"screen \(sn) form \(fm.id) writes \(en).\(f.name), which is outputOnly: the server sets it, and clears a value a client sends"
+		}],
+		[for sn, s in A.surface.screens for fm in s.forms if fm.action == "update" for en, e in A.state.entities if en == fm.entity || e.table == fm.entity
+		for ff in fm.fields for f in e.fields if f.name == ff.name if f.immutable != _|_ if f.immutable {
+			"screen \(sn) form \(fm.id) updates \(en).\(f.name), which is immutable: it is set when the row is created and never changed"
+		}],
+	])
+	_behaviorRefusal: [if len(_behaviorViolations) == 0 {true}, _behaviorViolations[0]][0] & true
 
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([

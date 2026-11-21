@@ -118,7 +118,7 @@ and the store's outbox replays it under the same key; a gesture on a stale view
 is a stale-revision receipt. A creation is keyed by its instance's id, drawn by
 the terminal. A domain refusal is a receipt on the row; a protocol violation is
 a 4xx and arrives at the fold as `refused`. Deadlines are armed on the ticker
-as a timed phase is entered, so a timeout and a lapsed lease fire whether
+as a state with an `after` is entered, so a timeout and a lapsed lease fire whether
 anyone is reading.
 
 A seat's columns past the protocol's are its view's fields of the same name,
@@ -131,7 +131,7 @@ since a server table's columns ride the change feed, which has no `json`.
 The fold draws a lease key once per tab and holds it; renewing is a `then` on
 the terminal's clock. A fold's seat is held through its waits, so the renewal
 sits on a seat of its own and the screen's other folds never wait a beat for
-it. A tab that closes stops renewing, and the machine's deadline drops it.
+it. A tab that closes stops renewing, and the machine's timer drops it.
 
 ### Sync
 

@@ -17,18 +17,18 @@ import "strings"
 	locks:   *[] | [...#MechaReadLock]
 	checks:  *[] | [...#MechaCheck]
 }
-#MechaWake: {phases: [string, ...string], deadline: string, event: string}
 #MechaPorts: {
 	admission?: #MechaAdmission
 	join?:      {phases: [string, ...string], event: string} & ({seat: string} | {seats: string, membersPayload: string})
-	// The phases that hold a deadline, armed on the ticker as they are entered.
-	wake?: #MechaWake
+	// No port times a machine: a timer is a state's XState `after`. #App
+	// refuses this one by name (_mechaViolations), pointing there.
+	wake?: _
 	reads?: [string]: {params: [...#MechaParam], returns: "boolean" | "jsonb", sql: string}
 	// A reader's tab holds the machine open by a lease row (`<machine>_lease`):
 	// writing it admits the reader and delivers `touch`, deleting it `leave`.
 	// `held` names the state field listing the live sessions by `id`: a row
-	// the machine no longer holds is pruned after a touch and after the
-	// ticker's wake, and its deletion delivers nothing.
+	// the machine no longer holds is pruned after a touch and after a timer
+	// fires, and its deletion delivers nothing.
 	lease?: {touch: string, leave: string, held: string}
 }
 

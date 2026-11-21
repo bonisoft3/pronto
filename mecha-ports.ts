@@ -1,11 +1,10 @@
-import type { MechaReducerMachine } from "./mecha-reducer.ts";
+import { type MechaReducerMachine, timed } from "./mecha-reducer.ts";
 
 type Param = {name: string; type: "uuid" | "text" | "jsonb" | "bigint"; default?: string | null};
 type Admission = {name: string; params: Param[]; id: string; checks: {sql: string; reason: string; mode: "reject" | "error"}[]};
 export type MechaPorts = {
   admission?: Admission;
   join?: {seat?: string; seats?: string; membersPayload?: string; phases: string[]; event: string};
-  wake?: {phases: string[]; deadline: string; event: string};
   reads?: Record<string, {params: Param[]; returns: "boolean" | "jsonb"; sql: string}>;
   lease?: {touch: string; leave: string; held: string};
 };
@@ -50,8 +49,9 @@ export function compileMechaPorts(machines: Record<string, MechaReducerMachine>)
   };
   for (const m of Object.values(machines)) {
     const s = schema(m.name), p = m.ports ?? {}, compiled = m.mecha?.ports;
-    for (const phase of [...(p.join?.phases ?? []), ...(p.wake?.phases ?? [])]) {
-      if (!m.states[phase]) throw new Error(`${m.name}: undeclared admission/wake phase ${phase}`);
+    if ((p as {wake?: unknown}).wake !== undefined) throw new Error(`${m.name}: ports.wake is no timer; a state's after is, its delay a number of milliseconds or a name in delays`);
+    for (const phase of p.join?.phases ?? []) {
+      if (!m.states[phase]) throw new Error(`${m.name}: undeclared join phase ${phase}`);
     }
     if (m.initialize) {
       output.push(fn(`${s}.publish`, roomParam, "void", `
@@ -66,13 +66,14 @@ seeded := ${s}.step(jsonb_build_object('initialize', true, 'payload', input,
  'context', jsonb_build_object('tier', 'mecha', 'now', coalesce(at, ${s}.clock())), 'viewers', '[]'::jsonb));
 INSERT INTO ${s}.instance (id, version, state) VALUES (instance_id, ${m.version}, seeded->'state');
 INSERT INTO ${s}.member (instance_id, actor, seat) SELECT instance_id, value::uuid, key FROM jsonb_each_text(participants);
-PERFORM ${s}.publish(instance_id);`, "seeded jsonb;"));
+${timed(m) ? `PERFORM ${s}.arm(instance_id, 0, seeded->'actions', coalesce(at, ${s}.clock()));
+` : ""}PERFORM ${s}.publish(instance_id);`, "seeded jsonb;"));
     }
     if (p.admission) {
       if (!m.initialize || !compiled?.admission) throw new Error(`${m.name}: admission requires initialization and compiled expressions`);
       const a = p.admission, expressions = compiled.admission;
       if (a.params.some(param => ["current_actor", "admission_id", "request_value", "prior", "answer"].includes(param.name))) throw new Error("admission parameter shadows an execution variable");
-      if (["step", "settle", "dispatch", "deliver", "publish", "spawn", "wake", "arm", "join", "command", "open", "lease", "prune", "sealed"].includes(a.name)) throw new Error("admission name shadows a Mecha primitive");
+      if (["step", "settle", "dispatch", "deliver", "publish", "spawn", "arm", "fire", "join", "command", "open", "lease", "prune", "sealed"].includes(a.name)) throw new Error("admission name shadows a Mecha primitive");
       if (p.lease && a.params.length) throw new Error(`${m.name}: a leased machine's admission takes no arguments`);
       output.push(`CREATE TABLE IF NOT EXISTS ${s}.admission_receipt (id uuid PRIMARY KEY, actor uuid NOT NULL, request jsonb NOT NULL, result jsonb, now bigint NOT NULL);`);
       const paramsJson = `jsonb_build_object(${a.params.flatMap(param => [lit(param.name), ident(param.name)]).join(", ")})`;
@@ -195,49 +196,52 @@ $lease$;
 REVOKE ALL ON FUNCTION ${s}.lease() FROM PUBLIC;
 CREATE OR REPLACE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.${m.name}_lease FOR EACH ROW EXECUTE FUNCTION ${s}.lease();`);
     }
-    if (p.wake) {
-      event(m, p.wake.event);
-      if (m.state.type !== "object" || m.state.fields[p.wake.deadline]?.type !== "integer") throw new Error(`${m.name}: unknown deadline field`);
-      const owner = `jsonb_build_object('machine', ${lit(m.name)}, 'row', jsonb_build_object('id', game.id::text))`;
-      // `due` is the instant the ticker found due, and meets the deadline
-      // whatever the database's clock reads. The step runs when the tick was
-      // decided, its transaction's clock(), and never before `due`: a late
-      // tick that ran at `due` would set the next deadline in the past.
-      output.push(fn(`${s}.wake`, [...roomParam, {name: "due", type: "bigint"}], "void", `
-PERFORM ${s}.hold_instance(instance_id);
-SELECT * INTO STRICT game FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
-IF game.state->>'phase' IN (${p.wake.phases.map(lit).join(", ")}) AND (game.state->>${lit(p.wake.deadline)})::bigint > 0
- AND (game.state->>${lit(p.wake.deadline)})::bigint <= due THEN
- PERFORM ${s}.deliver(instance_id, jsonb_build_object('kind', ${lit(p.wake.event)}, 'payload', '{}'::jsonb), greatest(due, ${s}.clock()));
-${p.lease ? ` PERFORM ${s}.prune(instance_id);\n` : ""}-- A tick for an earlier deadline, one since cleared, or a phase since left,
--- arms what the instance holds now: the fire that brought it took its schedule.
-ELSE PERFORM ${s}.arm(game); END IF;`, `game ${s}.instance;`));
-      // A deadline is the ticker's: entering a phase that holds one arms a
-      // one-shot schedule named by the revision that armed it, and every
-      // settle replaces it.
-      output.push(`CREATE OR REPLACE FUNCTION ${s}.arm(game ${s}.instance) RETURNS void
+    if (timed(m)) {
+      const owner = `jsonb_build_object('machine', ${lit(m.name)}, 'row', jsonb_build_object('id', instance_id::text))`;
+      const timer = `${owner} || jsonb_build_object('state', timer[2], 'delay', timer[1])`;
+      // A timer is the ticker's: a state's entry raises its delayed events,
+      // each a one-shot schedule due its delay after the step that entered
+      // it and named by that step's revision, and its exit cancels them.
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.arm(instance_id uuid, revision bigint, actions jsonb, at bigint) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $arm$
-DECLARE deadline bigint := (game.state->>${lit(p.wake.deadline)})::bigint;
+DECLARE action jsonb; timer text[];
 BEGIN
-  DELETE FROM public.schedule WHERE emits_entity = 'machine_timer_tick' AND emits_values @> ${owner};
-  IF game.state->>'phase' IN (${p.wake.phases.map(lit).join(", ")}) AND deadline > 0 THEN
-    INSERT INTO public.schedule (name, due_at, max_lateness_seconds, emits_entity, emits_values)
-      VALUES ('machine:' || ${lit(m.name)} || ':' || game.id::text || ':' || game.revision::text, to_timestamp(deadline / 1000.0), 2147483647, 'machine_timer_tick',
-        ${owner} || jsonb_build_object('state', game.state->>'phase', 'delay', deadline::text));
-  END IF;
+  FOR action IN SELECT value FROM jsonb_array_elements(coalesce(actions, '[]'::jsonb)) LOOP
+    timer := regexp_match(coalesce(action->'params'->>'id', action->'params'->>'sendId'), '^xstate\\.after\\.([^.]+)\\.(.+)$');
+    IF timer IS NULL THEN RAISE EXCEPTION 'unexpected action %', action; END IF;
+    IF action->>'type' = 'xstate.cancel' THEN
+      DELETE FROM public.schedule WHERE emits_entity = 'machine_timer_tick' AND emits_values @> (${timer});
+    ELSIF action->>'type' = 'xstate.raise' THEN
+      INSERT INTO public.schedule (name, due_at, max_lateness_seconds, emits_entity, emits_values)
+        VALUES ('machine:' || ${lit(m.name)} || ':' || instance_id::text || ':' || revision::text || ':' || (action->'params'->>'id'),
+          to_timestamp((at + (action->'params'->>'delay')::bigint) / 1000.0), 2147483647, 'machine_timer_tick', ${timer});
+    ELSE RAISE EXCEPTION 'unexpected action %', action;
+    END IF;
+  END LOOP;
 END;
 $arm$;
-REVOKE ALL ON FUNCTION ${s}.arm(${s}.instance) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ${s}.arm(uuid, bigint, jsonb, bigint) FROM PUBLIC;
 CREATE OR REPLACE FUNCTION ${s}.fire() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $fire$
+DECLARE instance_id uuid;
 BEGIN
   PERFORM ${s}.serial();
   IF NEW.machine <> ${lit(m.name)} OR NEW.late THEN RETURN NEW; END IF;
-  -- Its players first: a step holding them may be re-arming this schedule.
-  PERFORM ${s}.hold_instance((NEW."row"->>'id')::uuid);
-  DELETE FROM public.schedule WHERE name = NEW.schedule;
-  PERFORM ${s}.wake((NEW."row"->>'id')::uuid, round(extract(epoch FROM NEW.tick_at) * 1000)::bigint);
-  RETURN NEW;
+  instance_id := (NEW."row"->>'id')::uuid;
+  -- Its players, then the instance, as a step takes them: a step that left
+  -- the timer's state has cancelled its schedule by the time both are held.
+  PERFORM ${s}.hold_instance(instance_id);
+  PERFORM 1 FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  DELETE FROM public.schedule WHERE name = NEW.schedule AND emits_entity = 'machine_timer_tick';
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  -- The tick's instant is when the ticker found the delay met, whatever the
+  -- database's clock reads. The step runs when the tick was decided, its
+  -- transaction's clock(), and never before that instant: a late tick run at
+  -- the instant would start the next state's timers in the past.
+  PERFORM ${s}.deliver(instance_id, jsonb_build_object('kind', 'xstate.after.' || NEW.delay || '.' || NEW.state, 'payload', '{}'::jsonb),
+    greatest(round(extract(epoch FROM NEW.tick_at) * 1000)::bigint, ${s}.clock()));
+${p.lease ? `  PERFORM ${s}.prune(instance_id);\n` : ""}  RETURN NEW;
 END;
 $fire$;
 REVOKE ALL ON FUNCTION ${s}.fire() FROM PUBLIC;

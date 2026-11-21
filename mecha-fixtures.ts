@@ -45,3 +45,23 @@ export async function fixture() {
   const rules = await Deno.readTextFile(new URL("testdata/mecha/turn.js", import.meta.url));
   return { spec, rules, compiled: await compileMechaReducer(spec, rules, terminal) };
 }
+
+/** A turn clock (testdata/mecha-timer): a state whose XState `after` waits on
+ * a delay read off its context, its rules, and both compiled. */
+export async function timerFixture() {
+  const result = await run("cue", ["export", "./plugins/pronto/testdata/mecha-timer", "-e", "reducer"]);
+  if (!result.ok) throw new Error(result.err);
+  const spec: MechaReducerMachine = JSON.parse(result.out);
+  const rules = await Deno.readTextFile(new URL("testdata/mecha-timer/clock.js", import.meta.url));
+  return { spec, rules, compiled: await compileMechaReducer(spec, rules, terminal) };
+}
+
+/** A race (testdata/mecha-nested): a compound state whose own timer keeps
+ * running while its children hold theirs, its rules, and both compiled. */
+export async function nestedFixture() {
+  const result = await run("cue", ["export", "./plugins/pronto/testdata/mecha-nested", "-e", "reducer"]);
+  if (!result.ok) throw new Error(result.err);
+  const spec: MechaReducerMachine = JSON.parse(result.out);
+  const rules = await Deno.readTextFile(new URL("testdata/mecha-nested/race.js", import.meta.url));
+  return { spec, rules, compiled: await compileMechaReducer(spec, rules, terminal) };
+}

@@ -29,9 +29,9 @@ Deno.test("Mecha ports refuse unresolved composition and invalid authority befor
   const {spec} = await fixture();
   const compile = (machine: MechaReducerMachine) => compileMechaPorts({[machine.name]: machine});
   assertThrows(() => compile({...spec, ports: {join: {seat: "b", phases: ["playing"], event: "play"}}}), Error, "initialization");
-  assertThrows(() => compile({...spec, ports: {wake: {phases: ["missing"], deadline: "deadline", event: "timeout"}}}), Error, "undeclared");
-  assertThrows(() => compile({...spec, ports: {wake: {phases: ["playing"], deadline: "phase", event: "timeout"}}}), Error, "deadline");
-  assertThrows(() => compile({...spec, ports: {wake: {phases: ["playing"], deadline: "deadline", event: "play"}}}), Error, "Mecha event");
+  assertThrows(() => compile({...spec, ports: {join: {seat: "b", phases: ["missing"], event: "timeout"}}}), Error, "undeclared");
+  // No port times a machine: a state's after does.
+  assertThrows(() => compile({...spec, ports: {wake: {phases: ["playing"], deadline: "deadline", event: "timeout"}} as never}), Error, "a state's after");
   const admitted: MechaReducerMachine = {...spec, initialize: {reduce: "initial", input: {type: "object", fields: {}}},
     mecha: {...spec.mecha!, ports: {admission: {input: "'{}'::jsonb", members: "jsonb_build_object('a', current_actor)", locks: ""}}}};
   const admission = {name: "admit", params: [], id: "current_actor", checks: []};
