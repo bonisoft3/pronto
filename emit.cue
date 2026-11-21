@@ -6616,9 +6616,17 @@ _pgrollDir: "services/database/pgroll"
 					      }
 					    }
 					    handle @rendered {
+					      vars renderer true
 					      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
 					        header_up dapr-app-id render
 					        import bounded-render
+					        @renderdown status 429 502 503 504
+					        handle_response @renderdown {
+					          root * {$PRONTO_SRV_ROOT:/srv}
+					          header Cache-Control "no-cache"
+					          rewrite * /\(E.terminal.surface.entry)
+					          import files
+					        }
 					      }
 					    }
 
@@ -6636,6 +6644,43 @@ _pgrollDir: "services/database/pgroll"
 				let bare = strings.TrimSuffix(a, "/")
 				for w in [if bare == "" {"/"}, if bare != "" {bare}, if bare != "" {bare + "/"}] {w},
 			])
+			// A renderer the door cannot reach never answers, so caddy's own 502
+			// or 504 stands in for it; handle_response above sees only answers. Only a
+			// request `handle @rendered` took is the renderer's: another upstream's
+			// failure under a widened address stays a failure.
+			// Both serve the entry, which draws the route itself. This one is
+			// `files` with the 200 the error would otherwise keep, so a
+			// conditional or range request is answered whole, and only for the
+			// methods a document is read by.
+			_unreachable: [
+				if len(E._onRequest) == 0 {""},
+				"""
+
+				  handle_errors {
+				    @renderdown {
+				      method GET HEAD
+				      expression {err.status_code} in [502, 503, 504]
+				      vars {http.vars.renderer} true
+				    }
+				    handle @renderdown {
+				      root * {$PRONTO_SRV_ROOT:/srv}
+				      request_header -If-Match
+				      request_header -If-Unmodified-Since
+				      request_header -If-None-Match
+				      request_header -If-Modified-Since
+				      request_header -If-Range
+				      request_header -Range
+				      header Cache-Control "no-cache"
+				      rewrite * /\(E.terminal.surface.entry)
+				      file_server {
+				        etag_file_extensions .etag
+				        hide *.etag
+				        status 200
+				      }
+				    }
+				  }
+				""",
+			][0]
 			_document: [
 				if len(_documentAt) == 0 {""},
 				"""
@@ -6663,7 +6708,7 @@ _pgrollDir: "services/database/pgroll"
 				      rewrite @file {http.matchers.file.relative}
 				\(_rewrite)      import files
 				    }
-				  }
+				  }\(_unreachable)
 				"""
 			// An asset the anchor is absent from indexes out of range here, rather
 			// than emitting a proxy that silently 404s every deep link.
