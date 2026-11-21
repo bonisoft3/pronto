@@ -179,7 +179,7 @@ Deno.test('edge CUE queries preserve mecha reducers, functions, and optional cap
 
   const emptyCaps = await cue(['export', '-', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], base)
   assert.equal(emptyCaps.success, true, emptyCaps.stderr)
-  assert.deepEqual(JSON.parse(emptyCaps.stdout), { assets: null, seedBlobs: null, blobs: false, images: null, signIn: {}, providerRelease: {} })
+  assert.deepEqual(JSON.parse(emptyCaps.stdout), { assets: null, seedBlobs: null, blobs: false, images: null, signIn: {} })
 
   const populated = base + `
 app: state: mecha: reducers: presence: {

@@ -30,7 +30,6 @@ import (
 	distribution "github.com/bonisoft3/pronto/distribution"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
-	"github.com/bonisoft3/pronto/identity"
 	apt "github.com/bonisoft3/bayt/distros/apt"
 )
 
@@ -78,7 +77,7 @@ import (
 		// checkout.
 		dir:         *"apps/\(app)" | string
 		domain:      *"" | string
-		native:      *false | bool
+		native:      *[] | [...("android" | "ios")]
 		generateCmd: string
 		testCmd:     string
 		targets:     *[] | [...string]
@@ -315,7 +314,7 @@ import (
 		}
 		\(B._prepareHostWork)
 		$"log_location: ($work_fwd)/proc.log\n" | save -f ($work | path join "pc-logs.yaml")
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
 		let start_p = (20000 + (($h | str substring 0..6 | into int -r 16) mod 7000))
 		let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: "127.0.0.1", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' ($pvars | to json -r) ($start_p | into string) | from json)
 		let port = ($alloc._PC_PORT? | default $def_port)
@@ -402,7 +401,7 @@ import (
 		  DENO_CERT: $cert_p
 		}
 		let pc_bin = (^mise which process-compose | str trim)
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort)
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) | get var | uniq | sort)
 		mut next_p = (15000 + (((($nu.pid * 2654435761) + (random int 0..999999)) mod 85) * 200))
 		let ok = (try {
 		  for suite in [\(B._localSuites)] {
@@ -639,23 +638,27 @@ import (
 		// cross-project dep includes a tree the mirror lacks.
 		_nativeDistribution: distribution.#Project & {domain: B.meta.domain}
 		_bundleGates: {
-			build:     {default: true, platforms: [if B.meta.native {"android"}, if B.meta.native {"ios"}]}
+			build:     {default: true, platforms: B.meta.native}
 			launch:    {default: true, platforms: ["host", "compose", "cloudflare"]}
 			integrate: {default: true, platforms: ["host"]}
 			release:   {default: false, platforms: [for t in B.meta.targets if t == "pages" || t == "cloudflare" {t}]}
 		}
 		_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
-		if B.meta.native {
+		if len(B.meta.native) > 0 {
 			files: "say.yaml": say: build: rulemap: {
-				android: {
-					platform: "android"
-					stop:     true
-					cmds:     [{do: _nativeDistribution.nativeAndroid}]
+				if list.Contains(B.meta.native, "android") {
+					android: {
+						platform: "android"
+						stop:     true
+						cmds:     [{do: _nativeDistribution.nativeAndroid}]
+					}
 				}
-				ios: {
-					platform: "ios"
-					stop:     true
-					cmds:     [{do: _nativeDistribution.nativeIos}]
+				if list.Contains(B.meta.native, "ios") {
+					ios: {
+						platform: "ios"
+						stop:     true
+						cmds:     [{do: _nativeDistribution.nativeIos}]
+					}
 				}
 			}
 		}
@@ -1106,6 +1109,12 @@ import (
 						database: {
 							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on", "-c", "shared_buffers=512MB"]])}).out
 						}
+						// A release turns on the providers the program offers, which
+						// the local stack leaves off (mecha's OIDC_PROVIDERS):
+						// process-compose appends this list to the base's.
+						if len(B.cluster.capabilities.signIn) > 0 {
+							auth: environment: ["OIDC_PROVIDERS=${OIDC_PROVIDERS:-\(strings.Join([for p, _ in B.cluster.capabilities.signIn {p}], ","))}"]
+						}
 						electric: {
 							command: (_command & {args: ["env", "DATABASE_URL=postgresql://electric:${ELECTRIC_PASSWORD:-dev-electric-password}@127.0.0.1:5432/${POSTGRES_DB:-\(B.meta.app)}?sslmode=disable", "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true", "ELECTRIC_PORT=3002", "ELECTRIC_STORAGE_DIR=${PGDATA:-/var/lib/pgsql/data}/electric", "LD_LIBRARY_PATH=/electric-libs", "ELIXIR_ERL_OPTIONS=+fnu", "/electric-app/bin/entrypoint", "start"]}).out
 						}
@@ -1205,6 +1214,7 @@ import (
 				// container: the appliance does not start without one, as compose's
 				// airlock does not (process-compose substitutes no `:?` refusal).
 				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
+
 				// The seal key is the deployment's own: the repository's development
 				// one is the local stack's alone. The airlock refuses it by its id at
 				// start (seal.ts refuseDevKey); this refuses its usual spellings, the

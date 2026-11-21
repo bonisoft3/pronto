@@ -237,27 +237,26 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assert(!none.env.some((e: { name: string }) => e.name === "DATABASE_URL"));
 });
 
-// A provider is configured by the program for development, against a broker on the developer's
-// machine; released as is it sends every reader to their own localhost, and switched off it
-// leaves the terminal drawing a way in that answers 404 (bonkchess.com, before the broker ran).
-Deno.test("a release refuses a provider at a developer's address, or one the program offers and production does not serve", async () => {
+// A provider configured against a developer's machine, released as is, sends every reader to
+// their own localhost. One the program offers and the deployment leaves off is no fault: the
+// terminal draws what the auth service names (regression: a deployment serving a subset was refused).
+Deno.test("a release refuses a provider at a developer's address, and admits one the program offers left off", async () => {
   const google = (issuer: string, internal = issuer) => `OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin", OIDC_GOOGLE_ISSUER: "${issuer}", OIDC_GOOGLE_INTERNAL: "${internal}"`;
   for (const [oidc, why] of [
     [google("http://localhost:28443", "http://host.docker.internal:28443"), "localhost"],
     [google("https://id.example.com", "http://host.docker.internal:28443"), "host.docker.internal"],
     [google("http://127.0.0.1:9000"), "127.0.0.1"],
   ]) {
-    const r = await built(release(`, auth: {programProviders: "google", oidc: {${oidc}}}`));
+    const r = await built(release(`, auth: {oidc: {${oidc}}}`));
     assertEquals(r.success, false, oidc);
     assertStringIncludes(r.stderr, why);
   }
-  const off = await built(release(`, auth: {programProviders: "google", oidc: {OIDC_PROVIDERS: ""}}`));
-  assertEquals(off.success, false);
-  assertStringIncludes(off.stderr, "the terminal offers google");
-  const served = await built(release(`, auth: {programProviders: "google", oidc: {${google("https://id.example.com")}}}`));
+  const off = await built(release(`, auth: {oidc: {OIDC_PROVIDERS: ""}}`));
+  assertEquals(off.success, true, off.stderr);
+  const served = await built(release(`, auth: {oidc: {${google("https://id.example.com")}}}`));
   assertEquals(served.success, true, served.stderr);
   // Google's own issuer, the preset, named by leaving the issuer unset.
-  const preset = await built(release(`, auth: {programProviders: "google", oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "x.apps.googleusercontent.com", OIDC_GOOGLE_ISSUER: "", OIDC_GOOGLE_INTERNAL: ""}}`));
+  const preset = await built(release(`, auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "x.apps.googleusercontent.com", OIDC_GOOGLE_ISSUER: "", OIDC_GOOGLE_INTERNAL: ""}}`));
   assertEquals(preset.success, true, preset.stderr);
   const none = await built(release());
   assertEquals(none.success, true, none.stderr);

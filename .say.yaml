@@ -94,7 +94,7 @@ say:
         cmds:
           - do: "cue vet -c=false ./identity"
           - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
-          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
+          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker"
           - do: "mise -C identity/hydra x -- sh -c 'export HYDRA_BIN=$(command -v hydra); cd ../.. && deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
       outcome-obligations:
         priority: -1

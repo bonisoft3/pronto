@@ -499,16 +499,15 @@ export def bake-images [app_dir: string, compose: string, services: list<string>
 	do { cd $app_dir; $compose | ^docker buildx bake -f - --print ...$services } | from json | get target
 }
 
-export def auth-provider-environment [environment: record, release_providers: record = {}]: nothing -> record {
-	let merged = ($release_providers | transpose name cfg | reduce -f $environment {|it, acc|
-		let issuer = ($it.cfg.releaseIssuer? | default "")
-		if ($issuer | is-empty) { return $acc }
-		let upper = ($it.name | str uppercase)
-		let ik = $"OIDC_($upper)_ISSUER"
-		let nk = $"OIDC_($upper)_INTERNAL"
-		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
-		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
-	})
+# The providers a program offers, which its release turns on.
+export const PROGRAM_PROVIDERS = '[if code.capabilities.auth != _|_ if code.capabilities.auth.providers != _|_ for p in code.capabilities.auth.providers {p}]'
+
+# A release turns on the providers the program offers, which a local stack
+# leaves off, unless the deployment's environment names its own.
+export def auth-provider-environment [environment: record, providers: list<string> = []]: nothing -> record {
+	let merged = if ($environment.OIDC_PROVIDERS? | default "" | is-not-empty) or ($providers | is-empty) { $environment } else {
+		$environment | upsert OIDC_PROVIDERS ($providers | str join ",")
+	}
 	let entries = ($merged | transpose key value | where {|e| $e.key starts-with "OIDC_" })
 	let secrets = ($entries | where {|e| $e.key ends-with "_CLIENT_SECRET" and $e.value != "" }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
@@ -1050,8 +1049,8 @@ export def main [
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
-	let release_providers = (do { cd $app_source_dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
-	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $release_providers)
+	let providers = (do { cd $app_source_dir; ^cue export . -e $PROGRAM_PROVIDERS --out json } | from json)
+	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $providers)
 	# An issuer the release trusts, TRUSTED_JWKS, for the roles the program
 	# declares: its public keys are checked here, before anything is applied,
 	# and digested so a change of keys rolls crud. Unset, crud verifies the

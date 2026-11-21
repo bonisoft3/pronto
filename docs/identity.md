@@ -96,15 +96,20 @@ broker's settings. Adding it is the
   routes; the admin API is never public. Hand-written protocol code was the
   alternative: its own code store in memory and its own token signing, where
   Hydra holds both in a store that outlives a restart.
-- **On a developer's machine**, with no Google client the broker signs in
-  test people instead (`identity/hydra/fake.ts`), each with a name and a
-  verified address, and verifies any `localhost` app as a TXT record would,
-  so a first local sign-in is named as a real one is.
+- **Local stacks sign in by what needs no one else.** An app's `launch` and
+  `integrate` run no broker and turn on no provider (`OIDC_PROVIDERS` is
+  the deployment's, empty there): a person comes in as a guest or with a
+  passkey. A release turns on the providers its program offers, and the
+  terminal draws only those the auth service names (`GET /auth/oidc`), so a
+  way in shows where it works and nowhere else. Provider sign-in is tested
+  against the broker in the auth service's and the broker's own suites, and
+  end to end by an app's `verify` against its release. A local run against
+  the release broker would need it to trust a `localhost` app, which it
+  does not.
 
 | Where | How | Broker |
 | --- | --- | --- |
-| an app's `launch@host` | `identity-hydra` and `identity` as host processes via mise and Deno directly | Hydra in memory; Google with the operator's `broker.env`, else the test people |
-| an app's `launch` | the same two services from their pinned base images | as above, the test people unless `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set |
+| an app's `launch` / `integrate` | none | none: guest and passkey |
 | the operator's machine | `identity/serve.sh` | Hydra on SQLite |
 | Cloud Run / k8s / Cloudflare | `identity/serve.sh release` (operator), `release@gcp` / `release@k8s` / `release@cloudflare` (apps) | Hydra on PostgreSQL, admin API private; apps connect as the `origin` public client or a direct `OIDC_<NAME>_CLIENT_ID` |
 | `pages` | refused at compile time (`_authTargetRefusal`) | the browser tier runs guest sessions; providers need edge, container or cloud |
@@ -124,18 +129,19 @@ is mecha's [auth README](https://github.com/bonisoft3/mecha/blob/v0.30.0/service
 No screen draws a sign-in: a native host has no terminal chip, so its
 projection (`project-native.ts`) writes the account sheet its rail or bar
 opens from the program's `auth` — a passkey, each provider, the way out and
-deleting the account. A native host ships on iOS, whose App Store requires
-Sign in with Apple beside any other provider (App Review Guideline 4.8), so
-a program with `native: true` and a provider but not `apple` is refused.
+deleting the account. An app names its hosts (`native: ["android", "ios"]`);
+an iOS host ships on the App Store, which requires Sign in with Apple beside
+any other provider (App Review Guideline 4.8), so a program with an `ios`
+host and a provider but not `apple` is refused. Apple's sign-in needs a paid
+Apple developer account, so an app without an iOS host need not offer it.
 
 **Deleting an account** is the account panel's last row: the first press
 asks, the second deletes the account and every row it owns
 (`DELETE /auth/account`, which cascades), forgets it on this device, and
 signs the device out.
 
-An app naming `signin: broker: <url>` runs no local broker. Pronto publishes
-no runtime image of its own: local runs use the host's Deno and Hydra, Docker
-launches pinned base images.
+An app names the operator's broker (`signin: broker: <url>`) and runs none
+of its own.
 
 ## What a session says
 

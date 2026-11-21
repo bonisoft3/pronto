@@ -114,7 +114,7 @@ export async function clusterSteps(clusterJson: string): Promise<Steps> {
 const optionalCue = (expr: string, fallback: string) =>
   `{if ${expr} != _|_ {v: ${expr}}, if ${expr} == _|_ {v: ${fallback}}}.v`
 
-export const EDGE_CAPABILITIES_CUE = `{assets: ${optionalCue('code.capabilities.seedAssets', 'null')}, seedBlobs: ${optionalCue('code.capabilities.seedBlobs', 'null')}, blobs: ${optionalCue('code.capabilities.blobs', 'false')}, images: ${optionalCue('code.capabilities.edgeImages', 'null')}, signIn: ${optionalCue('cluster.capabilities.signIn', '{}')}, providerRelease: {if code.capabilities.auth != _|_ {v: ${optionalCue('code.capabilities.auth.provider', '{}')}}, if code.capabilities.auth == _|_ {v: {}}}.v}`
+export const EDGE_CAPABILITIES_CUE = `{assets: ${optionalCue('code.capabilities.seedAssets', 'null')}, seedBlobs: ${optionalCue('code.capabilities.seedBlobs', 'null')}, blobs: ${optionalCue('code.capabilities.blobs', 'false')}, images: ${optionalCue('code.capabilities.edgeImages', 'null')}, signIn: ${optionalCue('cluster.capabilities.signIn', '{}')}}`
 
 export const EDGE_STATE_CUE = `{reducers: code.state.mecha.reducers, functions: ${optionalCue('code.state.functions', '{}')}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}`
 

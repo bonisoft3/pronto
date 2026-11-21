@@ -1280,13 +1280,13 @@ export async function buildNativeApp(options: BuildNativeOptions): Promise<Build
   const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.json'))) as {
     app?: string
     brand?: { label?: string }
-    native?: boolean
+    native?: NativePlatform[]
     routes?: Array<{ path: string; paths?: Record<string, string>; files: { html: string } }>
     i18n?: { default?: string; locales?: Record<string, unknown> }
     units?: Record<string, { role?: string; isolation?: string; subdomain?: string; src?: string }>
   }
-  if (!shell.native) {
-    throw new Error(`${app} does not declare code.capabilities.native: true`)
+  if (!shell.native?.includes(platform)) {
+    throw new Error(`${app} declares no ${platform} host (code.capabilities.native)`)
   }
   const subdomains = realmSubdomains(shell.units)
   if (subdomains.length && !domain) {

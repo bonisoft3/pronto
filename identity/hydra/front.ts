@@ -18,7 +18,6 @@
 import { Refused, randomToken, verifyIdToken } from "../oidc.ts";
 import { callbackOf, type OptionalScope, pairwiseKey, pairwiseSubject, profileClaims, tenantOf } from "../broker/core.ts";
 import { apple, esc, google, hmacKey, json, page, parseAppleUserJson, type Provider, seal, tenantVerifier, type TxtResolver, unseal } from "../broker/main.ts";
-import { fakeApple, fakeGoogle } from "./fake.ts";
 
 export interface Hydra {
   /** Hydra's public API, as the front reaches it. */
@@ -44,12 +43,6 @@ export async function front(p: {
   hydra: Hydra;
   fetcher?: typeof fetch;
   resolveTxt?: TxtResolver;
-  /** Routes served beside the broker's own: a stand-in provider's (fake.ts). */
-  extra?: (req: Request, url: URL) => Promise<Response> | null;
-  /** Whether an app on this machine (a localhost origin) is verified as a
-   * DNS TXT record verifies one elsewhere: a broker signing in test people,
-   * whose profiles are no one's to withhold. */
-  trustLocal?: boolean;
   /** The secret Hydra's token hook sends as its bearer; without it there is no hook. */
   hookSecret?: string;
 }) {
@@ -157,8 +150,7 @@ export async function front(p: {
       return go(redirect_to as string);
     }
     const pn = randomToken(16);
-    const host = new URL(tenant).hostname;
-    const trusted = (p.trustLocal === true && (host === "localhost" || host.endsWith(".localhost"))) || await isTrusted(tenant);
+    const trusted = await isTrusted(tenant);
     const requested = ((r.requested_scope as string[]) ?? []).filter((s): s is OptionalScope => s === "profile" || s === "email");
     const scopes = trusted ? requested : [];
     const leg = await seal(stateKey, { c: challenge, t: tenant, p: name, pn, scopes, exp: Math.floor(Date.now() / 1000) + 600 });
@@ -284,8 +276,6 @@ export async function front(p: {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
-      const extra = p.extra?.(req, url);
-      if (extra) return await extra;
       if (hookKey && req.method === "POST" && path === "/hooks/token") return await tokenHook(req);
       if (req.method === "GET" && path === "/oauth2/auth") return await authorize(req, url);
       if (PASSED.test(path)) return await pass(req, url);
@@ -316,32 +306,7 @@ if (import.meta.main) {
   const realGoogle = google(env);
   const realApple = apple(env);
   const providers = [realGoogle, realApple].filter((x): x is Provider => x !== null);
-  let extra: ((req: Request, url: URL) => Promise<Response> | null) | undefined;
-  if (env("BROKER_FAKE_GOOGLE") === "1") {
-    if (new URL(issuer).hostname !== "localhost") throw new Error(`BROKER_FAKE_GOOGLE is for a localhost broker, not ${issuer}`);
-    const fakeHandlers: Array<(req: Request, url: URL) => Promise<Response> | null> = [];
-    if (!realGoogle) {
-      const fake = await fakeGoogle(issuer);
-      providers.push(fake.provider);
-      fakeHandlers.push(fake.handle);
-    }
-    if (!realApple) {
-      const fake = await fakeApple(issuer);
-      providers.push(fake.provider);
-      fakeHandlers.push(fake.handle);
-    }
-    if (fakeHandlers.length > 0) {
-      extra = (req, url) => {
-        for (const h of fakeHandlers) {
-          const out = h(req, url);
-          if (out) return out;
-        }
-        return null;
-      };
-      console.error("broker: using test stand-in providers where client secrets are absent (hydra/fake.ts)");
-    }
-  }
   if (providers.length === 0) throw new Error("no provider is configured: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or APPLE_CLIENT_ID/APPLE_CLIENT_SECRET");
   const hydra = { public: env("HYDRA_PUBLIC") ?? "http://127.0.0.1:28453", admin: env("HYDRA_ADMIN") ?? "http://127.0.0.1:28455" };
-  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, extra, trustLocal: extra !== undefined, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
+  Deno.serve({ port: Number(env("PORT") ?? 28443) }, await front({ issuer, secret, providers, hydra, hookSecret: env("HYDRA_HOOK_SECRET") || undefined }));
 }

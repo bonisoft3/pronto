@@ -315,7 +315,7 @@ _sqlType: {
 	columns!: #machineColumns
 	// Parent lookup, for a composition under a row that names a group.
 	entities: _
-	rls: *false | bool
+	rls:      *false | bool
 	_lines: list.Concat([
 		[for fld in T.e.fields {
 			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
@@ -2033,8 +2033,8 @@ _sqlType: {
 #settingKeys: ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout"]
 
 #alterSettings: {
-	role:     string
-	quoted:   *false | bool
+	role:   string
+	quoted: *false | bool
 	settings: [string]: string
 	let name = (#roleName & {"role": role, declared: quoted}).out
 	out: strings.Join([for k in #settingKeys if settings[k] != _|_ {"ALTER ROLE \(name) SET \(k) = '\(settings[k])';\n"}], "")
@@ -2097,7 +2097,7 @@ _sqlType: {
 // One grant: to roles, on the schema's tables, the schema itself, or the
 // tables created later.
 #accessGrant: {
-	to: [...string]
+	to:         [...string]
 	privileges: [...string]
 }
 
@@ -2105,7 +2105,7 @@ _sqlType: {
 // 001_roles.sql and 002_grants.sql render.
 #access: {
 	schema: string
-	order: [...string]
+	order:  [...string]
 	roles: [string]: #accessRole
 	schemaGrants:      [...#accessGrant]
 	tableGrants:       [...#accessGrant]
@@ -2120,7 +2120,7 @@ _sqlType: {
 // one value; the flags it follows are computed here, once.
 #accessModel: {
 	let M = self
-	code!: _
+	code!:          _
 	_appMigrations: #appMigrations & {"code": M.code}
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles and service-token plumbing.
@@ -2132,7 +2132,7 @@ _sqlType: {
 	// The roles a token may name beside the cluster's own, in one order
 	// (#TokenRole).
 	_declaredRoles: list.SortStrings([if M.code.state.tokenRoles != _|_ for n, _ in M.code.state.tokenRoles {n}])
-	_baseTables: [for _, e in M.code.state.entities if e.server if M._appMigrations.held[e.name] != _|_ {e.table}]
+	_baseTables:    [for _, e in M.code.state.entities if e.server if M._appMigrations.held[e.name] != _|_ {e.table}]
 	// Whether the database's owner provisions it (state.provisioning).
 	_checked: [if M.code.state.provisioning != _|_ if M.code.state.provisioning == "checked" {true}, false][0]
 	out: #access & {
@@ -2141,32 +2141,60 @@ _sqlType: {
 		order: list.Concat([base, M._declaredRoles, ["authenticator"]])
 		for r in base if r != "electric" {
 			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: r == "service", replication: false, token: true, declared: false, memberOf: []
-				settings: (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
+				kind:        "request"
+				login:       false
+				inherit:     true
+				superuser:   false
+				createrole:  false
+				createdb:    false
+				bypassrls:   r == "service"
+				replication: false
+				token:       true
+				declared:    false
+				memberOf:    []
+				settings:    (#roleSettings & {tier: [if r == "service" {"service"}, "client"][0]}).out
 			}
 		}
 		for r in M._declaredRoles {
 			roles: (r): {
-				kind: "request"
-				login: false, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: true, declared: true, memberOf: []
-				settings: (#roleSettings & {tier: "client"}).out
+				kind:        "request"
+				login:       false
+				inherit:     true
+				superuser:   false
+				createrole:  false
+				createdb:    false
+				bypassrls:   false
+				replication: false
+				token:       true
+				declared:    true
+				memberOf:    []
+				settings:    (#roleSettings & {tier: "client"}).out
 			}
 		}
 		if M._serverOn {
 			roles: electric: {kind: "sync", login: true, inherit: true, superuser: false, createrole: false, createdb: false, bypassrls: true, replication: true, token: false, declared: false, memberOf: [], settings: {}}
 		}
 		roles: authenticator: {
-			kind: "authenticator", login: true, inherit: false, superuser: false, createrole: false, createdb: false, bypassrls: false, replication: false, token: false, declared: false, settings: {}
-			memberOf: [for r in order if roles[r].token {r}]
+			kind:        "authenticator"
+			login:       true
+			inherit:     false
+			superuser:   false
+			createrole:  false
+			createdb:    false
+			bypassrls:   false
+			replication: false
+			token:       false
+			declared:    false
+			settings:    {}
+			memberOf:    [for r in order if roles[r].token {r}]
 		}
 		let dml = ["SELECT", "INSERT", "UPDATE", "DELETE"]
 		let granted = [if M._authOn {["app_user", "service"]}, if M._serviceOn {["anon", "service"]}, ["anon"]][0]
 		let visible = [if M._authOn {["anon", "app_user", "service"]}, granted][0]
-		schemaGrants: [{to: visible, privileges: ["USAGE"]}, if M._serverOn {to: ["electric"], privileges: ["USAGE"]}]
-		tableGrants: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
+		schemaGrants:      [{to: visible, privileges: ["USAGE"]}, if M._serverOn {to: ["electric"], privileges: ["USAGE"]}]
+		tableGrants:       [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
 		defaultPrivileges: [{to: granted, privileges: dml}, if M._serverOn {to: ["electric"], privileges: ["SELECT"]}]
-		publishedGrants: [if len(M._baseTables) > 0 {to: ["anon"], privileges: dml}]
+		publishedGrants:   [if len(M._baseTables) > 0 {to: ["anon"], privileges: dml}]
 	}
 }
 
@@ -2187,7 +2215,7 @@ _sqlType: {
 
 // One row of an inline table, its values as SQL literals.
 #sqlRow: {
-	vs: [...]
+	vs:  [...]
 	out: "(" + strings.Join([for x in vs {(#sqlLit & {v: x}).out}], ", ") + ")"
 }
 
@@ -2196,8 +2224,8 @@ _sqlType: {
 // of none.
 #valuesOr: {
 	let V = self
-	cols: [...{name: string, type: string}]
-	rows: [...string]
+	cols:   [...{name: string, type: string}]
+	rows:   [...string]
 	_names: strings.Join([for c in V.cols {c.name}], ", ")
 	out: [
 		if len(V.rows) > 0 {"(VALUES \(strings.Join(V.rows, ", "))) AS e(\(V._names))"},
@@ -2229,7 +2257,7 @@ _sqlType: {
 		// What GRANT gives a member that does not inherit (authenticator) is
 		// SET alone; an admin option is never the model's.
 		inherit: access.roles[x.member].inherit
-		fix:    "GRANT \((#roleName & {role: x.role, declared: access.roles[x.role].declared}).out) TO \((#roleName & {role: x.member, declared: access.roles[x.member].declared}).out);"
+		fix:     "GRANT \((#roleName & {role: x.role, declared: access.roles[x.role].declared}).out) TO \((#roleName & {role: x.member, declared: access.roles[x.member].declared}).out);"
 	}]
 	_settings: [for r in access.order for k in #settingKeys if access.roles[r].settings[k] != _|_ {
 		role:  r
@@ -2266,109 +2294,110 @@ _sqlType: {
 	let rows = #accessRows & {"access": access}
 	let sname = (#sqlLit & {v: access.schema}).out
 	let names = "ARRAY[\(strings.Join([for r in access.order {(#sqlLit & {v: r}).out}], ", "))]::text[]"
+
 	// Membership in authenticator also reaches the roles that it can SET.
 	let privileged = "ARRAY[\(strings.Join([for r in access.order if access.roles[r].bypassrls || access.roles[r].replication || access.roles[r].kind == "authenticator" {(#sqlLit & {v: r}).out}], ", "))]::text[]"
 	let roleTable = (#valuesOr & {
-		cols: list.Concat([[{name: "ord", type: "int"}, {name: "name", type: "text"}], [for b in ["login", "inherit", "superuser", "createrole", "createdb", "bypassrls", "replication"] {name: b, type: "boolean"}], [{name: "create_fix", type: "text"}, {name: "alter_fix", type: "text"}]])
+		cols:   list.Concat([[{name: "ord", type: "int"}, {name: "name", type: "text"}], [for b in ["login", "inherit", "superuser", "createrole", "createdb", "bypassrls", "replication"] {name: b, type: "boolean"}], [{name: "create_fix", type: "text"}, {name: "alter_fix", type: "text"}]])
 		"rows": [for r in rows.roles {(#sqlRow & {vs: [r.ord, r.name, r.a.login, r.a.inherit, r.a.superuser, r.a.createrole, r.a.createdb, r.a.bypassrls, r.a.replication, r.create, r.alter]}).out}]
 	}).out
 	let edgeTable = (#valuesOr & {
-		cols: [{name: "ord", type: "int"}, {name: "member", type: "text"}, {name: "role", type: "text"}, {name: "inherit", type: "boolean"}, {name: "fix", type: "text"}]
+		cols:   [{name: "ord", type: "int"}, {name: "member", type: "text"}, {name: "role", type: "text"}, {name: "inherit", type: "boolean"}, {name: "fix", type: "text"}]
 		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.ord, x.member, x.role, x.inherit, x.fix]}).out}]
 	}).out
 	let pairTable = (#valuesOr & {
-		cols: [{name: "member", type: "text"}, {name: "role", type: "text"}]
+		cols:   [{name: "member", type: "text"}, {name: "role", type: "text"}]
 		"rows": [for x in rows.edges {(#sqlRow & {vs: [x.member, x.role]}).out}]
 	}).out
 	let settingTable = (#valuesOr & {
-		cols: [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "role_sql", type: "text"}, {name: "key", type: "text"}, {name: "value", type: "text"}, {name: "fix", type: "text"}]
+		cols:   [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "role_sql", type: "text"}, {name: "key", type: "text"}, {name: "value", type: "text"}, {name: "fix", type: "text"}]
 		"rows": [for x in rows.settings {(#sqlRow & {vs: [x.ord, x.role, x.sql, x.key, x.value, x.fix]}).out}]
 	}).out
 	let grantTable = (#valuesOr & {
-		cols: [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "privilege", type: "text"}, {name: "fix", type: "text"}]
+		cols:   [{name: "ord", type: "int"}, {name: "role", type: "text"}, {name: "privilege", type: "text"}, {name: "fix", type: "text"}]
 		"rows": [for x in rows.schema {(#sqlRow & {vs: [x.ord, x.role, x.privilege, x.fix]}).out}]
 	}).out
 	let phases = [
 		"""
-		SELECT 1 AS phase, e.ord, CASE WHEN r.oid IS NULL THEN e.create_fix ELSE e.alter_fix END AS fix
-		      FROM \(roleTable) LEFT JOIN pg_roles r ON r.rolname = e.name
-		      WHERE r.oid IS NULL OR ROW(r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls, r.rolreplication)
-		        IS DISTINCT FROM ROW(e.login, e.inherit, e.superuser, e.createrole, e.createdb, e.bypassrls, e.replication)
-		""",
+			SELECT 1 AS phase, e.ord, CASE WHEN r.oid IS NULL THEN e.create_fix ELSE e.alter_fix END AS fix
+			      FROM \(roleTable) LEFT JOIN pg_roles r ON r.rolname = e.name
+			      WHERE r.oid IS NULL OR ROW(r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls, r.rolreplication)
+			        IS DISTINCT FROM ROW(e.login, e.inherit, e.superuser, e.createrole, e.createdb, e.bypassrls, e.replication)
+			""",
 		"""
-		SELECT 2, 0, format('ALTER DATABASE %I OWNER TO %I;', current_database(), current_user)
-		      FROM pg_database WHERE datname = current_database() AND pg_get_userbyid(datdba)::text = ANY (\(names))
-		""",
+			SELECT 2, 0, format('ALTER DATABASE %I OWNER TO %I;', current_database(), current_user)
+			      FROM pg_database WHERE datname = current_database() AND pg_get_userbyid(datdba)::text = ANY (\(names))
+			""",
 		"""
-		SELECT 2, 1, format('ALTER SCHEMA %I OWNER TO pg_database_owner;', nspname)
-		      FROM pg_namespace WHERE nspname = \(sname) AND pg_get_userbyid(nspowner)::text = ANY (\(names))
-		""",
+			SELECT 2, 1, format('ALTER SCHEMA %I OWNER TO pg_database_owner;', nspname)
+			      FROM pg_namespace WHERE nspname = \(sname) AND pg_get_userbyid(nspowner)::text = ANY (\(names))
+			""",
 		"""
-		SELECT 3, e.ord, e.fix FROM \(edgeTable)
-		      WHERE NOT EXISTS (SELECT FROM pg_auth_members m WHERE m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role)))
-		""",
+			SELECT 3, e.ord, e.fix FROM \(edgeTable)
+			      WHERE NOT EXISTS (SELECT FROM pg_auth_members m WHERE m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role)))
+			""",
 		"""
-		SELECT 3, 1000 + e.ord, format('REVOKE ADMIN OPTION FOR %I FROM %I GRANTED BY %I;', e.role, e.member, pg_get_userbyid(m.grantor))
-		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
-		      WHERE m.admin_option
-		""",
+			SELECT 3, 1000 + e.ord, format('REVOKE ADMIN OPTION FOR %I FROM %I GRANTED BY %I;', e.role, e.member, pg_get_userbyid(m.grantor))
+			      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+			      WHERE m.admin_option
+			""",
 		"""
-		SELECT 3, 2000 + e.ord, format('GRANT %I TO %I WITH INHERIT %s, SET TRUE GRANTED BY %I;', e.role, e.member, CASE WHEN e.inherit THEN 'TRUE' ELSE 'FALSE' END, pg_get_userbyid(m.grantor))
-		      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
-		      WHERE NOT (m.set_option AND m.inherit_option = e.inherit)
-		""",
+			SELECT 3, 2000 + e.ord, format('GRANT %I TO %I WITH INHERIT %s, SET TRUE GRANTED BY %I;', e.role, e.member, CASE WHEN e.inherit THEN 'TRUE' ELSE 'FALSE' END, pg_get_userbyid(m.grantor))
+			      FROM \(edgeTable) JOIN pg_auth_members m ON m.member = to_regrole(quote_ident(e.member)) AND m.roleid = to_regrole(quote_ident(e.role))
+			      WHERE NOT (m.set_option AND m.inherit_option = e.inherit)
+			""",
 		"""
-		SELECT 4, 0, format('REVOKE %I FROM %I GRANTED BY %I;', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor))
-		      FROM pg_auth_members m
-		      WHERE (pg_get_userbyid(m.member)::text = ANY (\(names)) OR pg_get_userbyid(m.roleid)::text = ANY (\(privileged)))
-		        AND NOT (
-		          m.admin_option AND NOT m.inherit_option AND NOT m.set_option
-		          AND pg_get_userbyid(m.member)::text <> ALL (\(names))
-		          AND EXISTS (SELECT FROM pg_database d JOIN pg_roles owner ON owner.oid = d.datdba
-		                      WHERE d.datname = current_database() AND owner.oid = m.member AND owner.rolcreaterole)
-		          AND EXISTS (SELECT FROM pg_roles grantor WHERE grantor.oid = m.grantor AND grantor.rolsuper)
-		        )
-		        AND NOT EXISTS (SELECT FROM \(pairTable) WHERE e.member = pg_get_userbyid(m.member)::text AND e.role = pg_get_userbyid(m.roleid)::text)
-		""",
+			SELECT 4, 0, format('REVOKE %I FROM %I GRANTED BY %I;', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor))
+			      FROM pg_auth_members m
+			      WHERE (pg_get_userbyid(m.member)::text = ANY (\(names)) OR pg_get_userbyid(m.roleid)::text = ANY (\(privileged)))
+			        AND NOT (
+			          m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+			          AND pg_get_userbyid(m.member)::text <> ALL (\(names))
+			          AND EXISTS (SELECT FROM pg_database d JOIN pg_roles owner ON owner.oid = d.datdba
+			                      WHERE d.datname = current_database() AND owner.oid = m.member AND owner.rolcreaterole)
+			          AND EXISTS (SELECT FROM pg_roles grantor WHERE grantor.oid = m.grantor AND grantor.rolsuper)
+			        )
+			        AND NOT EXISTS (SELECT FROM \(pairTable) WHERE e.member = pg_get_userbyid(m.member)::text AND e.role = pg_get_userbyid(m.roleid)::text)
+			""",
 		"""
-		SELECT 5, e.ord, e.fix FROM \(settingTable)
-		      WHERE (SELECT substr(c, length(e.key) + 2) FROM pg_db_role_setting s, unnest(s.setconfig) c
-		             WHERE s.setdatabase = 0 AND s.setrole = to_regrole(quote_ident(e.role)) AND starts_with(c, e.key || '=')) IS DISTINCT FROM e.value
-		""",
+			SELECT 5, e.ord, e.fix FROM \(settingTable)
+			      WHERE (SELECT substr(c, length(e.key) + 2) FROM pg_db_role_setting s, unnest(s.setconfig) c
+			             WHERE s.setdatabase = 0 AND s.setrole = to_regrole(quote_ident(e.role)) AND starts_with(c, e.key || '=')) IS DISTINCT FROM e.value
+			""",
 		"""
-		SELECT 6, e.ord, format('ALTER ROLE %s IN DATABASE %I RESET %s;', e.role_sql, current_database(), e.key) FROM \(settingTable)
-		      WHERE EXISTS (SELECT FROM pg_db_role_setting s, unnest(s.setconfig) c
-		                    WHERE s.setrole = to_regrole(quote_ident(e.role)) AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
-		                      AND starts_with(c, e.key || '='))
-		""",
+			SELECT 6, e.ord, format('ALTER ROLE %s IN DATABASE %I RESET %s;', e.role_sql, current_database(), e.key) FROM \(settingTable)
+			      WHERE EXISTS (SELECT FROM pg_db_role_setting s, unnest(s.setconfig) c
+			                    WHERE s.setrole = to_regrole(quote_ident(e.role)) AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
+			                      AND starts_with(c, e.key || '='))
+			""",
 		"""
-		SELECT 7, e.ord, e.fix FROM \(grantTable)
-		      WHERE COALESCE(NOT has_schema_privilege(to_regrole(quote_ident(e.role)), \(sname), e.privilege), true)
-		""",
+			SELECT 7, e.ord, e.fix FROM \(grantTable)
+			      WHERE COALESCE(NOT has_schema_privilege(to_regrole(quote_ident(e.role)), \(sname), e.privilege), true)
+			""",
 		"""
-		SELECT DISTINCT 7, 1000, CASE WHEN a.grantor = n.nspowner THEN '' ELSE format('SET ROLE %I; ', pg_get_userbyid(a.grantor)) END
-		        || format('REVOKE CREATE ON SCHEMA %I FROM %s;', n.nspname, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)::text) END)
-		        || CASE WHEN a.grantor = n.nspowner THEN '' ELSE ' RESET ROLE;' END
-		      FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
-		      WHERE n.nspname = \(sname) AND a.privilege_type = 'CREATE'
-		        AND (a.grantee = 0 OR pg_get_userbyid(a.grantee)::text = ANY (\(names)))
-		""",
+			SELECT DISTINCT 7, 1000, CASE WHEN a.grantor = n.nspowner THEN '' ELSE format('SET ROLE %I; ', pg_get_userbyid(a.grantor)) END
+			        || format('REVOKE CREATE ON SCHEMA %I FROM %s;', n.nspname, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)::text) END)
+			        || CASE WHEN a.grantor = n.nspowner THEN '' ELSE ' RESET ROLE;' END
+			      FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
+			      WHERE n.nspname = \(sname) AND a.privilege_type = 'CREATE'
+			        AND (a.grantee = 0 OR pg_get_userbyid(a.grantee)::text = ANY (\(names)))
+			""",
 		"""
-		SELECT 8, 1, format('ALTER ROLE %I IN DATABASE %I SET search_path = %I;', current_user, current_database(), \(sname))
-		      WHERE migration_schema IS DISTINCT FROM \(sname)
-		""",
+			SELECT 8, 1, format('ALTER ROLE %I IN DATABASE %I SET search_path = %I;', current_user, current_database(), \(sname))
+			      WHERE migration_schema IS DISTINCT FROM \(sname)
+			""",
 		"""
-		SELECT 8, 2, format('GRANT USAGE, CREATE ON SCHEMA %I TO %I;', \(sname), current_user)
-		      WHERE NOT (has_schema_privilege(current_user, \(sname), 'USAGE') AND has_schema_privilege(current_user, \(sname), 'CREATE'))
-		""",
+			SELECT 8, 2, format('GRANT USAGE, CREATE ON SCHEMA %I TO %I;', \(sname), current_user)
+			      WHERE NOT (has_schema_privilege(current_user, \(sname), 'USAGE') AND has_schema_privilege(current_user, \(sname), 'CREATE'))
+			""",
 		"""
-		SELECT 8, 3, format('ALTER ROLE %I BYPASSRLS;', current_user)
-		      FROM pg_roles WHERE rolname = current_user AND NOT (rolbypassrls OR rolsuper)
-		""",
+			SELECT 8, 3, format('ALTER ROLE %I BYPASSRLS;', current_user)
+			      FROM pg_roles WHERE rolname = current_user AND NOT (rolbypassrls OR rolsuper)
+			""",
 		"""
-		SELECT 8, 4, format('GRANT CREATE ON DATABASE %I TO %I;', current_database(), current_user)
-		      WHERE NOT has_database_privilege(current_user, current_database(), 'CREATE')
-		""",
+			SELECT 8, 4, format('GRANT CREATE ON DATABASE %I TO %I;', current_database(), current_user)
+			      WHERE NOT has_database_privilege(current_user, current_database(), 'CREATE')
+			""",
 	]
 	out: """
 		-- The database against its access model (state.provisioning: "checked"). Its owner
@@ -2824,9 +2853,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
 	// predicate that emits them, carried into the file visual lint reads.
 	server: bool
-	// Whether the app claims a native host beside the web one, carried into
-	// shell.yaml so project-native.ts projects its screens to DivKit and winio.
-	native: bool
+	// The native hosts the app ships beside the web one, carried into
+	// shell.yaml so project-native.ts projects its screens to DivKit and winio
+	// and a host's bundle is built only for a host the program names.
+	native: [...("android" | "ios")]
 	// The tables the terminal registers, each with the durability it builds
 	// the collection from (#App.#collections says which).
 	// Development admits declared capabilities before markup first uses them.
@@ -3011,8 +3041,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		floors: S.floors
 		server: S.server
-		if S.native {
-			native: true
+		if len(S.native) > 0 {
+			native: S.native
 		}
 		if S.code.capabilities.auth != _|_ {
 			// A provider's settings are the cluster's (#signIn).
@@ -3891,8 +3921,8 @@ _pgrollDir: "services/database/pgroll"
 			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.providers != _|_ {
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
-			blobs:   D.code.capabilities.blobs
-			issuers: len([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}]) > 0
+			blobs:      D.code.capabilities.blobs
+			issuers:    len([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}]) > 0
 			tokenRoles: list.SortStrings([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}])
 			if D.code.capabilities.ai != _|_ {
 				ai: D.code.capabilities.ai
@@ -3915,6 +3945,7 @@ _pgrollDir: "services/database/pgroll"
 					public_access: strings.Join([for e in updateOnly {(#publicUpdateSql & {"e": e}).out}], "\n\n")
 				}
 				let declared = list.SortStrings([if D.code.state.tokenRoles != _|_ for n, _ in D.code.state.tokenRoles {n}])
+
 				// Where none is declared, the prune rides a migrate step the
 				// release runs anyway, or the one `tokenRoles: {}` asks for, which
 				// is how a program with no other takes its last role back: a step
@@ -5529,6 +5560,7 @@ _pgrollDir: "services/database/pgroll"
 					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
 					tokenRoles: E._access.roles.authenticator.memberOf
 					if len(E._declaredRoles) > 0 {declaredRoles: E._declaredRoles}
+
 					// Whether this release takes back a role an earlier one declared
 					// (write.ts refuses to drop the last one where it does not).
 					if E.cluster.state.reconcile.roles != _|_ {prunesTokenRoles: true}
@@ -5718,7 +5750,7 @@ _pgrollDir: "services/database/pgroll"
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
-				_a: E._access
+				_a:     E._access
 				// Login is set below, once the role stands, so one that already
 				// stood gets it as well.
 				_create: [for r in _a.order if !_a.roles[r].declared if _a.roles[r].kind != "authenticator" {
@@ -6580,6 +6612,7 @@ _pgrollDir: "services/database/pgroll"
 			_rewriteDoors: strings.Join([if E.code.state.rewrites != _|_ for rn, r in E.code.state.rewrites {
 				let matcher = "rewrite_\(strings.Replace(rn, "-", "_", -1))"
 				let params = [if strings.Contains(r.source, ":") for m in regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1) {m}]
+
 				// A `has` item (#RewriteHas) is a regular expression over
 				// the key's decoded value, whose groups are parameters as
 				// the source's are, a key with no expression naming its own
@@ -6594,15 +6627,17 @@ _pgrollDir: "services/database/pgroll"
 					value:   "{http.request.uri.query.\(h.key)}"
 					pattern: [if h.value != _|_ {"^(?:\(h.value))$"}, "(?s)^(.+)$"][0]
 					key:     strings.Join([for j, c in strings.Runes(h.key) {"(?:\(regexp.QuoteMeta(strings.SliceRunes(h.key, j, j+1)))|%(?i:\(strconv.FormatInt(c, 16))))"}], "")
-					groups: [if h.value == _|_ if h.key =~ "[A-Za-z]" {name: ":\(regexp.ReplaceAll("[^A-Za-z]", h.key, ""))", group: "1"}, if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {name: ":\(g)", group: g}]
+					groups:  [if h.value == _|_ if h.key =~ "[A-Za-z]" {name: ":\(regexp.ReplaceAll("[^A-Za-z]", h.key, ""))", group: "1"}, if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {name: ":\(g)", group: g}]
 				}]
 				let tokens = regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1)
+
 				// A source's parameter a function's destination places is held
 				// to the same, read from the path as the matcher reads it: the
 				// expression matches the path itself, since one condition does
 				// not see what another matcher of the set captured.
 				let guarded = [if strings.HasPrefix(r.destination, "/crud/rpc/") for i, p in params if list.Contains(tokens, p) {"!{http.regexp.\(matcher)_path.\(i+1)}.matches(r\"\(_rewriteOperand)\")"}]
 				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\x7b\(strings.TrimPrefix(h.value, "{"))', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if list.Contains(tokens, g.name) {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
+
 				// `vars_regexp` is told the placeholder to read as a string,
 				// which the expression must hold as written, where a
 				// placeholder anywhere else in it is replaced by its value.
@@ -6621,6 +6656,7 @@ _pgrollDir: "services/database/pgroll"
 					[for i, p in params if p == t {"{re.\(matcher).\(i+1)}"}, for h in has for g in h.groups if g.name == t {"{re.\(h.name).\(g.group)}"}, t][0]
 				}], "")
 				let rpc = strings.HasPrefix(placed, "/rpc/")
+
 				// A rewrite to a path alone keeps the request's query, so a
 				// function's ends in the `?` that leaves it none.
 				let query = [if rpc if strings.Contains(placed, "?") {""}, if rpc {"?"}, if strings.Contains(placed, "?") {"&{query}"}, "?{query}"][0]

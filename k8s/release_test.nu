@@ -182,12 +182,12 @@ def test_auth_provider_secrets [] {
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))
 	assert equal $public_client.oidcSecrets []
 	assert equal $public_client.oidcSecretDigest ""
-	let with_release_broker = (auth-provider-environment {
-		OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "origin"
-		OIDC_GOOGLE_ISSUER: "http://localhost:28443", OIDC_GOOGLE_INTERNAL: "http://identity:28443/"
-	} {google: {releaseIssuer: "https://id.example.com"}})
-	assert equal $with_release_broker.oidc.OIDC_GOOGLE_ISSUER "https://id.example.com"
-	assert equal $with_release_broker.oidc.OIDC_GOOGLE_INTERNAL "https://id.example.com"
+	# A local stack leaves the providers off; the release turns on the
+	# program's, and a deployment naming its own keeps them.
+	let local = {OIDC_PROVIDERS: "", OIDC_GOOGLE_CLIENT_ID: "origin", OIDC_GOOGLE_ISSUER: "https://id.example.com"}
+	assert equal (auth-provider-environment $local ["google" "apple"]).oidc.OIDC_PROVIDERS "google,apple"
+	assert equal (auth-provider-environment ($local | update OIDC_PROVIDERS "google") ["google" "apple"]).oidc.OIDC_PROVIDERS "google"
+	assert equal (auth-provider-environment $local).oidc.OIDC_PROVIDERS ""
 	{App: {auth: {oidc: {OIDC_GOOGLE_CLIENT_SECRET: "must-be-refused"}}}} | to json | save -f $data
 	let refused = (try { render-manifests $app.cue_path "kind" --data $data; false } catch {|err|
 		assert ($err.msg | str contains "field not allowed")

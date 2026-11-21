@@ -14,8 +14,8 @@ _developmentApp: (#readCase & {reads: [], writes: []}).app & {
 		handlers: inspect: {of: "another-screen", src: "shell/handlers/inspect.js", note: "Inspect an existing row"}
 	}
 }
-_developmentConfig: (pronto.#shellConfig & {code: _developmentApp, development: true, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: false}).out
-_releaseConfig: (pronto.#shellConfig & {code: _developmentApp, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: false}).out
+_developmentConfig: (pronto.#shellConfig & {code: _developmentApp, development: true, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: []}).out
+_releaseConfig: (pronto.#shellConfig & {code: _developmentApp, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: []}).out
 
 // An unused capability must already be available when HTML first binds it.
 developmentTables: json.Marshal(_developmentConfig.tables) & json.Marshal(["goal", "note", "player"])
@@ -41,7 +41,7 @@ _moduleApp: _developmentApp & {
 		setup: actors: compose: {via: "local", machine: "worker", handler: "machines/compose.js"}
 	}
 }
-_moduleShell: pronto.#shellConfig & {code: _moduleApp, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: false, adapters: ["/omnishell/components/wallclock.js", "/omnishell/components/builtin.js"]}
+_moduleShell: pronto.#shellConfig & {code: _moduleApp, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: [], adapters: ["/omnishell/components/wallclock.js", "/omnishell/components/builtin.js"]}
 _moduleDev: (_moduleShell & {development: true}).out
 _moduleRelease: _moduleShell.out
 _moduleRoute: [for r in _moduleDev.routes if r.screen == "jogo" {r}][0]
@@ -53,7 +53,7 @@ developmentComposedHandler: json.Marshal(_moduleRoute.files.handlers) & json.Mar
 releaseModuleOrder: {handlers: json.Marshal(_releaseRoute.files.handlers), adapters: json.Marshal(_releaseRoute.files.adapters)} & {handlers: json.Marshal(_moduleApp.surface.screens.jogo.files.handlers), adapters: json.Marshal(_moduleApp.surface.screens.jogo.files.adapters)}
 
 _ambiguousApp: _moduleApp & {surface: screens: unbound: {title: "Unbound", route: "/unbound", reads: [], writes: [], charts: [], forms: [], states: [], files: {handlers: [], adapters: []}}}
-_ambiguousShell: (pronto.#shellConfig & {code: _ambiguousApp, development: true, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: false, adapters: ["/omnishell/components/wallclock.js"]}).out
+_ambiguousShell: (pronto.#shellConfig & {code: _ambiguousApp, development: true, migrations: [], floors: {}, hatch: {}, presenter: {policy: "", scripted: [], scripts: {}}, server: true, native: [], adapters: ["/omnishell/components/wallclock.js"]}).out
 // Another route's conflicting choice cannot silently choose a binding here.
 developmentAmbiguousAdapter: json.Marshal([for r in _ambiguousShell.routes if r.screen == "unbound" {r}][0].files.adapters) & json.Marshal(["shell/handlers/shared.js", "shell/handlers/zebra.js"])
 

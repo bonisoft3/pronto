@@ -118,7 +118,7 @@ tasks:
       }
       \$\"log_location: (\$work_fwd)/proc.log
       \" | save -f (\$work | path join \"pc-logs.yaml\")
-      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"CADDY_TLS_HOST_PORT\") and (\$it.var != \"IDENTITY_HTTP_PORT\") | get var | uniq | sort | append (if \$os == \"windows\" { [\"_PC_PORT\"] } else { [] }))
+      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"CADDY_TLS_HOST_PORT\") | get var | uniq | sort | append (if \$os == \"windows\" { [\"_PC_PORT\"] } else { [] }))
       let start_p = (20000 + ((\$h | str substring 0..6 | into int -r 16) mod 7000))
       let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: \"127.0.0.1\", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' (\$pvars | to json -r) (\$start_p | into string) | from json)
       let port = (\$alloc._PC_PORT? | default \$def_port)

@@ -13,15 +13,16 @@ async function exported(code: string, expression: string) {
   return { ...res, value: res.success ? JSON.parse(res.stdout) : undefined };
 }
 
-Deno.test("a provider reaches the terminal's auth and the auth service as a required client", async () => {
+Deno.test("a provider reaches the terminal's auth, and the auth service as one a release turns on", async () => {
   const code = withAuth(`{required: false, service: "/auth", providers: ["google"]}`);
   const files = await exported(code, "out");
   assertEquals(files.success, true, files.stderr);
   assertEquals(files.value["shell/shell.json"].data.auth.providers, ["google"]);
   const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
   assertEquals(env.success, true, env.stderr);
-  assertEquals(env.value.OIDC_PROVIDERS, "google");
-  assertStringIncludes(env.value.OIDC_GOOGLE_CLIENT_ID, "OIDC_GOOGLE_CLIENT_ID is required");
+  // Off unless the deployment turns it on, whose client the service then requires (oidc.ts).
+  assertEquals(env.value.OIDC_PROVIDERS, "${OIDC_PROVIDERS:-}");
+  assertEquals(env.value.OIDC_GOOGLE_CLIENT_ID, "${OIDC_GOOGLE_CLIENT_ID:-}");
 });
 
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
@@ -30,7 +31,7 @@ Deno.test("an app naming no provider leaves the terminal and the auth service as
   assertEquals(files.success, true, files.stderr);
   assertEquals("providers" in files.value["shell/shell.json"].data.auth, false);
   const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
-  assertEquals(env.value.OIDC_PROVIDERS, "");
+  assertEquals(env.value.OIDC_PROVIDERS, "${OIDC_PROVIDERS:-}");
   assertEquals(Object.keys(env.value).some((k) => k.startsWith("OIDC_GOOGLE")), false);
 });
 

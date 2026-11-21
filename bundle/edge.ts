@@ -87,7 +87,7 @@ async function run(cmd: string, args: string[], cwd?: string, env?: Record<strin
 
 const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.json'))) as {
   app?: string
-  native?: boolean
+  native?: string[]
   ai?: Record<string, unknown>
   tables: string[]
   schema?: Record<string, { durability?: string }>
@@ -115,7 +115,7 @@ const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.j
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
 const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities failed')
-const { assets, seedBlobs, blobs, images, signIn, providerRelease } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string }>; providerRelease: Record<string, { releaseIssuer?: string }> }
+const { assets, seedBlobs, blobs, images, signIn } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string }> }
 const routeScreens: Record<string, string> = {}
 for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
 const imagePlan = imagePlanRefusal(routeScreens, images)
@@ -240,16 +240,11 @@ const authVars: Record<string, string> = {
     ...Object.fromEntries(authProviders.flatMap((p) => {
       const upper = p.toUpperCase()
       const cfg = signIn[p] ?? {}
-      const localIssuer = cfg.issuer === 'http://localhost:28443'
       const entries: [string, string][] = []
-      const issuer = Deno.env.get(`OIDC_${upper}_ISSUER`) || (localIssuer ? providerRelease[p]?.releaseIssuer : cfg.issuer)
-      if (issuer) entries.push([`OIDC_${upper}_ISSUER`, issuer])
-      const client = Deno.env.get(`OIDC_${upper}_CLIENT_ID`) || (!localIssuer || issuer ? cfg.client : undefined)
-      if (client) entries.push([`OIDC_${upper}_CLIENT_ID`, client])
-      const scope = Deno.env.get(`OIDC_${upper}_SCOPE`) || (!localIssuer || issuer ? cfg.scope : undefined)
-      if (scope) entries.push([`OIDC_${upper}_SCOPE`, scope])
-      const params = Deno.env.get(`OIDC_${upper}_AUTHORIZE_PARAMS`) || (!localIssuer || issuer ? cfg.params : undefined)
-      if (params) entries.push([`OIDC_${upper}_AUTHORIZE_PARAMS`, params])
+      for (const [setting, own] of [['ISSUER', cfg.issuer], ['CLIENT_ID', cfg.client], ['SCOPE', cfg.scope], ['AUTHORIZE_PARAMS', cfg.params]] as const) {
+        const value = Deno.env.get(`OIDC_${upper}_${setting}`) || own
+        if (value) entries.push([`OIDC_${upper}_${setting}`, value])
+      }
       return entries
     })),
   } : {}),

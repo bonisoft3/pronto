@@ -1,7 +1,7 @@
 # GCP releases use the native Kubernetes stack when GKE is declared;
 # otherwise they run Cloud Run beside Cloud SQL.
 
-use ../k8s/release.nu [resolve-app]
+use ../k8s/release.nu [resolve-app PROGRAM_PROVIDERS]
 use ../release-schema.nu [fresh-schema-runtime]
 use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
@@ -402,16 +402,10 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
 		}
 	}
-	let release_providers = (do { cd $app_info.dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
-	let auth_env = ($release_providers | transpose name cfg | reduce -f $compose.services.auth.environment {|it, acc|
-		let issuer = ($it.cfg.releaseIssuer? | default "")
-		if ($issuer | is-empty) { return $acc }
-		let upper = ($it.name | str uppercase)
-		let ik = $"OIDC_($upper)_ISSUER"
-		let nk = $"OIDC_($upper)_INTERNAL"
-		let acc = if ($acc | get -o $ik | default "") == "http://localhost:28443" { $acc | upsert $ik $issuer } else { $acc }
-		if ($acc | get -o $nk | default "") == "http://identity:28443/" { $acc | upsert $nk $issuer } else { $acc }
-	})
+	let providers = (do { cd $app_info.dir; ^cue export . -e $PROGRAM_PROVIDERS --out json } | from json)
+	let auth_env = if ($compose.services.auth.environment.OIDC_PROVIDERS? | default "" | is-not-empty) or ($providers | is-empty) { $compose.services.auth.environment } else {
+		$compose.services.auth.environment | upsert OIDC_PROVIDERS ($providers | str join ",")
+	}
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
@@ -438,7 +432,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $sidecar_env | merge $render_cfg | merge $airlock_cfg | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own}, runHost: $run_host} | merge $migrate | merge $ticker | merge $sidecar_env | merge $render_cfg | merge $airlock_cfg | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp

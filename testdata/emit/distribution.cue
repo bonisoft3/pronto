@@ -137,7 +137,7 @@ _nativeApp: pronto.#App & {
 	for k, v in _code if k != "capabilities" {(k): v}
 	capabilities: {
 		for k, v in _code.capabilities if k != "native" {(k): v}
-		native: true
+		native: ["android", "ios"]
 	}
 }
 _nativeBuild: (pronto.#DefaultBuild & {code: _nativeApp, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project

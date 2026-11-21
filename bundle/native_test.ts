@@ -7,10 +7,11 @@ import { buildNativeApp } from './native.ts'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
 const snapcardsDir = path.join(repoRoot, 'apps/snapcards')
+const realworldDir = path.join(repoRoot, 'apps/realworld')
 const omnishellDir = path.join(repoRoot, 'plugins/omnishell')
 const mechaDir = path.join(repoRoot, 'libraries/mecha')
 
-Deno.test('buildNativeApp emits TWA-compatible Android Gradle project and iOS SwiftPM bundle with pre-seeded offline caches & curated derived.sql', async () => {
+Deno.test('buildNativeApp emits TWA-compatible Android Gradle project and, for an app that ships one, an iOS SwiftPM bundle with pre-seeded offline caches & curated derived.sql', async () => {
   const tmpRoot = await Deno.makeTempDir({ prefix: 'pronto-native-bundle-' })
   try {
     const kp = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair
@@ -76,34 +77,33 @@ Deno.test('buildNativeApp emits TWA-compatible Android Gradle project and iOS Sw
     assert.equal(Number(seededDecks.cnt), 8)
     sqlite.close()
 
-    // iOS target: bundle ID fun.snapcards.app, Associated Domains, Sign in with Apple entitlement, and identical bridge ABI.
+    // Snapcards ships an Android host alone: an iOS bundle of it would be an
+    // App Store build that never met App Review 4.8's Apple sign-in check.
+    await assert.rejects(
+      buildNativeApp({ appDir: snapcardsDir, platform: 'ios', omnishellDir, mechaDir, outDir: path.join(tmpRoot, 'ios-refused'), domain: 'snapcards.fun', ed25519PrivateKeyPkcs8: pkcs8 }),
+      /declares no ios host/,
+    )
+
+    // iOS target, from an app that ships one: bundle ID, Associated Domains, and the same bridge ABI.
     const iosOut = path.join(tmpRoot, 'ios')
     const iosRes = await buildNativeApp({
-      appDir: snapcardsDir,
+      appDir: realworldDir,
       platform: 'ios',
       omnishellDir,
       mechaDir,
       outDir: iosOut,
-      domain: 'snapcards.fun',
+      domain: 'realworld.bonisoft3.com',
+      iosBundleId: 'com.bonisoft3.realworld',
       ed25519PrivateKeyPkcs8: pkcs8,
     })
 
-    assert.equal(iosRes.bundleIdentifier, 'fun.snapcards.app')
-    assert.equal(iosRes.nativeBridgeAddress, androidRes.nativeBridgeAddress)
+    assert.equal(iosRes.bundleIdentifier, 'com.bonisoft3.realworld')
     assert.equal(iosRes.publicKeyBase64, expectedPubB64)
 
     const xcconfig = await Deno.readTextFile(path.join(iosOut, 'Config/App.xcconfig'))
-    assert.ok(xcconfig.includes('PRODUCT_BUNDLE_IDENTIFIER = fun.snapcards.app'))
+    assert.ok(xcconfig.includes('PRODUCT_BUNDLE_IDENTIFIER = com.bonisoft3.realworld'))
     const entitlements = await Deno.readTextFile(path.join(iosOut, 'App/App.entitlements'))
-    assert.ok(entitlements.includes('applinks:snapcards.fun'))
-    assert.ok(entitlements.includes('com.apple.developer.applesignin'))
-    const infoPlist = await Deno.readTextFile(path.join(iosOut, 'App/Info.plist'))
-    assert.ok(infoPlist.includes('<string>snapcards</string>'))
-
-    const printDivkit = JSON.parse(
-      await Deno.readTextFile(path.join(iosOut, 'Sources/SnapcardsApp/Resources/screens/print.divkit.json')),
-    ) as { card: { log_id: string } }
-    assert.equal(printDivkit.card.log_id, 'omnishell_print')
+    assert.ok(entitlements.includes('applinks:realworld.bonisoft3.com'))
   } finally {
     await Deno.remove(tmpRoot, { recursive: true }).catch(() => {})
   }

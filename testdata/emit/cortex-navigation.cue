@@ -24,7 +24,7 @@ _navigationCode: _code & {
 		setup: actors: activate: via: "navigation"
 	}
 }
-_navigationShell: (pronto.#shellConfig & {code: _navigationCode, migrations: [], server: true, native: false}).out
+_navigationShell: (pronto.#shellConfig & {code: _navigationCode, migrations: [], server: true, native: []}).out
 navigationConfig: _navigationShell.cortex.config & _navigationCode.state.cortex.navigation.config
 navigationActor:  _navigationShell.cortex.actors.activate.via & "navigation"
 

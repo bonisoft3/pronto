@@ -1335,8 +1335,8 @@ import (
 #Rewrite: {
 	source:      =~"^(/([A-Za-z0-9][A-Za-z0-9_-]*|:[a-z][A-Za-z0-9_]*))+$" & !~"^/(crud|signal|electric|auth|poke|blob-claim|blobs|img|health|omnishell|shell|seed-assets)(/|$)"
 	destination: =~"^/crud/(rpc/)?[a-z][a-z0-9_]*(\\?[^\\s{}\"`\\\\#]*)?$"
-	methods?: [#RewriteMethod, ...#RewriteMethod] & list.UniqueItems()
-	has?: [#RewriteHas, ...#RewriteHas]
+	methods?:    [#RewriteMethod, ...#RewriteMethod] & list.UniqueItems()
+	has?:        [#RewriteHas, ...#RewriteHas]
 }
 #RewriteMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
 
@@ -1371,6 +1371,7 @@ import (
 #TokenRole: close({
 	note: string & !=""
 })
+
 // A Postgres role name none of the cluster's own roles, nor one Postgres or a
 // managed database reserves. Emitted SQL quotes it.
 #TokenRoleName: =~"^[a-z][a-z0-9_]{0,62}$" & !~"^(anon|app_user|service|electric|authenticator|postgres|public|none|app|streaming_replica)$" & !~"^(pg_|cloudsql|rds|azure_)"
@@ -1894,7 +1895,7 @@ import (
 		// pronto's migrations ("generated", the default), or the instance's owner,
 		// which every release then checks before its migrations ("checked"),
 		// refusing any difference with the statements that fix it.
-		provisioning?: "generated" | "checked"
+		provisioning?:      "generated" | "checked"
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's
@@ -2068,18 +2069,17 @@ import (
 				_providersPresent: true & (providers != _|_)
 				_named:            true & list.Contains(providers, Name)
 				issuer?:           string
-				releaseIssuer?:    string
 				internal?:         string
 				client?:           string
 				scope?:            string
 				params?:           string
 			}
 		}
-		// The app ships a native host beside the web one, so every route
-		// projects deterministically to DivKit (phone) and winio (desktop) via
-		// project-native.ts. The host itself is the terminal's; this only says
-		// the app asks for it.
-		native: *false | bool
+		// The native hosts the app ships beside the web one, each for its
+		// store: every route projects deterministically to DivKit (phone) and
+		// winio (desktop) via project-native.ts. The hosts are the terminal's;
+		// this only says which the app asks for.
+		native: *[] | [...("android" | "ios")] & list.UniqueItems()
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
@@ -2125,7 +2125,7 @@ import (
 			models?: mechaCluster.#AiTierOverrides
 			targets?: {
 				[("browser" | "pages" | "docker" | "local" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
-				cloudflare?: mechaCluster.#AiEdgeOverrides
+				cloudflare?:                                                          mechaCluster.#AiEdgeOverrides
 			}
 		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
@@ -2183,6 +2183,7 @@ import (
 				src!:  string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
 				files: [string, ...string] & [...(string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")]
 			}
+
 			// The module the bundle starts from, one of `files`, which hold
 			// everything it imports beside its packages (its deno.json and lock
 			// among them), and the heap the isolate may hold, in MiB, which a
@@ -2785,10 +2786,10 @@ import (
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
 		}],
-		// A native host ships on iOS, whose App Store requires Sign in with Apple
+		// An iOS host ships on the App Store, which requires Sign in with Apple
 		// beside any other provider (App Review Guideline 4.8).
-		[if (A.capabilities & null) == _|_ if A.capabilities.native if len(_authProviders) > 0 if !list.Contains(_authProviders, "apple") {
-			"a native host ships on iOS, where the App Store requires Sign in with Apple beside \(_authProviders[0]) (App Review Guideline 4.8): add apple to capabilities.auth.providers"
+		[if (A.capabilities & null) == _|_ if list.Contains(A.capabilities.native, "ios") if len(_authProviders) > 0 if !list.Contains(_authProviders, "apple") {
+			"an iOS host ships on the App Store, which requires Sign in with Apple beside \(_authProviders[0]) (App Review Guideline 4.8): add apple to capabilities.auth.providers"
 		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true
@@ -2872,16 +2873,18 @@ import (
 	_signalRefusal: [if len(_signalViolations) == 0 {true}, _signalViolations[0]][0] & true
 	// A destination names only its source's parameters, and two rewrites one
 	// request matches would leave the answer to their order.
-	_rewrites: [if A.state.rewrites != _|_ {A.state.rewrites}, {}][0]
+	_rewrites:        [if A.state.rewrites != _|_ {A.state.rewrites}, {}][0]
 	_rewriteSegments: {for n, r in _rewrites {(n): strings.Split(r.source, "/")}}
 	// The parameters a rewrite's `has` gives its destination: the letters
 	// of a key that states no value, where it has any, and the groups a
 	// value's expression names, which the expression itself tells: made
 	// optional it matches nothing, and names every group it has.
-	_rewriteHas: {for n, r in _rewrites {(n): [if r.has != _|_ for h in r.has for p in [
-		if h.value == _|_ if h.key =~ "[A-Za-z]" {regexp.ReplaceAll("[^A-Za-z]", h.key, "")},
-		if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {g},
-	] {p}]}}
+	_rewriteHas: {for n, r in _rewrites {
+		(n): [if r.has != _|_ for h in r.has for p in [
+			if h.value == _|_ if h.key =~ "[A-Za-z]" {regexp.ReplaceAll("[^A-Za-z]", h.key, "")},
+			if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {g},
+		] {p}]
+	}}
 	_rewriteViolations: [
 		for n, r in _rewrites
 		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
@@ -2894,11 +2897,11 @@ import (
 		for n, r in _rewrites for p in _rewriteHas[n] if strings.Contains(r.source + "/", "/:" + p + "/") {
 			"rewrite \(n): `has` and the source both give :\(p), where Next.js would have the one of `has` replace the source's: name one of them by a group of its value, (?<name>…)"
 		},
-		for n, r in _rewrites for i, p in _rewriteHas[n] if list.Contains(list.Drop(_rewriteHas[n], i+1), p) if !list.Contains(list.Take(_rewriteHas[n], i), p) {
+		for n, r in _rewrites for i, p in _rewriteHas[n] if list.Contains(list.Drop(_rewriteHas[n], i + 1), p) if !list.Contains(list.Take(_rewriteHas[n], i), p) {
 			"rewrite \(n): `has` gives :\(p) twice, where Next.js would have the later replace the earlier: name one of them by a group of its value, (?<name>…)"
 		},
 		// The door reads a key's one value, so one item states all of it.
-		for n, r in _rewrites if r.has != _|_ for i, h in r.has if list.Contains([for o in list.Drop(r.has, i+1) {o.key}], h.key) if !list.Contains([for o in list.Take(r.has, i) {o.key}], h.key) {
+		for n, r in _rewrites if r.has != _|_ for i, h in r.has if list.Contains([for o in list.Drop(r.has, i + 1) {o.key}], h.key) if !list.Contains([for o in list.Take(r.has, i) {o.key}], h.key) {
 			"rewrite \(n): two `has` items name the key \(h.key), and one item states all a key's value meets"
 		},
 		// Go's expression takes a name declared twice, and the door gives
@@ -2931,7 +2934,7 @@ import (
 		// PostgREST reads it: an escape would hide one named twice.
 		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?."
 		let keys = [for pair in strings.Split(strings.SplitN(r.destination, "?", 2)[1], "&") {strings.SplitN(pair, "=", 2)[0]}]
-		for i, k in keys if strings.Contains(k, "%") || (list.Contains(list.Drop(keys, i+1), k) && !list.Contains(list.Take(keys, i), k)) {
+		for i, k in keys if strings.Contains(k, "%") || (list.Contains(list.Drop(keys, i + 1), k) && !list.Contains(list.Take(keys, i), k)) {
 			[
 				if strings.Contains(k, "%") {"rewrite \(n): a function's destination writes the key \(k) with an escape, and a key is written as PostgREST reads it, so that one named twice is seen"},
 				"rewrite \(n): a function's destination names \(k) twice, and PostgREST takes the last, so the one before it is never the argument",
@@ -2989,7 +2992,7 @@ import (
 	_groupOver: [for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ for g in e.access.groups {
 		group:  g.group
 		entity: n
-		over: [if g.of == _|_ {e.table}, for f in e.fields if g.of != _|_ if f.name == g.of if f.ref != _|_ {f.ref}, "\(e.table).\(g.of)"][0]
+		over:   [if g.of == _|_ {e.table}, for f in e.fields if g.of != _|_ if f.name == g.of if f.ref != _|_ {f.ref}, "\(e.table).\(g.of)"][0]
 	}]
 	_groupViolations: [
 		// A membership names a group as "<key>:<name>" and no entity, so one
@@ -3085,7 +3088,7 @@ import (
 	// A row handed to another owner leaves the previous one a grant, which the
 	// cluster writes from the row alone: its key, the grantee and the role.
 	_handoverViolations: [
-		if len(_groupViolations) + len(_grantViolations) == 0
+		if len(_groupViolations)+len(_grantViolations) == 0
 		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
 		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields
 		if f.required if !f.retired if f.default == _|_ if f.generated == _|_ if !(f.pk && f.type == "uuid")
@@ -3094,8 +3097,8 @@ import (
 		},
 	]
 	_handoverRefusal: [if len(_handoverViolations) == 0 {true}, _handoverViolations[0]][0] & true
-	_groupRefusal: [if len(_groupViolations) == 0 {true}, _groupViolations[0]][0] & true
-	_grantRefusal: [if len(_grantViolations) == 0 {true}, _grantViolations[0]][0] & true
+	_groupRefusal:    [if len(_groupViolations) == 0 {true}, _groupViolations[0]][0] & true
+	_grantRefusal:    [if len(_grantViolations) == 0 {true}, _grantViolations[0]][0] & true
 	_invokes: [
 		if A.state.mecha.rows != _|_
 		for mName, m in A.state.mecha.rows
@@ -3365,7 +3368,7 @@ import (
 		// directory, where a shim is found by its name.
 		[for hn, h in A.capabilities.hatches if h.kind == "isolate"
 		let names = [for f in h.files if strings.HasSuffix(f, ".wasm") || strings.HasSuffix(f, ".wasm.js") {path.Base(f, path.Unix)}]
-		for i, n in names if list.Contains(list.Drop(names, i+1), n) {
+		for i, n in names if list.Contains(list.Drop(names, i + 1), n) {
 			"isolate hatch \(hn) has two files named \(n): its WebAssembly and shims share one directory beside the bundle"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.port != 8080 {

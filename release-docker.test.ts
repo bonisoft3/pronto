@@ -612,3 +612,15 @@ Deno.test("the appliance's clock ends on a refused poke, so it restarts", async 
   assert(!line.includes('|| echo "clock: poke failed"'), "the clock swallows a refused poke");
   assertEquals(overlayOf(rd).processes.clock.availability?.restart, "on_failure");
 });
+
+// Regression: the appliance's auth ran the local stack's environment, which
+// turns on no provider, so a docker release offered none of its program's.
+Deno.test("the appliance turns on the providers the program offers, which the deployment may still name", async () => {
+  const withGoogle = paymentProgram()
+    .replace("targets: []", 'targets: ["docker"]')
+    .replace("capabilities: {hatches: {},", `capabilities: {auth: {required: false, service: "/auth", providers: ["google"], provider: google: {issuer: "https://id.example.com", client: "origin"}}, hatches: {},`);
+  const auth = overlayOf(await releaseDocker(withGoogle)).processes.auth;
+  assertEquals(auth.environment, ["OIDC_PROVIDERS=${OIDC_PROVIDERS:-google}"]);
+  const without = overlayOf(await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'))).processes;
+  assertEquals("auth" in without, false);
+});

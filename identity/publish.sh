@@ -21,18 +21,15 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/src/broker" "$work/src/hydra"
 cp "$here/oidc.ts" "$work/src/"
 cp "$here/broker/core.ts" "$here/broker/main.ts" "$work/src/broker/"
-cp "$here/hydra/front.ts" "$here/hydra/fake.ts" "$here/hydra/local.sh" "$work/src/hydra/"
+cp "$here/hydra/front.ts" "$work/src/hydra/"
 cat > "$work/src/README.md" <<EOF
 # pronto-identity $V
 
 The identity broker's runtime: Ory Hydra behind a front that signs people in
-through Google (or, on a developer's machine, a stand-in for it) and gives each
-application its own subject for them. Published from bonisoft3/pronto
+through Google and Apple and gives each application its own subject for them. Published from bonisoft3/pronto
 identity/ at $rev; its source, tests and docs live there.
 
-- \`$IMAGE:$V\`: the front, for an app's docker launch.
-- \`hydra/local.sh hydra|front\`: the broker as two of an app's launch@host
-  processes, run from this image's /app.
+- \`$IMAGE:$V\`: the front, beside the operator's Hydra.
 EOF
 
 # The front's image.

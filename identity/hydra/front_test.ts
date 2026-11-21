@@ -253,26 +253,6 @@ cases.push(["a tenant with a valid _pronto-identity DNS TXT record hops through 
   ]);
 }]);
 
-cases.push(["a localhost app on a broker signing in test people is verified as a DNS record verifies one, profile and all", async () => {
-  const LOCAL = "https://snapcards.localhost:8743";
-  const verifier = randomToken(32);
-  const q = new URLSearchParams({
-    client_id: LOCAL, redirect_uri: `${LOCAL}/auth/oidc/google/callback`, response_type: "code", scope: "openid profile email",
-    state: "st-local", nonce: "nn-local", provider: "google", code_challenge: await sha256url(verifier), code_challenge_method: "S256",
-  });
-  nextWho = "alice";
-  const atGoogle = await browse(`${ISSUER}/oauth2/auth?${q}`);
-  assertEquals(atGoogle.res.status, 302, "no interstitial for an app on this machine");
-  await atGoogle.res.body?.cancel();
-  const hop = await fetch(atGoogle.at, { redirect: "manual" });
-  await hop.body?.cancel();
-  const back = await browse(hop.headers.get("location")!, atGoogle.jar);
-  await back.res.body?.cancel();
-  const t = await redeem(LOCAL, new URL(back.at).searchParams.get("code")!, verifier);
-  const claims = await verifyIdToken(t.body.id_token, { alg: "RS256", issuers: [ISSUER], audience: LOCAL, nonce: "nn-local", keys });
-  assertEquals([claims.name, claims.email], ["Alice Example", "alice@example.test"]);
-}]);
-
 // Token roles: Hydra asks the front's token hook for a client credentials
 // token's role, which only the operator's registration names.
 const HOOK_SECRET = "h".repeat(40);
@@ -367,7 +347,7 @@ Deno.test({ name: "the broker on Hydra end to end", sanitizeOps: false, sanitize
   const hydraUrls = { public: `http://127.0.0.1:${HYDRA_PUBLIC_PORT}`, admin: `http://127.0.0.1:${HYDRA_ADMIN_PORT}` };
   const server = Deno.serve(
     { port: frontPort, hostname: "127.0.0.1", onListen() {} },
-    await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls, resolveTxt: async (host) => txtRecords.get(host) ?? [], trustLocal: true, hookSecret: HOOK_SECRET }),
+    await front({ issuer: ISSUER, secret: SECRET, providers: [provider], hydra: hydraUrls, resolveTxt: async (host) => txtRecords.get(host) ?? [], hookSecret: HOOK_SECRET }),
   );
   try {
     for (let i = 0; ; i++) {

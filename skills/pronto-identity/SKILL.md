@@ -47,13 +47,11 @@ verbs are green:
 
    import "github.com/bonisoft3/pronto/identity"
 
-   identity.#Signin & {signin: providers: ["google"]}
+   identity.#Signin & {signin: {broker: "https://id.example.com", providers: ["google"]}}
    ```
 
-   `signin: releaseBroker: "https://id.example.com"` keeps the local Hydra +
-   stand-in broker for `launch` and `integrate` while pinning the production
-   broker for release targets; `signin: broker: "https://id.example.com"` uses
-   the remote broker everywhere and runs no local broker.
+   The broker is the operator's; the app runs none. `launch` and `integrate`
+   offer guest and passkey only; a release turns the providers on.
 2. Add a decision for the sign-in to `ir.html` (and `code.decisions` in CUE); `saytw generate` re-pins `meta.ir.sha256` automatically.
 3. The nav's Sign in opens in place onto each provider beside the passkey. An
    app that hides the nav places `data-auth-provider="<name>"` and
@@ -63,23 +61,12 @@ verbs are green:
 
 The broker's pins move with pronto's version: nothing to refresh.
 
-## The local broker
+## Local stacks
 
-With the default broker (`http://localhost:28443`), the app's own launch brings
-it up: `identity-hydra` (Ory Hydra, in memory) and `identity` (the front), two
-services of its cluster.
-
-- `launch@host` runs each as a host process (Hydra via mise, the front directly
-  under Deno). With the operator's `~/.config/pronto-identity/broker.env` it signs
-  in through Google; without it, through a stand-in that says it is not Google and
-  signs in a test person (`tester`, `tester-2`).
-- `launch` runs their images: Hydra's (`oryd/hydra:v26.2.0`), and the front's
-  (standard Deno base image, or Mecha roster), the stand-in unless
-  `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
-- Its port is the operator's standalone broker's: run one or the other.
-
-A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
-`_INTERNAL`).
+`launch` and `integrate` run no broker and turn on no provider, so the panel
+offers guest and passkey alone. A release turns on the program's providers
+(`OIDC_PROVIDERS`), and the terminal draws those the auth service names. An
+app's `verify` signs in through the provider against its release.
 
 ## Deploy targets
 
