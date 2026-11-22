@@ -6,7 +6,7 @@ the authored views into `schema.json`, and writes one DuckDB query per selected
 output. The application
 executes generated SQL against a supplied snapshot on Pages and Cloudflare, while
 `release@docker` maintains the same authored materialized views incrementally in
-RisingWave through [Mecha compute](https://github.com/bonisoft3/mecha/blob/v0.31.0/docs/compute.md).
+RisingWave through [Mecha compute](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/compute.md).
 
 ```ts
 import { checkCompiledProgram, compileProgram } from "./compiler.ts";
