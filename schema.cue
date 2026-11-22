@@ -1214,7 +1214,10 @@ import (
 	// which the handler never holds. Or a declared bridge, for a sink that
 	// does not speak HTTP, or mecha's AI gateway (`ai: "text" | "image"`).
 	// `contentType` names what an origin takes that is not JSON; its handler
-	// sends the body already encoded, as a string.
+	// sends the body already encoded, as a string. "multipart/form-data" is the
+	// one of its family, its boundary the airlock's: the handler sends a list
+	// of FormData parts, {name, value} or {name, filename, type?, bytes | blob}
+	// (bytes as base64, blob a content key), and the airlock encodes them.
 	//
 	// `targets` overrides the sink per release target, as ai.targets does the
 	// models: the entry wins, the rest take the default, and a target left with
@@ -1231,7 +1234,7 @@ import (
 		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
 		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin | #NamedOrigin, bridge?: string}
 		credential?:  #Credential
-		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
+		contentType?: "multipart/form-data" | =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json" & !~"^multipart/"
 	}
 
 	// A read: the effect is this HTTP request, a GET, whose answer is the

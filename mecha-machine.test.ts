@@ -528,6 +528,12 @@ Deno.test("an origin that takes no JSON declares its media type, and only an ori
   const files = await emitFiles(program);
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.contentType, "application/x-www-form-urlencoded");
   assertStringIncludes(await refusal(program.replace("application/x-www-form-urlencoded", "application/json")), "contentType");
+  // Of the multipart family only form-data, bare: the airlock picks the boundary.
+  const multipart = await emitFiles(program.replace("application/x-www-form-urlencoded", "multipart/form-data"));
+  assertEquals(JSON.parse(JSON.stringify(multipart["services/airlock/effects.json"])).data.effects.charge.contentType, "multipart/form-data");
+  for (const bad of ["multipart/mixed", "multipart/form-data; boundary=x"]) {
+    assertStringIncludes(await refusal(program.replace("application/x-www-form-urlencoded", bad)), "contentType");
+  }
 });
 
 Deno.test("a sink's credential is a header the airlock adds from a declared secret, required of the environment and handed to no handler", async () => {
