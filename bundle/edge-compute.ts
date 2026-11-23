@@ -32,10 +32,13 @@ export async function writeEdgeCompute(out: string, mecha: string, omnishell: st
   const engine = await packageDuckDB(path.join(queryDirectory, 'duckdb'))
   const edge = path.join(mecha, 'packages/mecha-edge/src')
   const runtime = path.join(mecha, 'services/compute')
+  // Every local module the Workers import, whatever files this mecha version splits them into.
+  const graph = async (entry: string) => (JSON.parse(await command(['info', '--json', '--frozen', '--config', path.join(runtime, 'deno.json'), entry])) as
+    { modules: { specifier: string }[] }).modules.map(module => module.specifier).filter(specifier => specifier.startsWith('file:')).map(specifier => fileURLToPath(specifier))
+  const roots = [...['snapshot-query.ts', 'snapshot-compute.ts', 'paged-query-action.ts', 'paged-compute.ts', 'paged-transport.ts'].map(file => path.join(edge, file)),
+    path.join(runtime, 'static-build.ts')]
   const hostFiles = [
-    ...['chunk-limits.ts', 'execution.ts', 'json.ts', 'bounded.ts'].map(file => path.join(mecha, 'packages/compute-snapshot/src', file)),
-    ...['compute.ts', 'snapshot-query.ts', 'snapshot-compute.ts', 'snapshot-program.ts', 'paged-query.ts', 'execution-host.ts', 'paged-compute.ts', 'paged-transport.ts', 'paged-query-action.ts', 'query-sql.ts'].map(file => path.join(edge, file)),
-    ...['static-build.ts', 'static-cage.ts', 'query-stages.ts', 'wasm-select.ts', 'wasi.ts'].map(file => path.join(runtime, file)),
+    ...[...new Set((await Promise.all(roots.map(graph))).flat())].sort(),
     fileURLToPath(new URL('edge-compute.ts', import.meta.url)),
     ...['mise.toml', 'mise.lock'].map(file => path.join(mecha, 'packages/pglite-workerd', file)),
   ]
@@ -119,7 +122,7 @@ export class Queries {
     try {
       const body=await request.json();
       const db=await this.open(path==='/paged');
-      return Response.json(path==='/paged'?await pagedQueryAction(db,programs,body):snapshotQuery(db,programs,body));
+      return Response.json(path==='/paged'?await pagedQueryAction(db,programs,body):await snapshotQuery(db,programs,body));
     } catch(error) { return new Response(error instanceof Error ? error.message : String(error),{status:500}); }
   }
 }
