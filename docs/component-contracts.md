@@ -214,6 +214,32 @@ Declared via `meta.preconnect: string | #PreconnectItem | [...(string | #Preconn
 - **Crossorigin**: Preconnect accepts origin string shorthand (`"https://fonts.googleapis.com"`) or `#PreconnectItem` with `crossorigin: true` (emitting `<link rel="preconnect" href="..." crossorigin>`).
 - **Validation**: Origins must begin with `https://`, `http://`, or `//` and cannot contain whitespace, newlines, or `..`.
 
+### Google Ads tag (`meta.googleTag`)
+
+Declared via `meta.googleTag: #GoogleTag` (`id: "AW-…"`, `hosts`) beside `meta.consent`, which it requires; `schema.cue` states what each field means. The tag runs in a **tag frame**, `shell/tag.html`, a hidden frame of the app's own origin:
+
+- **Two documents**: the entry carries one inline bridge, admitted by its hash, and nothing of Google's; the terminal's policy is otherwise unchanged, its `frame-src 'self'` admitting the frame. The frame carries its own policy as its meta, which the door leaves alone (`@terminal` excludes it): Google's Ads origins for scripts and pings, `img-src https:` for the remarketing pixel at the reader's own `www.google.<TLD>`, no Trusted Types. Its window is its own realm, so the terminal's lockdown never reaches Google's scripts and Google's scripts never reach a sealed intrinsic.
+- **First-party**: the frame shares the app's origin, so the conversion linker's `_gcl_aw` and `_gcl_au` are the app's cookies. The same origin is also why the frame is no boundary against Google's code, which can reach its parent; what it separates is policy and realm.
+- **Messages**: both sides check origin and source. The terminal's first `gtag("consent", "update", …)` mounts the frame, which announces `ready`; the bridge answers `init` with that consent, the landing URL as `page_location`, the document's referrer and the landing `gclid`, `gbraid` and `wbraid` (written into the frame's own address before the loader runs). Each push or traverse of the Navigation API is a `page_view` with its address and the one before; a replace is not. The bridge's `gtag` forwards `consent` and `event` commands, throws on any other, and throws on an event before the terminal has stated consent; the frame throws on a message it does not know. The frame configures with `page_location` and `page_referrer` stated and has no referrer of its own, so Ads sees the reader's page, never `/shell/tag.html`.
+- **Hosts**: the bridge mounts the frame on a host in `hosts` alone, and the frame refuses to run unframed or elsewhere, so a launch, a test or a preview sends Google nothing. An empty `hosts` is refused, as is a `pages` release, one file with no frame beside it.
+- **Consent**: every storage starts denied, and the frame applies the consent `init` carries before `config`, so the tag never measures under a default it did not ask for. Where storage is denied the tag sends cookieless pings with ad data redacted; a later update writes the landing gclid's cookies and remarkets.
+- **Why a frame**: in the app's realm, remarketing's `googleads.g.doubleclick.net` viewthroughconversion script is refused by the terminal's Trusted Types, and with Google's `goog#html` policy admitted it throws into SES's uncaught handler (`browser-security.test.ts`). Loosening the terminal for one vendor would weaken every screen; a frame weakens nothing the app runs.
+- **Why not a hatch**: a hatch is app code behind ports into the machines; the tag has no port, runs before any screen, and both its scripts are fixed text the compiler hashes, so it belongs with the envelope. Its egress is a level 4 effect nonetheless, which is why it is a declaration a reviewer reads and consent-gated by default.
+
+### Consent (`meta.consent`)
+
+Declared via `meta.consent: #Consent` (`mode`, `none?`, `policy: {url, version}`) beside the tag it governs. A tag without consent is refused, and so is consent without a tag. The terminal draws it from the declaration (omnishell's `interpreter/consent.js`), from `shell.json`'s `consent`.
+
+- **Purposes**: in an advertiser's words, one purpose is asked: `advertising`, Consent Mode's `ad_storage`, `ad_user_data` and `ad_personalization`. Google's `analytics_storage` follows it, so Google stores nothing unless advertising is granted; that keeps the choice one question. `measurement`, the app's own first-party analytics into its own lake, is never asked. `adServing` is reserved for the publisher's side: an app showing others' ads (AdMob, AdSense) owes a TCF string, which a future `meta.adServing` would produce through c15t or a certified CMP. It is not built.
+- **Everyone alike**: the terminal does not know where a reader is and does not ask the door. Every reader on the tag's `hosts` gets the same bar, so a launch or a test, on any other host, never sees it.
+- **Mode `bar`** (the default): a compact strip along the bottom on the first view that leaves the page usable. It holds one sentence, the policy link, and Reject and Accept as one control styled once (emit.cue's `_consentCss`, on the design's tokens). It is first in the body, so the first Tab reaches it, and its words are the `chrome_consent_*` keys, which `check i18n` asks of every catalogue.
+  - Until the reader answers, advertising is denied and the bar is shown on every view.
+  - An answer is final: a Reject is not asked again. Global Privacy Control (`navigator.globalPrivacyControl`) is read as a Reject and the bar is not shown, unless the reader has explicitly accepted, which stands.
+  - Once answered, or under GPC, a shield control in the corner stands in for the bar. It reopens the bar, focusing its first button and marking the held choice `aria-pressed`; Escape closes it again.
+- **Mode `none`**: nobody is asked. `none.advertising` (`denied` or `granted`) must be written, and it holds for every reader. Nothing is drawn.
+- **Choice**: kept on the device under `pronto-consent` as `{version, advertising, at}`, beside the session. A record under another policy version is asked again.
+- **Order**: before any screen, the terminal states the signals (the held choice, else denied) through the bridge's `gtag`, which mounts the tag frame with them; each later choice is an update.
+
 ## One graph
 
 ```

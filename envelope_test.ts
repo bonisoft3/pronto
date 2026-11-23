@@ -411,6 +411,23 @@ Deno.test("malformed preconnect href is refused at compile time", async () => {
   assertStringIncludes(stderr, "preconnect href must begin with https://, http://, or //");
 });
 
+Deno.test("a Google tag is refused on a pages release, which serves no frame beside its one file", async () => {
+  const stderr = await assertCueFails(`
+    meta: {
+      name: "tagged-pages"
+      description: "a tag on pages"
+      googleTag: {id: "AW-123", hosts: ["pages.example"]}
+      consent: policy: {url: "https://pages.example/privacy", version: "1"}
+      ir: sha256: ""
+      targets: ["pages"]
+      clocks: []
+      decisions: {}
+      tests: {}
+    }
+  `);
+  assertStringIncludes(stderr, "googleTag needs its frame served beside the app");
+});
+
 Deno.test("path traversal with .. in wellKnown is refused at compile time", async () => {
   const stderr = await assertCueFails(`
     meta: {

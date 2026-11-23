@@ -5,8 +5,10 @@
 package pronto
 
 import (
+	"crypto/sha256"
 	"list"
 	"path"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/yaml"
 	"regexp"
@@ -1860,6 +1862,31 @@ import (
 	creator?:     string
 }
 
+// A Google Ads tag: page views, remarketing and the conversion linker's
+// first-party _gcl_* cookies for the readers of `hosts`, run in a frame of the
+// app's origin. Any other host loads nothing, so a launch or a test reaches no
+// Google server. Every storage starts denied and follows what the terminal
+// states from meta.consent, which the tag requires.
+#GoogleTag: {
+	id:    =~"^AW-[0-9]+$"
+	hosts: [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
+}
+
+// The reader's consent to advertising: the app's tags storing and sending
+// for ads (Consent Mode's ad_storage, ad_user_data and ad_personalization).
+// The terminal asks every reader alike, wherever they are, in a bar on the
+// first view; `none` asks nobody and states `none.advertising` for everyone.
+// Measurement, the app's own analytics into its own lake, is never asked.
+#Consent: {
+	mode: *"bar" | "none"
+	none?: advertising!: "denied" | "granted"
+	// The privacy policy the bar links; a new version asks every reader again.
+	policy: {
+		url:     =~"^https://[^\\s]+$"
+		version: =~"^[0-9A-Za-z][0-9A-Za-z.-]*$"
+	}
+}
+
 #Llms: {
 	text?:     string
 	file?:     string
@@ -2391,6 +2418,8 @@ import (
 		wellKnown?: [string]: #WellKnownItem
 		preconnect?:  string | #PreconnectItem | [...(string | #PreconnectItem)]
 		dnsPrefetch?: string | [...string]
+		googleTag?:   #GoogleTag
+		consent?:     #Consent
 		themeColor?:  string
 		sitemap?:     #Sitemap
 		ir:           {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
@@ -4458,6 +4487,162 @@ import (
 	][0]
 }
 
+#consentPlan: {
+	let C = self
+	raw?:    _
+	enabled: C.raw != _|_
+	// The hosts of the tags consent governs: nowhere else is anything sent,
+	// so nowhere else is anyone asked.
+	hosts: [...string]
+
+	_errors: list.Concat([
+		[if enabled if len(C.hosts) == 0 {"consent governs what a tag sends, and the app declares none: declare meta.googleTag"}],
+		[if enabled if C.raw.mode == "none" if C.raw.none == _|_ {"consent mode none asks nobody, so it states what everyone gets: write none.advertising"}],
+		[if enabled if C.raw.mode == "bar" if C.raw.none != _|_ {"consent.none is what mode none states; the bar asks instead"}],
+	])
+
+	terminal: [if enabled {
+		mode:   C.raw.mode
+		policy: C.raw.policy
+		hosts:  C.hosts
+		if C.raw.none != _|_ {none: C.raw.none}
+	}, null][0]
+}
+
+#googleTagPlan: {
+	let G = self
+	raw?:     _
+	enabled:  G.raw != _|_
+	consent?: _
+
+	// The tag frame: a document of this origin, so the cookies it writes are
+	// first-party, in a realm of its own, so Google's scripts run under its
+	// policy and never under the terminal's lockdown and Trusted Types.
+	frame:  "shell/tag.html"
+	_hosts: [if enabled {json.Marshal(G.raw.hosts)}, ""][0]
+
+	_errors: list.Concat([
+		[if enabled if len(G.raw.hosts) == 0 {"googleTag.hosts must name the hosts whose readers the tag measures"}],
+		[if enabled if list.Contains(G.targets, "pages") {"googleTag needs its frame served beside the app, which a pages release, one file, cannot"}],
+		[if enabled if G.consent == _|_ {"googleTag stores Google's cookies only with the reader's consent: declare meta.consent"}],
+	])
+	targets: [...string]
+
+	// The app's side: `gtag` takes consent and event commands for the frame.
+	// On a declared host alone, the terminal's first consent update mounts the
+	// frame, which is told that consent, the page it measures and the landing
+	// click ids before it configures, and then each route the reader reaches.
+	bridge: [if enabled {
+		"""
+			{
+			  const hosts = \(_hosts);
+			  const landing = new URL(location.href);
+			  const queue = [];
+			  let frame = null;
+			  let ready = false;
+			  const post = (message) => ready ? frame.contentWindow.postMessage(message, location.origin) : queue.push(message);
+			  const mount = (consent) => {
+			    frame = document.createElement("iframe");
+			    frame.src = \(json.Marshal("/"+frame));
+			    // Or the frame's own referrer, this page, stands in for an empty one.
+			    frame.referrerPolicy = "no-referrer";
+			    frame.hidden = true;
+			    frame.tabIndex = -1;
+			    frame.setAttribute("aria-hidden", "true");
+			    addEventListener("message", (event) => {
+			      if (event.origin !== location.origin || event.source !== frame.contentWindow || event.data?.kind !== "ready") return;
+			      const click = {};
+			      for (const key of ["gclid", "gbraid", "wbraid"]) if (landing.searchParams.has(key)) click[key] = landing.searchParams.get(key);
+			      frame.contentWindow.postMessage({kind: "init", consent, page_location: landing.href, page_referrer: document.referrer, click}, location.origin);
+			      ready = true;
+			      for (const message of queue.splice(0)) post(message);
+			    });
+			    document.body.append(frame);
+			  };
+			  window.gtag = function gtag(command, ...args) {
+			    if (command !== "consent" && command !== "event") throw new TypeError(`the tag frame takes consent and event commands, not ${command}`);
+			    if (!hosts.includes(location.hostname)) return;
+			    if (frame !== null) return post({kind: "gtag", args: [command, ...args]});
+			    if (command !== "consent" || args[0] !== "update") throw new Error("the terminal states the reader's consent before any other command reaches the tag frame");
+			    mount(args[1]);
+			  };
+			  if (hosts.includes(location.hostname)) {
+			    let shown = landing.href;
+			    globalThis.navigation?.addEventListener("currententrychange", (event) => {
+			      if (location.href === shown) return;
+			      if (event.navigationType !== "replace") post({kind: "page_view", page_location: location.href, page_referrer: shown});
+			      shown = location.href;
+			    });
+			  }
+			}
+			"""
+	}, ""][0]
+	tag:        [if enabled {"<script>\(bridge)</script>"}, ""][0]
+	bridgeHash: "'sha256-\(base64.Encode(null, sha256.Sum256(bridge)))'"
+	// What the terminal's policy admits beside its own, by directive: the
+	// bridge, and nothing of Google's.
+	sources: [if enabled {script: [bridgeHash]}, {}][0]
+
+	_frameScript: [if enabled {
+		let src = "https://www.googletagmanager.com/gtag/js?id=\(G.raw.id)"
+		"""
+			if (parent === window || !\(_hosts).includes(location.hostname)) throw new Error("the tag frame runs framed by the app on a declared host");
+			const dataLayer = window.dataLayer = [];
+			function gtag() { dataLayer.push(arguments); }
+			gtag("consent", "default", {ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied", analytics_storage: "denied"});
+			gtag("set", "ads_data_redaction", true);
+			addEventListener("message", (event) => {
+			  if (event.origin !== location.origin || event.source !== parent) return;
+			  const message = event.data;
+			  if (message.kind === "init") {
+			    gtag("consent", "update", message.consent);
+			    if (Object.keys(message.click).length > 0) history.replaceState(null, "", "?" + new URLSearchParams(message.click));
+			    gtag("js", new Date());
+			    gtag("config", \(json.Marshal(G.raw.id)), {page_location: message.page_location, page_referrer: message.page_referrer});
+			    const tag = document.createElement("script");
+			    tag.async = true;
+			    tag.src = \(json.Marshal(src));
+			    document.head.append(tag);
+			  } else if (message.kind === "page_view") {
+			    gtag("event", "page_view", {send_to: \(json.Marshal(G.raw.id)), page_location: message.page_location, page_referrer: message.page_referrer});
+			  } else if (message.kind === "gtag") {
+			    gtag(...message.args);
+			  } else {
+			    throw new TypeError(`not a tag frame message: ${message.kind}`);
+			  }
+			});
+			parent.postMessage({kind: "ready"}, location.origin);
+			"""
+	}, ""][0]
+	// Google's Ads lists (developers.google.com/tag-platform/security/guides/csp);
+	// a remarketing pixel goes to the reader's own www.google.<TLD>, which no
+	// list can name.
+	framePolicy: strings.Join([
+		"default-src 'none'",
+		"base-uri 'none'",
+		"object-src 'none'",
+		"form-action 'none'",
+		"script-src 'sha256-\(base64.Encode(null, sha256.Sum256(_frameScript)))' https://www.googletagmanager.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.google.com",
+		"connect-src https://www.googletagmanager.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://ad.doubleclick.net https://pagead2.googlesyndication.com",
+		"img-src https:",
+		"frame-src https://www.googletagmanager.com",
+	], "; ")
+	frameHtml: [if enabled {
+		"""
+			<!doctype html>
+			<html>
+			<head>
+			<meta charset="utf-8">
+			<meta http-equiv="Content-Security-Policy" content="\(strings.Replace(framePolicy, "'", "&#39;", -1))">
+			<script>\(_frameScript)</script>
+			</head>
+			<body></body>
+			</html>
+
+			"""
+	}, ""][0]
+}
+
 #envelopePlan: {
 	let P = self
 	meta:          _
@@ -4472,6 +4657,17 @@ import (
 	hints: #hintsPlan & {
 		if P.meta.preconnect != _|_ {preconnect: P.meta.preconnect}
 		if P.meta.dnsPrefetch != _|_ {dnsPrefetch: P.meta.dnsPrefetch}
+	}
+
+	googleTag: #googleTagPlan & {
+		targets: P.meta.targets
+		if P.meta.googleTag != _|_ {raw: P.meta.googleTag}
+		if P.meta.consent != _|_ {consent: P.meta.consent}
+	}
+
+	consent: #consentPlan & {
+		if P.meta.consent != _|_ {raw: P.meta.consent}
+		hosts: [if P.meta.googleTag != _|_ {P.meta.googleTag.hosts}, []][0]
 	}
 
 	manifest: #manifestPlan & {
@@ -4510,6 +4706,8 @@ import (
 
 	_errors: list.Concat([
 		P.hints._errors,
+		P.googleTag._errors,
+		P.consent._errors,
 		P.manifest._errors,
 		P.social._errors,
 		P.llms._errors,
@@ -4517,7 +4715,7 @@ import (
 		P.sitemap._errors,
 	])
 
-	_hasEnvelopeInjections: P.meta.favicon != _|_ || P.hints.links != "" || P.manifest.links != "" || P.social.links != "" || P.sitemap.tag != ""
+	_hasEnvelopeInjections: P.meta.favicon != _|_ || P.hints.links != "" || P.googleTag.tag != "" || P.manifest.links != "" || P.social.links != "" || P.sitemap.tag != ""
 
 	headLinks: [
 		if !_hasEnvelopeInjections {
@@ -4527,6 +4725,7 @@ import (
 			strings.Join([
 				for s in [
 					P.hints.links,
+					P.googleTag.tag,
 					[if P.meta.favicon != _|_ {P.favicon.links}, "<link rel=\"icon\" href=\"data:,\">"][0],
 					P.manifest.links,
 					P.social.links,
@@ -4549,6 +4748,12 @@ import (
 				text:   P.manifest.jsonText
 			}
 		}
+		if P.googleTag.enabled {
+			(P.googleTag.frame): {
+				format: "text"
+				text:   P.googleTag.frameHtml
+			}
+		}
 		for k, f in P.llms.files {
 			(k): f
 		}
@@ -4568,6 +4773,11 @@ import (
 			if P.manifest.enabled {
 				file:   "shell/manifest.webmanifest"
 				target: "/srv/manifest.webmanifest"
+				watch:  true
+			},
+			if P.googleTag.enabled {
+				file:   P.googleTag.frame
+				target: "/srv/\(P.googleTag.frame)"
 				watch:  true
 			},
 		],

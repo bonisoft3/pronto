@@ -3164,6 +3164,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// A provider's settings are the cluster's (#signIn).
 			auth: {for k, v in S.code.capabilities.auth if k != "provider" {(k): v}}
 		}
+		if S.code.meta.consent != _|_ {
+			consent: (#consentPlan & {
+				raw: S.code.meta.consent
+				hosts: [if S.code.meta.googleTag != _|_ {S.code.meta.googleTag.hosts}, []][0]
+			}).terminal
+		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
 		// resolved patterns on each route are what survives them.
@@ -4959,6 +4965,34 @@ _pgrollDir: "services/database/pgroll"
 		if E._design.shell.nav == "dock" || E._design.shell.nav == "tabbar" {"-1"},
 		"1",
 	][0]
+	// The consent bar and the control that reopens it (omnishell consent.js):
+	// a strip along the bottom that leaves the page usable. Accept and Reject
+	// wear one style: a refusal no harder to see or reach than consent.
+	// Joined to the sign-in rules, so an app without a bar emits no line.
+	_consentCss: [if E.code.meta.consent != _|_ if E.code.meta.consent.mode == "bar" {
+		"\n" + """
+			.shell-consent[hidden], .shell-consent-open[hidden] { display: none; }
+			:where(.shell-consent) { position: fixed; z-index: 2147483000; inset-inline: 0; inset-block-end: 0;
+			  box-sizing: border-box; padding: var(--sp-sm, 8px) var(--sp-md, 16px);
+			  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-sm, 8px) var(--sp-md, 16px);
+			  background: var(--surface, Canvas); color: var(--primary, CanvasText);
+			  border-block-start: 1px solid var(--shell-rule, currentColor); box-shadow: var(--shadow-2, none);
+			  font-size: .875rem; line-height: 1.4; }
+			:where(.shell-consent p) { margin: 0; flex: 0 1 48rem; }
+			:where(.shell-consent a) { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+			:where(.shell-consent-actions) { display: flex; gap: var(--sp-sm, 8px); }
+			:where(.shell-consent-actions button) { font: inherit; font-weight: 600; min-height: 36px; min-width: 7rem; padding: 6px 16px; cursor: pointer;
+			  border: 1px solid transparent; border-radius: var(--r-md, 8px);
+			  background: var(--primary, CanvasText); color: var(--surface, Canvas); }
+			:where(.shell-consent-actions button[aria-pressed="true"])::before { content: "✓ " / ""; }
+			:where(.shell-consent-open) { position: fixed; z-index: 2147483000; inset-inline-end: var(--sp-sm, 8px); inset-block-end: var(--sp-sm, 8px);
+			  width: 40px; height: 40px; padding: 0; display: grid; place-items: center; cursor: pointer;
+			  background: var(--surface, Canvas); color: var(--primary, CanvasText);
+			  border: 1px solid var(--shell-rule, currentColor); border-radius: 50%; box-shadow: var(--shadow-2, none); }
+			:where(.shell-consent-open svg) { width: 20px; height: 20px; }
+			:where(.shell-consent :is(a, button), .shell-consent-open):focus-visible { outline: 3px solid var(--accent, currentColor); outline-offset: 3px; }
+			"""
+	}, ""][0]
 	_signinCss: """
 		body > nav .shell-me [hidden] { display: none; }
 		:where(body > nav .shell-me) { position: relative; }
@@ -5178,7 +5212,7 @@ _pgrollDir: "services/database/pgroll"
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }
 		\(E._navCss)
-		\(E._signinCss)
+		\(E._signinCss)\(E._consentCss)
 		:where(body > nav > a[data-display="icon-only"]) { padding-inline: var(--shell-nav-icon-pad-x, 6px); justify-content: center; gap: 0; }
 		:where(body > nav[hidden]) { display: none; }
 
@@ -5405,6 +5439,7 @@ _pgrollDir: "services/database/pgroll"
 	_resources: list.Concat([
 		[if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}],
 		[for _, v in E.code.capabilities.vendored for u in v.scripts {kind: "connect", source: u}],
+		[for k, sources in E._envelope.googleTag.sources for s in sources {kind: k, source: s}],
 	])
 	_resourceSources: {for r in _resources {(r.kind): (r.source): true}}
 	// The entry document, the policy it carries as its meta.
@@ -6687,7 +6722,9 @@ _pgrollDir: "services/database/pgroll"
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
-			_fenced:      list.Concat([_unitPaths, _presenterAt])
+			// The tag frame carries its own policy as its meta.
+			_tagFrameAt: [if E._envelope.googleTag.enabled {"/\(E._envelope.googleTag.frame)"}]
+			_fenced:     list.Concat([_unitPaths, _presenterAt, _tagFrameAt])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				// The ladder's pages answer with their own policy (E._ladderPolicy),
 				// so the terminal's names every path but theirs.
