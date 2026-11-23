@@ -1311,13 +1311,15 @@ import (
 								{from: {ref: ":\(_pgroll.target)"}, srcs: ["/usr/local/bin/pgroll"], dst: "/usr/local/bin/pgroll"},
 							]},
 							// The airlock's own Deno and cache, apart from auth's, the
-							// handlers and manifest, its daprd with the effects' bindings,
-							// and the ledger's upgrade.
+							// handlers and manifest, the compute core its handler cage
+							// imports, its daprd with the effects' bindings, and the
+							// ledger's upgrade.
 							if _effects {[
 								{from: {ref: ":airlock"}, srcs: ["/usr/bin/deno"], dst: "/usr/local/bin/airlock-deno"},
 								{from: {ref: ":airlock"}, srcs: ["/deno-dir"], dst: "/airlock-deno-dir"},
 								{from: {ref: ":airlock"}, srcs: ["/app"], dst: "/app"},
 								{from: {ref: ":airlock"}, srcs: ["/airlock"], dst: "/airlock"},
+								{from: {ref: ":airlock"}, srcs: ["/packages"], dst: "/packages"},
 								{from: {ref: ":airlock-mesh"}, srcs: ["/daprd"], dst: "/daprd"},
 								{from: {ref: ":airlock-mesh"}, srcs: ["/dapr"], dst: "/dapr"},
 								{from: {ref: ":airlock-upgrade"}, srcs: ["/airlock-upgrade.sql"], dst: "/airlock-upgrade.sql"},

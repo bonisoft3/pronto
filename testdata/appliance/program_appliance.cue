@@ -69,12 +69,6 @@ code: state: migrations: "040_ping_count": operations: [{sql: {onComplete: true,
 	GRANT EXECUTE ON FUNCTION count_pings() TO service;
 	"""}}]
 code: state: drains: "ping-count": {on: ["ping"], call: "count_pings"}
-code: state: steps: {
-	graphile: "030"
-	airlock:  "031"
-	machines: "032"
-	note:     "The raw steps 011 to 025 write no ping row: pings exist only once the fixture inserts them."
-}
 code: meta: clocks: ["docker", "cloudflare"]
 // A database function, so the appliance shows it runs Jessie as `plv8`.
 code: state: functions: echo: {rules: "rules/echo.js", fuel: 1000, note: "the appliance's plv8 runs it"}
