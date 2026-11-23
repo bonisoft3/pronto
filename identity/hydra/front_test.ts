@@ -194,7 +194,7 @@ cases.push(["only Hydra's public routes pass, and discovery names the broker's i
 // settings pronto-identity gives it.
 const MECHA_AUTH = Deno.env.get("MECHA_AUTH");
 if (MECHA_AUTH) cases.push(["mecha's auth service signs in through Hydra with the broker's settings", async () => {
-  const { oidc, providersFrom } = await import(`file://${MECHA_AUTH}/oidc.ts`);
+  const { oidc, providersFrom, STATE_COOKIE } = await import(`file://${MECHA_AUTH}/oidc.ts`);
   const settings: Record<string, string> = {
     OIDC_PROVIDERS: "google", OIDC_GOOGLE_ISSUER: ISSUER, OIDC_GOOGLE_CLIENT_ID: "origin",
     OIDC_GOOGLE_SCOPE: "openid", OIDC_GOOGLE_AUTHORIZE_PARAMS: "provider=google",
@@ -206,7 +206,7 @@ if (MECHA_AUTH) cases.push(["mecha's auth service signs in through Hydra with th
     issue: async () => "token",
   });
   const started: Response = await routes(new Request(`${A}/auth/oidc/google/start?return=/play`))!;
-  const verifierCookie = started.headers.getSetCookie().find((c) => c.startsWith("mecha_oidc_state="))!.split(";")[0];
+  const verifierCookie = started.headers.getSetCookie().find((c) => c.startsWith(`${STATE_COOKIE}_google=`))!.split(";")[0];
   const shown = await browse(started.headers.get("location")!);
   const go = (await shown.res.text()).match(/href="([^"]+\/login\/continue[^"]+)"/)![1].replace(/&#38;/g, "&");
   nextWho = "alice";

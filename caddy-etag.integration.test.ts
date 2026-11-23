@@ -151,13 +151,24 @@ for (const development of [false, true]) Deno.test({ name: development
     await Deno.mkdir(`${scratch}/srv/shell`, { recursive: true });
     await Deno.writeTextFile(`${scratch}/${file}`, file);
   }
-  await Deno.writeTextFile(`${scratch}/Caddyfile`, caddyfile);
+  await Deno.writeTextFile(`${scratch}/Caddyfile`, caddyfile + '\n:9001 {\n respond "{http.request.header.Cookie}"\n}\n');
   // A host without glTF MIME entries must behave like the container that has them.
   await Deno.writeTextFile(`${scratch}/mime.types`, "application/octet-stream glb gltf bin\n");
   const tree: [string, string][] = [[`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]];
   try {
-    await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", ...(development ? ["-e", "PRONTO_FILE_MODE=development"] : []), "-p", "127.0.0.1::8080", CADDY, ...command], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/mime.types`, "/etc/mime.types"], ...tree])]);
+    await docker(["start", await created(["--name", name, ...["AUTH", "CRUD", "ELECTRIC", "IMGPROXY", "TICKER"].flatMap(hop => ["-e", `PRONTO_UPSTREAM_${hop}=127.0.0.1:9001`]), "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", ...(development ? ["-e", "PRONTO_FILE_MODE=development"] : []), "-p", "127.0.0.1::8080", CADDY, ...command], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/mime.types`, "/etc/mime.types"], ...tree])]);
     let url = await base();
+    const credentials = ["__Host-mecha_session=s", "__Host-mecha_session_held=h", "__Host-mecha_oidc_state_google=g", "mecha_session=old", "mecha_oidc_state=oldstate"];
+    for (const cookie of [credentials.join("; "), `theme=dark; ${credentials.join("; ")}; basket=42; mecha_session_hint=1`]) {
+      for (const path of ["/auth/session", "/crud/items", "/electric/v1/shape", "/img/image", "/poke"]) {
+        const response = await fetch(`${url}${path}`, { headers: { Cookie: cookie } });
+        const body = await response.text();
+        if (response.status !== 200) fail(`${path}: ${response.status}: ${body}`);
+        const parts = body.split(";").map(part => part.trim()).filter(Boolean);
+        const expected = cookie.split(";").map(part => part.trim()).filter(part => path.startsWith("/auth/") || !credentials.includes(part));
+        if (JSON.stringify(parts) !== JSON.stringify(expected)) fail(`${path} forwarded ${body}`);
+      }
+    }
     const started = await docker(["inspect", "-f", "{{.State.StartedAt}}", name]);
     const before: Record<string, string> = {};
     const bodyAt = (path: string, body: (v: string) => string, v: string) => development && path === "/regras" ? ENTRY(v) : body(v);

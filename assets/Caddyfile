@@ -74,6 +74,9 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
+  # Host-prefixed auth cookies use Path=/; only auth receives those credentials.
+  @withoutAuthCookies not path /auth/*
+  request_header @withoutAuthCookies Cookie "(^|;)[ \t]*(__Host-)?mecha_(session(_held)?|oidc_state(_[A-Za-z0-9_-]+)?)=[^;]*" ""
   @gltfBinary path_regexp (?i)\.glb$
   @gltfJson path_regexp (?i)\.gltf$
   # A proxy's injected scripts would violate the released page's CSP.
