@@ -160,7 +160,7 @@ Deno.test('duplicate replay after lost acknowledgment publishes once', async () 
 Deno.test('generated and undeclared sink columns fail before publication', async () => {
   const f = await fixture();
   const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0 }], execute: async () => ({ sink: [{ id: 'one', amount: '1', scope_id: 'private:' }] }) });
-  await assertRejects(() => coordinator.resume(), Error, 'cannot write sink.scope_id');
+  await assertRejects(() => coordinator.resume(), Error, 'sink: invalid output columns');
   assertEquals((await f.db.query('SELECT * FROM sink')).rows, []);
   await coordinator.stop(); await f.db.close();
 });
@@ -502,6 +502,23 @@ Deno.test('staged JSON equality skips unchanged writes and empty seals delete ex
     await tx.exec('SET LOCAL ROLE service');
     await assertRejects(() => tx.query('SELECT * FROM compute_snapshot_private.captures'), Error, 'permission denied');
   });
+  await coordinator.stop(); await f.db.close();
+});
+
+// The coordinator's whole-output publish locked each unchanged row and fired its
+// triggers; it now leaves an equal row untouched, as staged publication does.
+Deno.test('whole-output publication leaves an unchanged row untouched', async () => {
+  const f = await fixture();
+  const coordinator = await createSnapshotCoordinator({ ...f.config, computations: [{ ...spec, coalesceMs: 0 }] });
+  const rows = [{ id: 'one', amount: '2' }];
+  let before: unknown[] = [];
+  for (let cycle = 0; cycle < 2; cycle++) {
+    const identity = (await coordinator.claim())!;
+    await coordinator.publish(identity, { sink: rows });
+    if (cycle > 0) assertEquals((await f.db.query('SELECT xmin::text,xmax::text,ctid::text FROM sink')).rows, before);
+    before = (await f.db.query('SELECT xmin::text,xmax::text,ctid::text FROM sink')).rows;
+    await f.write(`UPDATE source SET amount=2`);
+  }
   await coordinator.stop(); await f.db.close();
 });
 
