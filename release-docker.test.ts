@@ -107,6 +107,20 @@ Deno.test("release-docker runs a program's effects: the airlock, its daprd and t
   assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "for n in crud database auth airlock-mesh airlock;");
 });
 
+// Regression: a server out of restarts stayed dead while process-compose kept
+// the rest of the appliance running, so the container looked alive with a
+// component gone (golaberto's compute reached 14 of its 15 restarts).
+Deno.test("a server out of restarts ends the appliance, and a one-off does not", async () => {
+  const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
+  const heredoc = rd.dockerfile.preamble.find((l) => l.includes("/.bayt/process-compose.appliance.yaml"))!;
+  const overlay = parse(heredoc.slice(heredoc.indexOf("\n") + 1, heredoc.lastIndexOf("APPLIANCE"))) as {
+    processes: Record<string, { availability?: { exit_on_end?: boolean } }>;
+  };
+  const ending = Object.entries(overlay.processes).filter(([, p]) => p.availability?.exit_on_end === true).map(([n]) => n);
+  for (const server of ["electric", "airlock-mesh", "airlock"]) assert(ending.includes(server), `${server} does not end the appliance: ${ending}`);
+  assert(!ending.includes("airlock-upgrade"), "a one-off ends the appliance");
+});
+
 Deno.test("a bridge on docker runs in the appliance as a process its daprd dials by the container's name", async () => {
   const rd = await releaseDocker(bridged('{container: "transport", port: 8090, targets: ["docker"], appliance: {srcs: ["/bin/fetch"], command: ["/bin/fetch", "--listen", "127.0.0.1:8090"]}}'));
   assert(rd.deps.includes(":transport-appliance:outs"), `the bridge's build is no dependency: ${rd.deps}`);

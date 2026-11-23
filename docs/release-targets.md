@@ -649,6 +649,10 @@ What fixes its shape:
   the release refuses until a mecha release publishes that image. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
+- **A server out of restarts ends the appliance.** Each process that restarts
+  on failure keeps the base file's cap and, in the appliance's overlay, ends
+  process-compose once it gives up, so the container exits non-zero for
+  whatever supervises it. A local launch and integrate keep the base file.
 - **Durable PostgreSQL writes.** The appliance enables `fsync`,
   `synchronous_commit`, and `full_page_writes`, overriding the development
   cluster settings. Mount `PGDATA` on persistent storage.
