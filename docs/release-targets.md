@@ -29,14 +29,14 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
   `docker`, `k8s`, `gcp` and `aws`, and not `azure`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
-  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.32.0/README.md#4-vertical-scalability-down-and-up)).
+  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.33.0/README.md#4-vertical-scalability-down-and-up)).
   pronto's `#Tier` names five of its rungs — `browser`, `edge`, `container`,
   which is mecha's single machine, `k8s`, and `cloud` — and the browser, the
   edge, and the container are built. `container` is where every app develops,
   and for release it is the `docker` target: the SQL fence `-- tier:
   container` … `-- tier: any` around the publication and the replica identity,
   the statements that need a WAL reader
-  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/browser.md#the-fence)).
+  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/browser.md#the-fence)).
 
 | target | tier | the artifact | the door |
 |---|---|---|---|
@@ -78,9 +78,9 @@ Every target serves the files a page runs or fetches at their content
 addresses, `_immutable-<sha256>-<name>` beside each file, and every document
 that boots the terminal — the entry, a prerendered document, one rendered on
 request — carries the map from logical path to address as its import map,
-`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.30.0/server/release-addresses.ts)).
+`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.31.0/server/release-addresses.ts)).
 A page therefore runs one release, and an open one takes the next at the
-level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.30.0/docs/screen-updates.md#when-a-deployment-lands)).
+level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.31.0/docs/screen-updates.md#when-a-deployment-lands)).
 An address never changes and is served `immutable`; the map is an inline
 script, so the door's policy names its hash.
 
@@ -95,7 +95,7 @@ as a reader's tab does.
 
 ## ICE servers
 
-An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.30.0/docs/kinetic.md))
+An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.31.0/docs/kinetic.md))
 gathers its candidates over the ICE servers in the terminal config,
 `shell.json`'s `iceServers`. They are derived from the release target, by
 `#IceServers` in [`distribution/config.cue`](../distribution/config.cue), and
@@ -150,7 +150,7 @@ applying migrations, so declared collations retain case and accent semantics
 offline. ICU and PGlite versions are pinned together in the browser runtime;
 this is part of the database contract and requires no application setting. The
 page's fetch shim serves the table by path and hands `/crud`, `/auth` and
-`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/browser.md#the-one-user-cluster),
+`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/browser.md#the-one-user-cluster),
 which mints its user at boot, so the tenancy floor runs against a real subject
 and there is no door. A program begins as one HTML file, `ir.html`, and ships
 as one.
@@ -225,7 +225,7 @@ a broken release, for a program with:
   cloudflare target refuses one too.
 
 **The page runs its drains and its clock**
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/browser.md#drains-and-the-clock)):
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/browser.md#drains-and-the-clock)):
 the bundler carries the drains from `.pronto/cluster.json` and places mecha's
 `schedule` table before the seed, as the edge's data directory does
 ([`edge-scripts.ts`](../bundle/edge-scripts.ts)). The clock runs while the
@@ -304,7 +304,7 @@ contain private uploads.
 The adapter accepts GET and HEAD, rejects other source buckets, and caches
 transformed responses by object ETag and size for one hour. Besides plain
 imgproxy URLs it answers `rs:fit:<w>:<w>` at the widths a screen's
-[`data-image-src`](https://github.com/bonisoft3/omnishell/blob/v0.30.0/REFERENCE.md#responsive-images) offers, and
+[`data-image-src`](https://github.com/bonisoft3/omnishell/blob/v0.31.0/REFERENCE.md#responsive-images) offers, and
 refuses every other transformation: each size of each picture is a paid
 transformation.
 
@@ -387,7 +387,7 @@ renderer, database and app entry that use them. The database object retains
 captures, retries and publication receipts. A separate `ComputeCoordinator` object
 owns the computation alarm and dispatch; companion execution owns only scratch
 state. The database object's alarm continues to serve schedules and drains even
-when a computation is slow or exhausted. See [the computation contract](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/compute.md#cloudflare-snapshot-execution).
+when a computation is slow or exhausted. See [the computation contract](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/compute.md#cloudflare-snapshot-execution).
 
 A new deployment can opt into `--ssr-database separate`: it writes
 `database.jsonc` for `<app>-database` with compressed 128 KiB filesystem blocks,
@@ -405,7 +405,7 @@ Speculative document requests use cached HTML without starting or refreshing a
 render. A cache miss returns `204` with `no-store`. Actual navigation may render
 or revalidate stale HTML under public RLS without guest login. Language
 negotiation matches the browser, and the response varies on `Accept-Language`.
-See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.30.0/docs/native-worker-ssr.md) for the freshness and isolation
+See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.31.0/docs/native-worker-ssr.md) for the freshness and isolation
 contract. Authentication and derivation support remain the edge target's.
 
 The integrated deployment has been exercised on Paid; Free enforcement,
@@ -422,7 +422,7 @@ a row names: each file, named by its sha256, goes to blob storage at `seed/<file
 the publish here and by a one-shot `seed-blobs` target in a cluster, and is then an
 object like any other. Pages has no blob storage, and inlines them
 ([pages](#pages)). An effect's answered bytes are written at run time to the same
-bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.32.0/services/airlock/README.md#a-handler)).
+bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.33.0/services/airlock/README.md#a-handler)).
 A session's upload is a claim first, `POST /blob-claim/<key>`, and then `PUT
 /blobs/mecha-objects/<key>`, as behind the container's door; the plane's budget of claims is
 what bounds guests, whose ids are free. A bridge naming `cloudflare` runs as a
@@ -432,7 +432,7 @@ settle failed without a call ([targets](container-bridges.md#targets)).
 An app with effects runs them in a second Worker, `<object script>-airlock`, the
 consumer of a queue of the same name that the script holding the object produces
 to ([edge-dispatcher.ts](../bundle/edge-dispatcher.ts), mecha-edge's
-[effects](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/mecha-edge/README.md#effects)): the
+[effects](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/mecha-edge/README.md#effects)): the
 object never waits on an effect's network. The publish creates the queue when it
 is missing and deploys the dispatcher after the object's script, which its
 binding names. The dispatcher alone holds the secrets its effects declare and the
@@ -441,9 +441,9 @@ OpenAI): each is set from the publish's environment, or must already be the
 deployed dispatcher's, or the publish is refused.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
-[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/mecha-edge/README.md)
+[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
@@ -496,7 +496,7 @@ What fixes its shape, as built:
   `--from=<dir>` starts it from a directory built elsewhere
   instead, an archive restored from its database with the ledger of what that
   database applied
-  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/pglite-workerd/restore.ts)),
+  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/pglite-workerd/restore.ts)),
   applies the release's scripts the ledger lacks as a publish applies them to
   a kept directory (below), and skips the derivation.
 - **Loading is once, and a later release migrates.** The object opens only
@@ -526,7 +526,7 @@ What fixes its shape, as built:
   deployed Workers because the migration may have committed. `--reset` loads a
   directory built for this release.
 - **One object, every user behind one writer.** PGlite is one connection.
-  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/postgrest-js/src/rest-handler.ts)
+  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
   policy is Postgres's own here as on a single machine. Guests only:
@@ -542,7 +542,7 @@ What fixes its shape, as built:
   by the object's epoch; a public table's chunks are every guest's.
 - **The drains run in the object**, called as their tables change and once
   after every boot that serves, a failed one's retry at the alarm
-  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/mecha-edge/README.md#drains)).
+  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/mecha-edge/README.md#drains)).
   A drain's writes reach a guest's cached `/crud` read once its 5 seconds pass,
   and a cached render once its minute does, as every write the object makes
   itself; the shape stream carries them at once.
@@ -602,10 +602,10 @@ one oversized numerical job fit.
 An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
 import, handed the machines `edge.ts` renders from the app's rules
-([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/mecha-edge/README.md#machines)).
+([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/mecha-edge/README.md#machines)).
 A deadline a machine arms and a cron schedule the program declares are the
 object's alarm, swept as the ticker sweeps them
-([the clock](https://github.com/bonisoft3/mecha/blob/v0.32.0/packages/mecha-edge/README.md#the-clock)).
+([the clock](https://github.com/bonisoft3/mecha/blob/v0.33.0/packages/mecha-edge/README.md#the-clock)).
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
 the object preserves schedule rows but runs no schedule ticks, and no schedule
 Cron Trigger is written. Drain retry and computation deadlines still arm the
@@ -810,7 +810,7 @@ preview also deletes its setup marker so recreating it provisions resources.
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
 | the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
 
-This is mecha's [bundled unit](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/deployment.md#the-bundled-unit)
+This is mecha's [bundled unit](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/deployment.md#the-bundled-unit)
 applied to the door: the containers wake together, reach each other on
 localhost, and need no invoker between them. The door dials each upstream at
 its own `PRONTO_UPSTREAM_<SERVICE>`, which a gcp release sets to the
@@ -1067,7 +1067,7 @@ Aurora does not pause while logical replication is on. Project, account,
 region and domain are declarations on the cluster; credentials are
 each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
-[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.32.0/docs/deployment.md#clouds-as-built)
+[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.33.0/docs/deployment.md#clouds-as-built)
 is the mapping these start from.
 
 A sign-in provider (`auth.providers`) is registered with the provider, told
@@ -1079,7 +1079,7 @@ The deployment overrides each as `OIDC_<NAME>_<SETTING>`, and gives what the
 program must not hold, Google's client secret as `OIDC_GOOGLE_CLIENT_SECRET`.
 Another OpenID issuer may stand in the provider's place, such as a broker an
 operator runs, by its issuer and the client `origin`
-(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.32.0/services/auth/README.md#provider-sign-in)).
+(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.33.0/services/auth/README.md#provider-sign-in)).
 Compose refuses to render the stack when neither gives a client id, and the
 k8s release copies the public `OIDC_*` settings onto the auth service. Nonempty
 client secrets go to a separate Kubernetes Secret through stdin; the Deployment
