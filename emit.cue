@@ -2711,7 +2711,7 @@ _cdcBeforeField: "__before"
 #cdcTraceJoin: {
 	let J = self
 	consumer: string
-	out:      [{mutation: "meta cdc_consumer = \(json.Marshal(J.consumer))"}, {resource: "cdc_trace_join"}]
+	out:      [{mutation: "meta cdc_consumer = \(json.Marshal(J.consumer))"}, {resource: "cdc_stream_trim"}, {resource: "cdc_trace_join"}]
 }
 
 // Sent with each call a stream makes for a row, so the call joins the row's
@@ -4105,7 +4105,9 @@ _pgrollDir: "services/database/pgroll"
 					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, signals: [if D.code.state.signals != _|_ {D.code.state.signals}, {}][0], step: (#steps & {code: D.code}).machines})._effectUpgradeSql
 				}], "\n\n")
 			}
-			pipelines: [for n, _ in (#streams & {code: D.code}).out {
+			pipelines: [for n, kind in (#streams & {code: D.code}).out {
+				if kind == "drain" {group: "\(D.code.meta.name)-\(n)"}
+				if kind == "pipeline" if D.code.state.pipelines[n].trigger == "cdc" {group: D.code.state.pipelines[n].group}
 				name: "\(D.code.meta.name)-\(n)"
 				file: "docker/\(D.code.meta.name)-\(n).yaml"
 			}]

@@ -206,7 +206,12 @@ export function snapshotCompose(model: Compose): Compose {
     }
     if (name.endsWith('-transform') && hasComputations) {
       const prefix = name.slice(0, -'-transform'.length)
-      service.environment = { ...service.environment, COMPUTE_GROUP: service.environment?.COMPUTE_GROUP ?? `${prefix}-compute` }
+      const groups: unknown = JSON.parse(service.environment!.CDC_GROUPS)
+      if (!Array.isArray(groups) || !groups.every((group) => typeof group === 'string' && group.length > 0)) {
+        throw new Error(`${name} requires a CDC_GROUPS array of consumer names`)
+      }
+      const computeGroup = service.environment?.COMPUTE_GROUP ?? `${prefix}-compute`
+      service.environment = { ...service.environment, COMPUTE_GROUP: computeGroup, CDC_GROUPS: JSON.stringify([...new Set([...groups, computeGroup])].sort()) }
       if (!service.command) {
         const pipelines = (service.develop?.watch ?? []).map((w) => w.target).filter((t): t is string => Boolean(t?.startsWith('/pipelines/')))
         service.command = ['streams', '--no-api', '-r', '/cdc-trace.yaml', ...pipelines, '/compute-events.yaml']

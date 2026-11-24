@@ -1127,7 +1127,7 @@ import (
 								(c): {
 									command:         (_command & {args: a.command, literal: true}).out
 									readiness_probe: _ready & {exec: command: "portcheck --port \(a.port)"}
-									availability: {restart: "on_failure", exit_on_end: true}
+									availability:    {restart: "on_failure", exit_on_end: true}
 								}
 							}
 							"airlock-mesh": {
@@ -1141,7 +1141,7 @@ import (
 									"BRIDGE_\(strings.ToUpper(strings.Replace(b.name, "-", "_", -1)))_URL=http://\(b.container):\(b.appliance.port)\(_act)"
 								}]
 								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.meshHttp)"}
-								availability: {restart: "on_failure", exit_on_end: true}
+								availability:    {restart: "on_failure", exit_on_end: true}
 							}
 							airlock: {
 								command:     (_command & {args: ["airlock-deno", "run", "--frozen", "--unstable-worker-options", "--allow-net=database:\(mecha.#AppliancePort.database),airlock-mesh:\(mecha.#AppliancePort.meshHttp),0.0.0.0:\(mecha.#AppliancePort.airlock)", "--allow-read", "--allow-env", "--allow-sys", "main.ts"]}).out
@@ -1158,7 +1158,7 @@ import (
 									"airlock-mesh": condition:    "process_healthy"
 								}
 								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.airlock)"}
-								availability: {restart: "on_failure", exit_on_end: true}
+								availability:    {restart: "on_failure", exit_on_end: true}
 							}
 						}
 
@@ -1177,7 +1177,7 @@ import (
 								])
 								depends_on: crud: condition: "process_healthy"
 								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.ticker)"}
-								availability: {restart: "on_failure", exit_on_end: true}
+								availability:    {restart: "on_failure", exit_on_end: true}
 							}
 							// The clock's poke, at the cadence compose's clock keeps. A
 							// refused one ends the clock, which its restart makes visible.
@@ -1188,6 +1188,9 @@ import (
 								depends_on: ticker: condition: "process_healthy"
 								availability: {restart: "on_failure", exit_on_end: true}
 							}
+						}
+						if _streams {
+							transform: environment: ["CDC_GROUPS=\(B.cluster.surface.targets.transform.entrypoint.env.CDC_GROUPS)"]
 						}
 						if _risingwave {
 							risingwave: {
@@ -1204,9 +1207,10 @@ import (
 								]
 								depends_on: database: condition: "process_healthy"
 								readiness_probe: _ready & {exec: command: "portcheck --port 4566"}
-								availability: {restart: "on_failure", exit_on_end: true}
+								availability:    {restart: "on_failure", exit_on_end: true}
 							}
 						}
+
 						// A server out of restarts ends the appliance, so the container exits
 						// for its supervisor; the base file's cap alone would leave it running
 						// with the server gone.
@@ -1262,11 +1266,7 @@ import (
 						defaultPreamble: {
 							"pgdg": {priority: -6, line: mecha.#AppliancePgdg}
 							"postgres": (apt.#install & {
-								pkgs: list.Concat([
-									["postgresql-\(mecha.#AppliancePostgres)=\(mecha.#AppliancePostgres).*"],
-									// The bus's store; Redis's own image links musl.
-									[if _capture {"redis-server=5:8.0.*"}],
-								])
+								pkgs: ["postgresql-\(mecha.#AppliancePostgres)=\(mecha.#AppliancePostgres).*"]
 								then: ["mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql"]
 							}).out
 						}
@@ -1327,6 +1327,7 @@ import (
 							// The change feed's binaries and mecha's files, where the processes'
 							// overrides name them, and the app's pipeline files beside its tree.
 							if _capture {[
+								{from: {name: mecha.#RedisImage}, srcs: ["/usr/local/bin/redis-server", "/usr/local/bin/redis-cli"], dst: "/usr/local/bin/"},
 								{from: {ref: ":mesh-events"}, srcs: ["/daprd"], dst: "/usr/local/bin/daprd"},
 								{from: {ref: ":mesh-events"}, srcs: ["/dapr/components/"], dst: "/mesh-events/dapr/components/"},
 								{from: {ref: ":conduit"}, srcs: ["/app/conduit"], dst: "/usr/local/bin/conduit"},

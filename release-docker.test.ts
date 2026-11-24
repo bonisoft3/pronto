@@ -230,11 +230,29 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
   for (const s of ["ENV MECHA_MESH_DIR=/mesh-events", "ENV MECHA_TRANSFORM_DIR=/transform"]) assertStringIncludes(preamble, s);
   for (const p of ["conduit", "transform"]) assert(rd.dockerfile.cmd.includes(p), `${p} is not started: ${rd.dockerfile.cmd}`);
   const packages = await exportJson('_build.project.targets["release-docker"].dockerfile.defaultPreamble', code);
-  assertStringIncludes(JSON.stringify(packages.value), "redis-server");
+  assert(!JSON.stringify(packages.value).includes("redis-server="));
+  const redisCopy = rd.dockerfile.copy.find((entry: { from?: { name?: string } }) => entry.from?.name?.startsWith("redis:"));
+  assert(redisCopy?.from?.name, "the appliance must copy the pinned Redis binaries used by Compose");
+  assertStringIncludes(redisCopy.from.name, "redis:8.2.11-bookworm@sha256:");
+  assertEquals(redisCopy.srcs, ["/usr/local/bin/redis-server", "/usr/local/bin/redis-cli"]);
 });
 
 // The appliance runs computations on RisingWave; DuckDB snapshots are used
 // only on pages and cloudflare.
+Deno.test("release trimming excludes the native snapshot reader", async () => {
+  const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +
+    '\napp: state: drains: "settle-count": {on: ["payment"], call: "count_settled"}\n' +
+    'app: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\n' +
+    'app: state: computations: totals: {to: ["Total"], risingwave: "duckstream/totals.risingwave.json"}\n';
+  const rd = await releaseDocker(code);
+  const env = overlayOf(rd).processes.transform.environment;
+  const manifest = env?.find((value: string) => value.startsWith("CDC_GROUPS="));
+  assert(manifest);
+  const groups = JSON.parse(manifest.slice("CDC_GROUPS=".length));
+  assertEquals(groups.length, 1);
+  assert(groups[0].endsWith("-settle-count"));
+});
+
 Deno.test("release-docker runs a program's computations on RisingWave", async () => {
   const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +
     '\napp: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\n' +

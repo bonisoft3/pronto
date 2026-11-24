@@ -196,6 +196,7 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AppliancePort: impl.#AppliancePort
 #AppliancePorts: impl.#AppliancePorts
 #DuckdbExtensionsMarker: impl.#DuckdbExtensionsMarker
+#RedisImage: impl.#RedisImage
 #AppliancePostgres: impl.#AppliancePostgres
 #AppliancePgdg: impl.#AppliancePgdg
 #PostgresArgs: impl.#PostgresArgs

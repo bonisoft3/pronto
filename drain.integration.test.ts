@@ -16,7 +16,7 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
   equal(config.input, { broker: { inputs: [
     { redis_streams: { url: "${REDIS_URL}", streams: ["cdc-events"], body_key: "data", consumer_group: "test-projection" } },
     { generate: { count: 1, interval: "", mapping: 'root = {"wake": "start"}' } },
-  ] }, processors: [{ mutation: 'meta cdc_consumer = "test-projection"' }, { resource: "cdc_trace_join" }] });
+  ] }, processors: [{ mutation: 'meta cdc_consumer = "test-projection"' }, { resource: "cdc_stream_trim" }, { resource: "cdc_trace_join" }] });
   equal(config.pipeline.threads, 1);
   equal(config.output.http_client.max_in_flight, 1);
   equal(config.output.http_client.batching.period, "1s");
@@ -91,7 +91,7 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
     await Deno.copyFile(trace, `${scratch}/cdc-trace.yaml`);
     await Deno.writeTextFile(`${scratch}/stream_benthos_test.yaml`, JSON.stringify({ tests }));
     const result = await new Deno.Command("docker", {
-      args: ["start", "-a", await created(["--rm", "--entrypoint", "/redpanda-connect",
+      args: ["start", "-a", await created(["--rm", "-e", "REDIS_URL=redis://localhost:6379", "--entrypoint", "/redpanda-connect",
         image, "test", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"], [[scratch, "/w"]])], stdout: "piped", stderr: "piped",
     }).output();
     if (!result.success) throw new Error(decoder.decode(result.stdout) + decoder.decode(result.stderr));

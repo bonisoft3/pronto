@@ -8,7 +8,7 @@ import { deepStrictEqual as equal } from "node:assert/strict";
 import { created } from "./docker-copy.ts";
 
 const decoder = new TextDecoder();
-const REDIS = "redis:7.4.1-alpine@sha256:59b6e694653476de2c992937ebe1c64182af4728e54bb49e9b7a6c26614d8933";
+const REDIS = "redis:8.2.11-bookworm@sha256:b0b01167ff47bc3868e56a967895a26be4230891a1f42a78ab61cdd227accc8d";
 const T1 = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 const T2 = "00-1af7651916cd43dd8448eb211c80319c-c7ad6b7169203331-01";
 
@@ -81,7 +81,7 @@ Deno.test("a pipeline's calls carry their row's transaction trace, and markers a
 
     const connect = await created(["--rm", "--network", net,
       "--add-host=host.docker.internal:host-gateway",
-      "-e", "REDIS_URL=redis://redis:6379", "-e", `CRUD_URL=http://host.docker.internal:${crud.addr.port}`,
+      "-e", "REDIS_URL=redis://redis:6379", "-e", 'CDC_GROUPS=["test-count"]', "-e", `CRUD_URL=http://host.docker.internal:${crud.addr.port}`,
       "--entrypoint", "/redpanda-connect", image, "streams", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"], [[scratch, "/w"]]);
     containers.push(connect);
     await run("docker", "start", connect);

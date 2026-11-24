@@ -606,7 +606,7 @@ Deno.test('Pages precomputation forces snapshots, wires compute-events on transf
       'plausible-risingwave': { environment: { RUST_LOG: 'info' } },
       'plausible-transform': {
         develop: { watch: [{ path: '../docker/pipeline.yaml', target: '/pipelines/pipeline.yaml' }] },
-        environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379' },
+        environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379', CDC_GROUPS: '[]' },
       },
       'plausible-compute': {
         build: { additional_contexts: { 'plausible-risingwave': 'service:plausible-risingwave', 'compute-image': 'docker-image://compute' } },
@@ -625,6 +625,7 @@ Deno.test('Pages precomputation forces snapshots, wires compute-events on transf
   assert.deepEqual(result.services['plausible-transform'].environment, {
     CRUD_URL: 'http://crud:3000',
     REDIS_URL: 'redis://redis:6379',
+    CDC_GROUPS: '["plausible-compute"]',
     COMPUTE_GROUP: 'plausible-compute',
   })
   assert.deepEqual(result.services['plausible-transform'].command, [
@@ -643,7 +644,7 @@ Deno.test('Pages precomputation forces snapshots, wires compute-events on transf
 
   const noPipelines = snapshotCompose({
     services: {
-      'plausible-transform': { environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379' } },
+      'plausible-transform': { environment: { CRUD_URL: 'http://crud:3000', REDIS_URL: 'redis://redis:6379', CDC_GROUPS: '[]' } },
       'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
     },
   })
@@ -657,7 +658,7 @@ Deno.test('Pages precomputation forces snapshots, wires compute-events on transf
 
   const existingArgv = snapshotCompose({
     services: {
-      'plausible-transform': { command: ['streams', '--no-api', '-r', '/cdc-trace.yaml'], environment: {} },
+      'plausible-transform': { command: ['streams', '--no-api', '-r', '/cdc-trace.yaml'], environment: { CDC_GROUPS: '[]' } },
       'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
     },
   })
@@ -669,12 +670,15 @@ Deno.test('Pages precomputation forces snapshots, wires compute-events on transf
     '/compute-events.yaml',
   ])
   assert.deepEqual(snapshotCompose(existingArgv).services['plausible-transform'].command, existingArgv.services['plausible-transform'].command)
+  assert.deepEqual(JSON.parse(noPipelines.services['plausible-transform'].environment!.CDC_GROUPS), ['plausible-compute'])
+  existingArgv.services['plausible-transform'].environment!.CDC_GROUPS = '["another-reader","plausible-compute"]'
+  assert.deepEqual(JSON.parse(snapshotCompose(existingArgv).services['plausible-transform'].environment!.CDC_GROUPS), ['another-reader', 'plausible-compute'])
 
   assert.throws(
     () =>
       snapshotCompose({
         services: {
-          'plausible-transform': { command: 'streams --no-api', environment: {} },
+          'plausible-transform': { command: 'streams --no-api', environment: { CDC_GROUPS: '[]' } },
           'plausible-compute': { environment: { COMPUTATIONS: '[{"name":"analytics"}]', DUCKSTREAM_ENGINE: 'risingwave' } },
         },
       }),
