@@ -27,7 +27,7 @@ argues one path for all four, built from what the cluster already runs.
 - **The lake.** Domain rows reach DuckLake through pg_duckpipe
   ([[2026-10-20-duckstream-backend-contract|the backend contract]]).
 - **No product events.** A page can load no third-party script; the terminal forbids
-  it ([terminal](https://github.com/bonisoft3/omnishell/blob/v0.32.0/docs/terminal.md)). Google's tag runs beside it in a
+  it ([terminal](https://github.com/bonisoft3/omnishell/blob/v0.33.0/docs/terminal.md)). Google's tag runs beside it in a
   tag frame, and the terminal asks the reader's consent for it (both below).
 
 ## What is decided
@@ -100,7 +100,7 @@ a fan-out service like the one above; an app whose marketers want GTM's interfac
 declare sGTM as one destination.
 
 **Native does not get a webview.** [Native
-hosts](https://github.com/bonisoft3/omnishell/blob/v0.32.0/docs/native-hosts.md#rejected) rejects a webview for its cost; an invisible one to host GTM would pay it for a
+hosts](https://github.com/bonisoft3/omnishell/blob/v0.33.0/docs/native-hosts.md#rejected) rejects a webview for its cost; an invisible one to host GTM would pay it for a
 script whose web cookies do not attribute an app. Native hosts post to `/e`; installs and
 in-app purchases are attributed by the store integrations Google Ads already reads.
 
