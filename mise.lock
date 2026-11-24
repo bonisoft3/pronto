@@ -40,43 +40,43 @@ url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Windows-x86
 url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641111438"
 
 [[tools."github:cue-lang/cue"]]
-version = "0.18.0-rc.4"
+version = "0.18.0"
 backend = "github:cue-lang/cue"
 
 [tools."github:cue-lang/cue"."platforms.linux-arm64"]
-checksum = "sha256:3ef06173e42984e395c02f6665f6ac640767d5ce3c389f0d9ffb5f5812a3cfbd"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914772"
+checksum = "sha256:20b99a70821f358413318d80c956d36214aa98f61307af19130d31c3490b8451"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930834"
 
 [tools."github:cue-lang/cue"."platforms.linux-arm64-musl"]
-checksum = "sha256:3ef06173e42984e395c02f6665f6ac640767d5ce3c389f0d9ffb5f5812a3cfbd"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914772"
+checksum = "sha256:20b99a70821f358413318d80c956d36214aa98f61307af19130d31c3490b8451"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930834"
 
 [tools."github:cue-lang/cue"."platforms.linux-x64"]
-checksum = "sha256:08958dff38118e7461e6bf689e329ff547f090217010f5689109fb95eacb7366"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914776"
+checksum = "sha256:6f763cc20c42174344fbead70737714d63a50c3fa7ec71179e67974c4f9c5f81"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930835"
 
 [tools."github:cue-lang/cue"."platforms.linux-x64-musl"]
-checksum = "sha256:08958dff38118e7461e6bf689e329ff547f090217010f5689109fb95eacb7366"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914776"
+checksum = "sha256:6f763cc20c42174344fbead70737714d63a50c3fa7ec71179e67974c4f9c5f81"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930835"
 
 [tools."github:cue-lang/cue"."platforms.macos-arm64"]
-checksum = "sha256:38db5a5fe02bca48f18d664170d4e2f655745e93711b8df30e5e37ed71f04f51"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914775"
+checksum = "sha256:9f8959a8a8bee82db08facd890b138f285c0b850b8b18125086761c0fded58a5"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930830"
 
 [tools."github:cue-lang/cue"."platforms.macos-x64"]
-checksum = "sha256:35ba0bd4c9a2ff4ce67d3f16bb907427ab76785b2dd278f7da9c4a94321d811b"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914778"
+checksum = "sha256:d122cb6717bc6b80240882a3a85ae5d364e5483e57829c185d58214bd93206e9"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930833"
 
 [tools."github:cue-lang/cue"."platforms.windows-x64"]
-checksum = "sha256:6fdc4794bf45718f5c7b30638c69a947dfa468c82cd09616f1ab246a2af303ae"
-url = "https://github.com/cue-lang/cue/releases/download/v0.18.0-rc.4/cue_v0.18.0-rc.4_windows_amd64.zip"
-url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/735914777"
+checksum = "sha256:c2b17fc673b1395704cf4db657327c5f9da831edab5164531ec315ba05bb95b4"
+url = "https://github.com/cue-lang/cue/releases/download/v0.18.0/cue_v0.18.0_windows_amd64.zip"
+url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/786930836"
 
 [[tools."github:denoland/deno"]]
 version = "2.9.7"

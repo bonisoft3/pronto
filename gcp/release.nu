@@ -365,7 +365,8 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		return {}
 	}
 
-	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
+	let gcp_meta = (^cue export --expression '{name: GCP.name, oidc: [for k, _ in GCP.auth.oidc {k}], sidecars: {for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}}' --out json $app_info.cue_path | from json)
+	let name = ($gcp_meta.name | str trim)
 	# The cluster's migrate step runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $services)
 	let has_render = ("render" in $services)
@@ -406,7 +407,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let auth_env = if ($compose.services.auth.environment.OIDC_PROVIDERS? | default "" | is-not-empty) or ($providers | is-empty) { $compose.services.auth.environment } else {
 		$compose.services.auth.environment | upsert OIDC_PROVIDERS ($providers | str join ",")
 	}
-	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
+	let fixed = $gcp_meta.oidc
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let auth_own = ($auth_env | transpose key value | where {|e| $e.key starts-with "AUTH_" } | reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
@@ -424,7 +425,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# release.cue sets is the release's, over compose's, as auth.oidc's are.
 	let run_host = $"($plan0.service)-($number).($plan0.region).run.app"
 	let peers = (plan-with $app_info.cue_path ({GCP: {runHost: $run_host}} | merge deep $base)).peers
-	let own = (^cue export --expression '{for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}' --out json $app_info.cue_path | from json)
+	let own = $gcp_meta.sidecars
 	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
 		let set = ($own | get -o $n | default [])
 		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value | where {|e| $e.key not-in $set }

@@ -257,7 +257,7 @@ _sqlType: {
 	type:  #Type | #LegacyType
 	_type: [if #typeAlias[D.type] != _|_ {#typeAlias[D.type]}, D.type][0]
 	_expr: strings.TrimSpace(D.sql)
-	if D._expr =~ "^'(?:[^']|'')*'$" if !list.Contains(["bytes", "json", "geojson"], D._type) {
+	if D._expr =~ "^'(?:[^']|'')*'$" if D._type != "bytes" && D._type != "json" && D._type != "geojson" {
 		value: strings.Replace(strings.TrimSuffix(strings.TrimPrefix(D._expr, "'"), "'"), "''", "'", -1)
 	}
 	if D._expr =~ #"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"# {
@@ -529,17 +529,19 @@ _sqlType: {
 	_table:         [if _rel.schema != _|_ {"\"\(_rel.schema)\".\"\(_rel.table)\""}, "\"\(_rel.table)\""][0]
 	_cols:          [if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
 	_rawKeys:       [{[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
+	_rawKeySet:     {for k in _rawKeys {(k): true}}
+	_accSet:        {if _rel["accumulate"] != _|_ for c in _rel.accumulate {(c): true}}
 	_keys:          [{[for k in _rawKeys {"\"\(k)\""}]}, []][0]
 	_vals:          [if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
-	_updates:       [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
-	_setClauses:    [if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
+	_updates:       [if _rel["values"] != _|_ {[for c, _ in _rel.values if _rawKeySet[c] == _|_ {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
+	_setClauses:    [if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || _rawKeySet[c] == _|_) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
 	_customUpdates: [if _rel["updateValues"] != _|_ {[for c, val in _rel.updateValues {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
-	_accUpdates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {
+	_accUpdates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if _rawKeySet[c] == _|_ {
 		if _rel["accumulate"] != _|_ {
-			if list.Contains(_rel.accumulate, c) {
+			if _accSet[c] != _|_ {
 				"\"\(c)\" = \"\(_rel.table)\".\"\(c)\" + EXCLUDED.\"\(c)\""
 			}
-			if !list.Contains(_rel.accumulate, c) {
+			if _accSet[c] == _|_ {
 				"\"\(c)\" = EXCLUDED.\"\(c)\""
 			}
 		}
@@ -750,9 +752,11 @@ _sqlType: {
 		}]
 	}])
 
+	_sourceEventSet: {for ev in ST.sourceEvents {(ev): true}}
+
 	_allTransitions: list.Concat([_onTransitions, _afterTransitions])
 
-	_transitionBranches: [if !ST.cortex for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
+	_transitionBranches: [if !ST.cortex for t in _allTransitions if t.target != _|_ if t.event == _|_ || _sourceEventSet[t.event] == _|_ {
 		_guardLine: [if t["guard"] != _|_ if t.delayMs == _|_ {
 			"""
 				        IF (\(t.guard)) IS NOT TRUE THEN
@@ -804,7 +808,7 @@ _sqlType: {
 	_directRecipe: _cortexRecipe & {
 		mode: "direct"
 		transitions: list.Concat([
-			[for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
+			[for t in _allTransitions if t.target != _|_ if t.event == _|_ || _sourceEventSet[t.event] == _|_ {
 				event:  "direct:\(t.target)" + [if t.delayMs != _|_ {":\(t.delayMs):\(t.branch)"}, ""][0]
 				when:   "NEW.\"\(ST.field)\" = '\(t.target)'" + [if ST.timed {[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]}, ""][0]
 				target: t.target
@@ -1007,8 +1011,8 @@ _sqlType: {
 			// The entity's own fields alone, a name inside a string literal being
 			// none; the state and count fields are the machine's, which the
 			// answer moves.
-			_fields: [for f in _entity.fields {f.name}]
-			_cols:   list.SortStrings([for c, _ in {for f in list.Concat([_pk, list.FlattenN(_named, 1)]) if list.Contains(_fields, f) if f != _field if f != x.count if f != x.incarnation {(f): true}} {c}])
+			_fieldSet: {for f in _entity.fields {(f.name): true}}
+			_cols:     list.SortStrings([for c, _ in {for f in list.Concat([_pk, list.FlattenN(_named, 1)]) if _fieldSet[f] != _|_ if f != _field if f != x.count if f != x.incarnation {(f): true}} {c}])
 			"""
 				  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
 				    RAISE EXCEPTION '% in \(sName) keeps what its read asked until the answer of %', '\(_table)', '\(x.name)' USING ERRCODE = 'check_violation';
@@ -2140,12 +2144,13 @@ _sqlType: {
 	let M = self
 	code!:          _
 	_appMigrations: #appMigrations & {"code": M.code}
+	_timedMachines: (#TimedMachines & {code: M.code}).out
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles and service-token plumbing.
 	_authOn: M.code.capabilities.auth != _|_ || len(M._appMigrations.accessed) > 0
 	// The `service` role alone also stands where a schedule or an effect is
 	// declared: the ticker writes its ticks as it.
-	_serviceOn: len((#TimedMachines & {code: M.code}).out) > 0 || M._authOn || len(M.code.state.schedules) > 0 || [if M.code.state.effects != _|_ {len(M.code.state.effects) > 0}, false][0]
+	_serviceOn: len(M._timedMachines) > 0 || M._authOn || len(M.code.state.schedules) > 0 || [if M.code.state.effects != _|_ {len(M.code.state.effects) > 0}, false][0]
 	_serverOn:  (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
 	// The roles a token may name beside the cluster's own, in one order
 	// (#TokenRole).
@@ -3060,7 +3065,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_appAdapters: {for _, screen in S.code.surface.screens for p in screen.files.adapters if !strings.HasPrefix(p, "/") {
 		(pathpkg.Base(p)): {(p): true}
 	}}
-	_composedHandlers: [if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex if chart.setup != _|_ for name, actor in chart.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {"shell/handlers/\(name).js"}]
+	_composedHandlers: [if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex if chart.setup != _|_ for name, actor in chart.setup.actors if (actor.via == "session" || actor.via == "sync" || actor.via == "local") if actor.handler != _|_ {"shell/handlers/\(name).js"}]
 	migrations:        [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
@@ -3349,10 +3354,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						for appAdapterName, candidates in S._appAdapters if routeAdapters[appAdapterName] == _|_ if len(candidates) == 1 for p, _ in candidates {p},
 						for p in S.adapters let builtinAdapterName = pathpkg.Base(p) if routeAdapters[builtinAdapterName] == _|_ if S._appAdapters[builtinAdapterName] == _|_ {p},
 					])])
+					let routeHandlers = {for p in s.files.handlers {(p): true}}
 					handlers: list.Concat([s.files.handlers, list.SortStrings([for p, _ in {
 						for _, h in S.code.surface.handlers {(h.src): true}
 						for p in S._composedHandlers {(p): true}
-					} if !list.Contains(s.files.handlers, p) {p}])])
+					} if routeHandlers[p] == _|_ {p}])])
 				}
 			}
 			states: s.states // storybook frame list; semantics stay in the ir storyboard
@@ -3803,6 +3809,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	cluster!:  _
 	terminal!: _
 	_streams:  (#streams & {code: D.code}).out
+	let _targetSet = {for t in D.code.meta.targets {(t): true}}
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		launchCommand: {do: distribution.#Project.launch, use: "./tools.nu"}
@@ -3845,7 +3852,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// is what makes the app's mirror bundle it again and deploy it.
 				// The tags on HEAD under this app's prefix are release.nu's own
 				// reading of what it just created.
-				if list.Contains(D.code.meta.targets, "pages") {
+				if _targetSet["pages"] != _|_ {
 					pages: {
 						verb:     "release"
 						platform: "pages"
@@ -3857,7 +3864,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 				// The edge target: mecha's edge cluster in one Durable Object,
 				// where the app's machines step and their deadlines are its alarm.
-				if list.Contains(D.code.meta.targets, "cloudflare") {
+				if _targetSet["cloudflare"] != _|_ {
 					cloudflare: {
 						verb:     "release"
 						platform: "cloudflare"
@@ -3866,7 +3873,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						publish:  [_distribution.publishEdge]
 					}
 				}
-				if list.Contains(D.code.meta.targets, "docker") {
+				if _targetSet["docker"] != _|_ {
 					docker: {
 						verb:     "release"
 						platform: "docker"
@@ -3926,7 +3933,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// A deploy, not a published version: its rule is the release
 			// engine alone, so it carries none of release.nu's versioning
 			// and its flags (--dry-run, --snapshot) reach that engine.
-			if list.Contains(D.code.meta.targets, "k8s") {
+			if _targetSet["k8s"] != _|_ {
 				sayYaml: {..., say: {..., release: {..., rulemap: {..., k8s: {..., platform: "k8s", cmds: [{..., do: _distribution.k8s}]}}}}}
 			}
 
@@ -3935,21 +3942,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// what it deploys rather than a stack on this machine (release.nu):
 			// the drivers integrate runs that read APP_URL, which verify@gcp runs
 			// alone against the release or a named preview (verify.nu).
-			if list.Contains(D.code.meta.targets, "gcp") {
+			if _targetSet["gcp"] != _|_ {
 				sayYaml: {..., say: {..., release: {..., rulemap: {..., gcp: {..., platform: "gcp", cmds: [{..., do: _distribution.gcp}]}}}}}
 			}
 
 			// Post-release verification across live deployments.
-			if list.Contains(D.code.meta.targets, "pages") {
+			if _targetSet["pages"] != _|_ {
 				sayYaml: {..., say: {..., verify: {..., rulemap: {..., pages: {..., platform: "pages", cmds: [{..., do: _distribution.verifyPages}]}}}}}
 			}
-			if list.Contains(D.code.meta.targets, "cloudflare") {
+			if _targetSet["cloudflare"] != _|_ {
 				sayYaml: {..., say: {..., verify: {..., rulemap: {..., cloudflare: {..., platform: "cloudflare", cmds: [{..., do: _distribution.verifyEdge}]}}}}}
 			}
-			if list.Contains(D.code.meta.targets, "k8s") {
+			if _targetSet["k8s"] != _|_ {
 				sayYaml: {..., say: {..., verify: {..., rulemap: {..., k8s: {..., platform: "k8s", cmds: [{..., do: _distribution.verifyK8s}]}}}}}
 			}
-			if list.Contains(D.code.meta.targets, "gcp") {
+			if _targetSet["gcp"] != _|_ {
 				sayYaml: {..., say: {..., verify: {..., rulemap: {..., gcp: {..., platform: "gcp", cmds: [{..., do: _distribution.verifyGcp}]}}}}}
 			}
 			sayYaml: {
@@ -4089,6 +4096,7 @@ _pgrollDir: "services/database/pgroll"
 	let D = self
 	code!:   _
 	statics: [...mecha.#Static]
+	let _model = #accessModel & {code: D.code}
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
 	// /srv root. One directory is load-bearing, not tidiness: journal.html and
@@ -4167,10 +4175,10 @@ _pgrollDir: "services/database/pgroll"
 			if D.code.capabilities.ai != _|_ {
 				ai: D.code.capabilities.ai
 			}
-			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
+			server: _model._serverOn
 		}
 		state: {
-			let _appMigrations = #appMigrations & {"code": D.code}
+			let _appMigrations = _model._appMigrations
 			migrations: _appMigrations.list
 			if D.code.state.migrations != _|_ || D.code.state.baseline != _|_ {
 				pgroll: {
@@ -4191,8 +4199,9 @@ _pgrollDir: "services/database/pgroll"
 				// states none has its trigger dropped, so a database that held one
 				// agrees with a fresh one; that rides a step the release runs anyway,
 				// as the roles' prune below does.
-				let behaved = [for _, e in D.code.state.entities if e.server if (#behaved & {"e": e}).out {e}]
-				let plain = [for _, e in D.code.state.entities if e.server if !(#behaved & {"e": e}).out {e.table}]
+				let _behavedMap = {for n, e in D.code.state.entities if e.server {(n): (#behaved & {"e": e}).out}}
+				let behaved = [for n, e in D.code.state.entities if e.server if _behavedMap[n] {e}]
+				let plain = [for n, e in D.code.state.entities if e.server if !_behavedMap[n] {e.table}]
 				// Embedded as a struct, as the roles' are below, for the same reason.
 				let fieldBehaviorReconcile = {field_behavior: strings.Join(list.Concat([
 					[for e in behaved {(#fieldBehaviorSql & {"e": e, columns: D.code._machineColumns}).out}],
@@ -4207,16 +4216,15 @@ _pgrollDir: "services/database/pgroll"
 				// of its own for every server app would start one for each. The
 				// field comes as a struct the comprehension embeds: one it spelled
 				// with a reference read as incomplete in a cluster an app extends.
-				let model = #accessModel & {code: D.code}
-				let isChecked = model._checked
+				let isChecked = _model._checked
 				let tokenSql = [if len(declared) > 0 {(#tokenRolesSql & {roles: declared, "checked": isChecked}).out}, (#tokenRolesPrune & {restate: true, "checked": isChecked}).out][0]
-				let rolesReconcile = {roles: [if isChecked {(#accessCheckSql & {access: model.out}).out}, ""][0] + tokenSql}
-				let migrating = len(declared) > 0 || (model._serverOn && (isChecked || D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len(behaved) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0))
+				let rolesReconcile = {roles: [if isChecked {(#accessCheckSql & {access: _model.out}).out}, ""][0] + tokenSql}
+				let migrating = len(declared) > 0 || (_model._serverOn && (isChecked || D.code.state.tokenRoles != _|_ || len(updateOnly) > 0 || len(behaved) > 0 || len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0))
 				if migrating {rolesReconcile}
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
-					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, signals: [if D.code.state.signals != _|_ {D.code.state.signals}, {}][0], step: (#steps & {code: D.code}).machines})._effectUpgradeSql
+					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, signals: [if D.code.state.signals != _|_ {D.code.state.signals}, {}][0], step: _model._appMigrations._steps.machines})._effectUpgradeSql
 				}], "\n\n")
 			}
 			pipelines: [for n, kind in (#streams & {code: D.code}).out {
@@ -4297,10 +4305,9 @@ _pgrollDir: "services/database/pgroll"
 				}
 				if c.typedSinks {
 					sinkTypes: {for n in c.to
-					let columns = [if c.sinkColumns != _|_ if c.sinkColumns[n] != _|_ {c.sinkColumns[n]},
-						[for f in D.code.state.entities[n].fields {f.name}]][0] {
+					let colSet = [if c.sinkColumns != _|_ if c.sinkColumns[n] != _|_ {{for col in c.sinkColumns[n] {(col): true}}}, null][0] {
 						(D.code.state.entities[n].table): [
-							for f in D.code.state.entities[n].fields if !f.retired if f.generated == _|_ if list.Contains(columns, f.name) {
+							for f in D.code.state.entities[n].fields if !f.retired if f.generated == _|_ if colSet == null || colSet[f.name] != _|_ {
 								name:     f.name
 								type:     [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
 								required: f.required
@@ -4521,6 +4528,7 @@ _pgrollDir: "services/database/pgroll"
 // and bayt.cue redeclares cluster, terminal and loop as the escape-hatch seams.
 #emit: {
 	let E = self
+	_targetSet: {for t in E.code.meta.targets {(t): true}}
 	_uniqueLines: [
 		for ent in E._baseServer for u in ent.uniques {
 			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
@@ -4604,7 +4612,7 @@ _pgrollDir: "services/database/pgroll"
 	// clock.ts), so only an effect asks it for one; `edgeClock: "disabled"` is
 	// a frozen archive saying in as many words that its schedules do not run
 	// there.
-	_timedMachines: (#TimedMachines & {code: E.code}).out
+	_timedMachines: E._model._timedMachines
 	_clockDeclared: {
 		for t in E.code.meta.targets {
 			if (t != "pages" && t != "cloudflare" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0] {
@@ -4619,7 +4627,7 @@ _pgrollDir: "services/database/pgroll"
 	// grant that the page's cluster does not serve; and a validation runs in plv8, which PGlite has none of.
 	// The pages target is refused rather than released broken.
 	_pagesBundle: {
-		if list.Contains(E.code.meta.targets, "pages") {
+		if E._targetSet["pages"] != _|_ {
 			units:       true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
 			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
@@ -4630,19 +4638,19 @@ _pgrollDir: "services/database/pgroll"
 	// yet, so those targets are refused rather than released without it.
 	// A shared entity syncs through keyed shapes, which the edge does not serve
 	// (mecha-edge's cluster.ts), so the target is refused as the page's is.
-	_sharedTargets: cloudflare: true & [if list.Contains(E.code.meta.targets, "cloudflare") {len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0}, true][0]
+	_sharedTargets: cloudflare: true & [if E._targetSet["cloudflare"] != _|_ {len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0}, true][0]
 
 	_rewriteTargets: {
 		if E.code.state.rewrites != _|_ if len(E.code.state.rewrites) > 0 {
-			pages:      true & !list.Contains(E.code.meta.targets, "pages")
-			cloudflare: true & !list.Contains(E.code.meta.targets, "cloudflare")
+			pages:      true & (E._targetSet["pages"] == _|_)
+			cloudflare: true & (E._targetSet["cloudflare"] == _|_)
 		}
 	}
 
 	// A declared token role is a role of the container's PostgreSQL, which the
 	// page's and the edge's databases have no counterpart of.
 	_tokenRoleTargets: {
-		if len(E._declaredRoles) > 0 for t in ["pages", "cloudflare"] if list.Contains(E.code.meta.targets, t) {
+		if len(E._declaredRoles) > 0 for t in ["pages", "cloudflare"] if E._targetSet[t] != _|_ {
 			(t): "tokenRoles: the \(t) target has no role a token may switch to" & true
 		}
 	}
@@ -5458,7 +5466,7 @@ _pgrollDir: "services/database/pgroll"
 
 		"""
 
-	_appMigrations: #appMigrations & {"code": E.code}
+	_appMigrations: E._model._appMigrations
 	_seedFile:      _appMigrations._seedFile
 
 	_migrations: _appMigrations.list
@@ -5502,7 +5510,7 @@ _pgrollDir: "services/database/pgroll"
 	if E.code.capabilities.ai != _|_ {
 		cluster: capabilities: ai: E.code.capabilities.ai
 	}
-	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
+	_serverOn: E._model._serverOn
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
@@ -5806,7 +5814,7 @@ _pgrollDir: "services/database/pgroll"
 	// the app's module over the Mecha machine it reaches — run by the terminal
 	// for a local child — and the declarations of every machine it may write to.
 	_composedHandlers: {
-		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex if cortexMachine.setup != _|_ for name, actor in cortexMachine.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex if cortexMachine.setup != _|_ for name, actor in cortexMachine.setup.actors if (actor.via == "session" || actor.via == "sync" || actor.via == "local") if actor.handler != _|_ {
 			"shell/handlers/\(name).js": {
 				machine:  {machine: E.code.state.mecha.reducers[actor.machine].reducer, rules: E.code.state.mecha.reducers[actor.machine].rules}
 				local:    actor.via == "local"
@@ -6355,17 +6363,17 @@ _pgrollDir: "services/database/pgroll"
 
 							// Where the edge's airlock goes: it has no daprd to read an endpoint from.
 							let edge = (#SinkAt & {sink: i.effect.sink, target: "cloudflare"}).out
-							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.origin != _|_ {edgeOrigin: edge.origin}
+							if E._targetSet["cloudflare"] != _|_ if edge != null if edge.origin != _|_ {edgeOrigin: edge.origin}
 
 							// The bridge the effect is settled by (#EffectBridge).
 							let settledBy = #EffectBridge & {effect: i.effect, bridges: [if E.code.state.bridges != _|_ {E.code.state.bridges}, {}][0], targets: E.code.meta.targets}
 							let named = settledBy.named
 
 							// And the bridge the edge calls, where that is not it.
-							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.bridge != _|_ if edge.bridge != named[0] {edgeBridge: edge.bridge}
+							if E._targetSet["cloudflare"] != _|_ if edge != null if edge.bridge != _|_ if edge.bridge != named[0] {edgeBridge: edge.bridge}
 
 							// Or the AI gateway, where the bridge is another target's.
-							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.ai != _|_ if len(named) > 0 {edgeAi: true}
+							if E._targetSet["cloudflare"] != _|_ if edge != null if edge.ai != _|_ if len(named) > 0 {edgeAi: true}
 							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
 							if len(named) > 0 {bridge: settledBy.out}
 						}
@@ -6967,13 +6975,14 @@ _pgrollDir: "services/database/pgroll"
 					groups:  [if h.value == _|_ if h.key =~ "[A-Za-z]" {name: ":\(regexp.ReplaceAll("[^A-Za-z]", h.key, ""))", group: "1"}, if h.value != _|_ for g, _ in regexp.FindNamedSubmatch("(?:\(h.value))?", "") {name: ":\(g)", group: g}]
 				}]
 				let tokens = regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1)
+				let _tokenSet = {for tk in tokens {(tk): true}}
 
 				// A source's parameter a function's destination places is held
 				// to the same, read from the path as the matcher reads it: the
 				// expression matches the path itself, since one condition does
 				// not see what another matcher of the set captured.
-				let guarded = [if strings.HasPrefix(r.destination, "/crud/rpc/") for i, p in params if list.Contains(tokens, p) {"!{http.regexp.\(matcher)_path.\(i+1)}.matches(r\"\(_rewriteOperand)\")"}]
-				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\x7b\(strings.TrimPrefix(h.value, "{"))', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if list.Contains(tokens, g.name) {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
+				let guarded = [if strings.HasPrefix(r.destination, "/crud/rpc/") for i, p in params if _tokenSet[p] != _|_ {"!{http.regexp.\(matcher)_path.\(i+1)}.matches(r\"\(_rewriteOperand)\")"}]
+				let terms = [if len(guarded) > 0 {"path_regexp('\(matcher)_path', r\"^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$\")"}, for g in guarded {g}, for h in has {"vars_regexp('\(h.name)', '\\x7b\(strings.TrimPrefix(h.value, "{"))', r\"\(h.pattern)\") && \(h.value) != \"\" && !{http.request.uri.query}.matches(r\"(?:^|&)\(h.key)(?:=[^&]*)?&(?:.*&)?\(h.key)(?:[=&]|$)\")" + strings.Join([if strings.HasPrefix(r.destination, "/crud/rpc/") for g in h.groups if _tokenSet[g.name] != _|_ {" && !{http.regexp.\(h.name).\(g.group)}.matches(r\"\(_rewriteOperand)\")"}], "")}]
 
 				// `vars_regexp` is told the placeholder to read as a string,
 				// which the expression must hold as written, where a
@@ -7325,8 +7334,8 @@ _pgrollDir: "services/database/pgroll"
 
 		// The mirror release: the workflow bundles and deploys the app on its
 		// mirror, where copybara moves it to the root GitHub reads.
-		let hasPages = list.Contains(E.code.meta.targets, "pages")
-		let hasCloudflare = list.Contains(E.code.meta.targets, "cloudflare")
+		let hasPages = E._targetSet["pages"] != _|_
+		let hasCloudflare = E._targetSet["cloudflare"] != _|_
 		if hasPages || hasCloudflare {
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]

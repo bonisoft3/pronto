@@ -956,11 +956,17 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render}" $app_info.cue_path } | complete)
+	let meta_expr = if $cluster_env == "gke" {
+		"{app: {name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render}, gke: GKE}"
+	} else {
+		"{app: {name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render}}"
+	}
+	let meta_res = (do { cue export --expression $meta_expr $app_info.cue_path } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
-	let app_meta = ($meta_res.stdout | from json)
+	let meta_payload = ($meta_res.stdout | from json)
+	let app_meta = $meta_payload.app
 
 	let target_ns = $app_meta.namespace
 	let gateway_host = ($manifests | from yaml | where kind == "Gateway" | get 0.spec.listeners.0.hostname)
@@ -977,7 +983,7 @@ export def main [
 	}
 
 	let target_env = if $cluster_env == "gke" {
-		let config = (^cue export --expression GKE --out json $app_info.cue_path | from json)
+		let config = $meta_payload.gke
 		let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
 		kubectl config view --minify --flatten --context $config.context | save -f $kubeconfig
 		$env.KUBECONFIG = $kubeconfig

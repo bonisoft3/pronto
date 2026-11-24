@@ -377,7 +377,7 @@ import (
 	_localIntegrateDo: """
 		\(B._installBrowser)
 		let base_tmp = (if (($env.RUNNER_TEMP? | default "") != "") { $env.RUNNER_TEMP } else { $nu.temp-dir })
-		let work = ($base_tmp | path join $"bayt-host-\(project.name)-($nu.pid)-(random int 100000..999999)")
+		let work = ($base_tmp | path join $"bayt-host-\(B.meta.app)-($nu.pid)-(random int 100000..999999)")
 		let wbin = ($work | path join "bin")
 		mkdir $wbin
 		if $os == "windows" {
@@ -514,7 +514,7 @@ import (
 		["workspaceroot-pronto-sources_bayt"],
 	])
 
-	_mechaRuntime: mecha.#Runtime & {"project": project.name, "cluster": B.cluster}
+	_mechaRuntime: mecha.#Runtime & {"project": B.meta.app, "cluster": B.cluster}
 	// A runner rebuilds the stack its closure brings up, from the sources the
 	// runtime's images are built from. Launch reaches them through `:outs`
 	// edges, which a `:srcs` view does not follow, so each is named.
@@ -849,7 +849,7 @@ import (
 					// own the closure brings the plane up, and under the verb, which
 					// brought it up first, this is a health check — see the visual
 					// check in omnishell/terminal.cue. Qualified, as bayt names it.
-					depends_on: "\(project.name)-launch": condition: "service_healthy"
+					depends_on: "\(B.meta.app)-launch": condition: "service_healthy"
 					command: [
 						"deno", "run", "--node-modules-dir=auto",
 						"--allow-read", "--allow-write", "--allow-net",
@@ -873,7 +873,7 @@ import (
 			}
 			if B.cluster.capabilities.server {
 				let schema = B.cluster.surface.schema
-				"replay": core.#target & {
+				"replay": {
 					activate: "mise x --"
 					entrypoint: {
 						do:    #"let pronto = (if (($env.PRONTO_DIR? | default '') != '') { $env.PRONTO_DIR } else { (^mise where github:bonisoft3/pronto | str trim) }); if (($env.BAYT_LOCAL_WORK_DIR? | default '') != '') { let work = $env.BAYT_LOCAL_WORK_DIR; let pgroll = ($work | path join 'pgroll'); if ('.bayt/bayt.migrate.json' | path exists) and (not ($pgroll | path exists)) { mkdir $pgroll; let m = (open .bayt/bayt.migrate.json | get dockerfile); ($m | get -o copy | default []) | each {|c| cp ($c.srcs.0) ($pgroll | path join ($c.dst | path basename)) } | ignore; ($m | get -o epilogue | default []) | each {|e| let lines = ($e | lines); if ($lines.0 | str starts-with "COPY <<'PGROLL' /tmp/") { let name = ($lines.0 | parse "COPY <<'PGROLL' /tmp/{name}.parts" | get 0.name); ($lines | skip 1 | take while {|l| $l != "PGROLL" } | str join "" | decode base64) | save --raw -f ($pgroll | path join $name) } else if ($lines.0 | str starts-with "COPY <<'PGROLL' /pgroll/") { let name = ($lines.0 | parse "COPY <<'PGROLL' /pgroll/{name}" | get 0.name); $lines.1 | save --raw -f ($pgroll | path join $name) } else if ($lines.0 | str starts-with "COPY <<'RECONCILE' /pgroll/") { let name = ($lines.0 | parse "COPY <<'RECONCILE' /pgroll/{name}" | get 0.name); ($lines | skip 1 | drop 1 | str join "\n") | save --raw -f ($pgroll | path join $name) } } | ignore }; let os = (match $nu.os-info.name { 'macos' => 'macos', 'windows' => 'windows', _ => 'linux' }); let sh = (if ('services/migrate/migrate.nu' | path exists) { 'services/migrate/migrate.nu' } else if ('services/migrate/migrate.sh' | path exists) and ($os != 'windows') { 'services/migrate/migrate.sh' } else { ((^mise where github:bonisoft3/mecha | str trim) | path join 'services/migrate/migrate.nu') }); with-env { PRONTO_REPLAY_INITDB: ($work | path join 'initdb.d'), PRONTO_REPLAY_PGROLL_DIR: $pgroll, PRONTO_MIGRATE_SH: $sh } { ^deno run --config ($pronto | path join 'deno.json') --allow-read --allow-write --allow-run --allow-env ($pronto | path join 'check-replay.ts') . } } else { ^deno run --config ($pronto | path join 'deno.json') --allow-read --allow-write --allow-run --allow-env ($pronto | path join 'check-replay.ts') . }"#
@@ -887,7 +887,7 @@ import (
 						after: (schema.target): "healthy"
 					}
 				}
-				"ci-replay": core.#target & {
+				"ci-replay": {
 					activate: ""
 					taskfile: incremental: false
 					deps: list.Concat([
@@ -1009,7 +1009,7 @@ import (
 								PGRST_JWT_SECRET: B.cluster.surface.jwtSecret
 							}
 						}
-						depends_on: "\(project.name)-launch": condition: "service_healthy"
+						depends_on: "\(B.meta.app)-launch": condition: "service_healthy"
 						// `$$` so compose leaves a variable to the container's shell.
 						command: ["mise", "x", "--", "nu", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], "; ")]
 					}
@@ -1272,7 +1272,7 @@ import (
 				// no port a bridge's process of it listens on.
 				let _portCheck = strings.Join([for c, a in _containers {"'if [ \"$PORT\" = \(a.port) ]; then echo \"appliance: PORT \(a.port) is where the bridge process \(c) listens; set another\" >&2; exit 1; fi' "}], "")
 				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, if _risingwave {["risingwave"]}, [for c, _ in _containers {c}]]), " ")
-				"release-docker": core.#target & {
+				"release-docker": {
 					activate: ""
 					deps: list.Concat([
 						[":database", ":crud", ":caddy", ":electric:outs"],

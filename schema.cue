@@ -1138,7 +1138,7 @@ import (
 		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
 		// A lone arrow's actions are asked of the arrow itself: wrapped in a
-		// list first, a missing `actions` stalls CUE 0.18.0-rc.4 without end
+		// list first, a missing `actions` stalls CUE 0.18 without end
 		// when the machine is read under an inline (#emit & {...}).files.
 		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for acts in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {[for t in tr if t.actions != _|_ {t.actions}]}, if tr.actions != _|_ {[tr.actions]}, []][0] for a in [if (acts & [...]) != _|_ {acts}, [acts]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for acts in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {[for t in tr if t.actions != _|_ {t.actions}]}, if tr.actions != _|_ {[tr.actions]}, []][0] for a in [if (acts & [...]) != _|_ {acts}, [acts]][0] {a}],
@@ -1913,6 +1913,9 @@ import (
 
 #App: {
 	let A = self
+	_entityFieldNames: {for en, e in A.state.entities {(en): {for f in e.fields {(f.name): true}}}}
+	_targetSet:        {for t in A.meta.targets {(t): true}}
+	_clockSet:         {for c in A.meta.clocks {(c): true}}
 	state: {
 		entities: [string]~(Name,_): #Entity & {name: Name}
 		// DDL table-order override: must list every entity, parents before
@@ -2505,13 +2508,14 @@ import (
 	_sinkColumnViolations: list.Concat([for name, computation in A.state.computations
 	if computation.sinkColumns != _|_ for entity, columns in computation.sinkColumns {
 		let fields = A.state.entities[entity].fields
-		let writable = [for f in fields if !f.retired if f.generated == _|_ {f.name}]
+		let writableSet = {for f in fields if !f.retired if f.generated == _|_ {(f.name): true}}
+		let colSet = {for c in columns {(c): true}}
 		list.Concat([
-			[for column in columns if !list.Contains(writable, column) {
+			[for column in columns if writableSet[column] == _|_ {
 				"computation \(name) sink \(entity) column \(column) is not a writable entity field"
 			}],
 			[for f in fields if !f.retired if f.generated == _|_
-			if f.pk || (f.required && f.default == _|_) if !list.Contains(columns, f.name) {
+			if f.pk || (f.required && f.default == _|_) if colSet[f.name] == _|_ {
 				"computation \(name) sink \(entity) requires insert column \(f.name)"
 			}],
 		])
@@ -2531,12 +2535,12 @@ import (
 		}
 		for plName, pl in A.state.duckstreams if pl.backend == _|_ if pl.tempo == "cold"
 		let plSinkEntity = [if eLookup[pl.sink] != _|_ {eLookup[pl.sink]}, pl.sink][0]
-		let plSourceEntities = [for s in pl.sources {[if eLookup[s] != _|_ {eLookup[s]}, s][0]}]
+		let plSourceSet = {for s in pl.sources {([if eLookup[s] != _|_ {eLookup[s]}, s][0]): true}}
 		for sName, s in A.surface.screens
-		let sReadsEntities = [if s.reads != _|_ for r in s.reads {[if eLookup[r.table] != _|_ {eLookup[r.table]}, r.table][0]}]
+		let sReadsSet = {if s.reads != _|_ for r in s.reads {([if eLookup[r.table] != _|_ {eLookup[r.table]}, r.table][0]): true}}
 		let sFormsEntities = [if s.forms != _|_ for f in s.forms if f.entity != _|_ {[if eLookup[f.entity] != _|_ {eLookup[f.entity]}, f.entity][0]}]
-		if list.Contains(sReadsEntities, plSinkEntity)
-		if len([for fe in sFormsEntities if list.Contains(plSourceEntities, fe) {fe}]) > 0 {
+		if sReadsSet[plSinkEntity] != _|_
+		if len([for fe in sFormsEntities if plSourceSet[fe] != _|_ {fe}]) > 0 {
 			pipeline: plName
 			screen:   sName
 			sink:     pl.sink
@@ -2669,7 +2673,7 @@ import (
 				[if !strings.Contains(markup, "data-kinetic=\"\(inv.src)\"") {"\(cName).\(sName): no data-kinetic=\"\(inv.src)\" mounts the kinetic child on its screen"}],
 			])
 		},
-		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if list.Contains(["session", "sync", "local"], c.setup.actors[inv.src].via) {
+		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ let _via = c.setup.actors[inv.src].via if _via == "session" || _via == "sync" || _via == "local" {
 			let actor = c.setup.actors[inv.src]
 			list.Concat([
 				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],
@@ -2817,9 +2821,11 @@ import (
 			"machine \(mn) combines states and lifecycle handlers: declare separate machines"
 		}],
 		if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
+			let _stateSet = {for state, _ in m.states {(state): true}}
+			let _enumSet = [if e.cel.enums[m.field] != _|_ {{for v in e.cel.enums[m.field] {(v): true}}}, null][0]
 			list.Concat([
 				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
-				[if !list.Contains([for f in e.fields {f.name}], m.field) {"machine \(mn) field \(m.field) is not a column of \(en)"}],
+				[if A._entityFieldNames[en][m.field] == _|_ {"machine \(mn) field \(m.field) is not a column of \(en)"}],
 				[for f in e.fields if f.name == m.field if f.generated != _|_ {
 					"machine \(mn) field \(en).\(m.field) is generated and cannot hold transitions"
 				}],
@@ -2836,10 +2842,10 @@ import (
 				[for f in e.fields if f.name == m.field if f.default != _|_ if strings.TrimSpace(f.default) != "'"+strings.Replace(m.initial, "'", "''", -1)+"'" {
 					"machine \(mn) initial \(m.initial) disagrees with \(en).\(m.field) default \(f.default)"
 				}],
-				[if e.cel.enums[m.field] != _|_ for state, _ in m.states if !list.Contains(e.cel.enums[m.field], state) {
+				[if _enumSet != null for state, _ in m.states if _enumSet[state] == _|_ {
 					"machine \(mn) state \(state) is not admitted by \(en).\(m.field) cel enum"
 				}],
-				[for i, row in e.seed if row[m.field] != _|_ if !list.Contains([for state, _ in m.states {state}], row[m.field]) {
+				[for i, row in e.seed if row[m.field] != _|_ if [if (row[m.field] & string) != _|_ {_stateSet[row[m.field]] == _|_}, true][0] {
 					"machine \(mn) seed \(en)[\(i)].\(m.field) value \(row[m.field]) is not a state"
 				}],
 				// A seed restores its row standing in a state, entering nothing:
@@ -2857,7 +2863,7 @@ import (
 	_timerViolations: list.Concat([
 		// A page's clock (mecha-browser's clock.ts) sweeps only while it is
 		// open, so a page states that it is the clock.
-		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "cloudflare" if A._clockSet[target] == _|_ {
 			"server timers require a declared clock for \(target)"
 		}],
 		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
@@ -2937,8 +2943,7 @@ import (
 			"unit \(un) has a memo and declares fields for \(r): an answer's shape is the memo's key and columns, derived"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
-		let me = A.state.entities[u.memo.entity]
-		for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
+		for k in u.memo.key if A._entityFieldNames[u.memo.entity][k] == _|_ {
 			"unit \(un) memo keys on \(k), which is not a field of \(u.memo.entity)"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
@@ -3245,12 +3250,12 @@ import (
 	_effectEntities:    {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
 	_effectEntityNames: {for n, s in _effectEntities {(n): [for en, _ in s {en}]}}
 	// By key: an effect refused below is bottom as a value, not undeclared.
-	_effectNames: [for n, _ in _effects {n}]
+	_effectNameSet: {for n, _ in _effects {(n): true}}
 	// An invoking state is left only by its outcome, so an outcome that cannot
 	// be delivered leaves the row there for good: the interpreter would refuse the
 	// move, and the airlock would retry the sink until its attempts ran out.
 	_invokeViolations: list.Concat([
-		[for i in _invokes if !list.Contains(_effectNames, i.src) {
+		[for i in _invokes if _effectNameSet[i.src] == _|_ {
 			"machine \(i.machine) state \(i.state) invokes undeclared effect: \(i.src)"
 		}],
 		[for i in _invokes if i.others {
@@ -3268,7 +3273,7 @@ import (
 		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if !A.state.entities[en].server {
 			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
 		}],
-		[for n, ens in _effectEntityNames if _effects[n] != _|_ if _effects[n].request == _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ if _effects[n].request == _|_ for en in ens for k in _effects[n].key if A._entityFieldNames[en][k] == _|_ {
 			"effect \(n) keys on \(k), which is not a field of \(en)"
 		}],
 		[for i in _invokes if i.final {
@@ -3277,7 +3282,7 @@ import (
 		[for i in _invokes for fb in i.fallbacks if fb.guarded {
 			"machine \(i.machine) state \(i.state): each outcome requires an unguarded fallback"
 		}],
-		[for i in _invokes for ar in i.arrows if !list.Contains(i.states, ar.target) {
+		[for i in _invokes let _stateSet = {for s in i.states {(s): true}} for ar in i.arrows if _stateSet[ar.target] == _|_ {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome target that is no state: \(ar.target)"
 		}],
 		[for i in _invokes for ar in i.arrows if ar.target == i.state {
@@ -3294,7 +3299,7 @@ import (
 		]) for a in [if (actions & [...]) != _|_ {actions}, [actions]][0] if a.reject != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's entry or exit actions reject, which would refuse the recorded outcome's delivery"
 		}],
-		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k, v in _effects[n].input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in A.state.entities[en].fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k, v in _effects[n].input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if A._entityFieldNames[en][strings.SplitN(v, ".", 2)[1]] == _|_ {
 			"effect \(n) input \(k) reads \(v), which is not a field of \(en)"
 		}],
 		// The credential is the airlock's alone: a handler handed it could put
@@ -3320,6 +3325,7 @@ import (
 	_readVars: {for n, x in _reads {
 		(n): [if regexp.Match("[{]", x.request.path) for e in regexp.FindAll("[{][^}]*[}]", x.request.path, -1) for v in strings.Split(strings.Trim(e, "{}?&"), ",") {v}]
 	}}
+	_readVarSets: {for n, vars in _readVars {(n): {for v in vars {(v): true}}}}
 	_readViolations: list.Concat([
 		[for n, x in _reads if x.request.body != _|_ {
 			"effect \(n) is a GET, which carries no body (RFC 9110 §9.3.1): what it sends is its path and query"
@@ -3348,13 +3354,13 @@ import (
 		[for n, _ in _reads if A.capabilities.auth == _|_ {
 			"effect \(n) is a read, and the app declares no auth: a read spends its sink's credential, so only a signed-in writer asks one"
 		}],
-		[for n, x in _reads if list.Contains(A.meta.targets, "cloudflare") {
+		[for n, x in _reads if A._targetSet["cloudflare"] != _|_ {
 			"effect \(n) is a read, which the edge's airlock does not perform: name another target"
 		}],
 		[for n, x in _reads for v in _readVars[n] if x.input[v] == _|_ {
 			"effect \(n)'s path names \(v), which its input does not"
 		}],
-		[for n, x in _reads for k, _ in x.input if !list.Contains(_readVars[n], k) {
+		[for n, x in _reads for k, _ in x.input if _readVarSets[n][k] == _|_ {
 			"effect \(n)'s input \(k) is sent nowhere: its path names it in no expression"
 		}],
 		[for n, x in _reads for k, v in x.input if (v & string) == _|_ && (v & number) == _|_ && (v & bool) == _|_ && (v & {raw: string}) == _|_ {
@@ -3519,10 +3525,10 @@ import (
 		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions for target in A.meta.targets if target == "pages" || target == "cloudflare" if action.mail == _|_ {
 			"Activepieces action \(hn).\(an) has no \(target) implementation"
 		}],
-		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if list.Contains(A.meta.targets, "pages") if action.mail.pages == _|_ {
+		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if A._targetSet["pages"] != _|_ if action.mail.pages == _|_ {
 			"mail action \(hn).\(an) requires EmailJS publicKey, serviceId and templateId for pages"
 		}],
-		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if list.Contains(A.meta.targets, "cloudflare") if !A.meta.cloudflare.workersPaid if action.mail.cloudflare == _|_ {
+		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if A._targetSet["cloudflare"] != _|_ if !A.meta.cloudflare.workersPaid if action.mail.cloudflare == _|_ {
 			"mail action \(hn).\(an) requires meta.cloudflare.workersPaid or explicit Cloudflare recipients"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.action == _|_ {
@@ -4009,7 +4015,8 @@ import (
 		if _isObj if M.raw.dir != _|_ {dir: M.raw.dir}
 		if _isObj if M.raw.lang != _|_ {lang: M.raw.lang}
 		if _isObj {
-			for k, v in M.raw if !list.Contains(["name", "short_name", "description", "start_url", "display", "background_color", "theme_color", "icons", "shortcuts", "scope", "orientation", "dir", "lang"], k) {
+			let _manifestReserved = {name: true, short_name: true, description: true, start_url: true, display: true, background_color: true, theme_color: true, icons: true, shortcuts: true, scope: true, orientation: true, dir: true, lang: true}
+			for k, v in M.raw if _manifestReserved[k] == _|_ {
 				(k): v
 			}
 		}
@@ -4206,6 +4213,7 @@ import (
 			eName
 		}
 	]
+	_publicEntitySet: {for eName in _publicEntityNames {(eName): true}}
 
 	_entitySummaries: [
 		for eName in _publicEntityNames {
@@ -4250,7 +4258,7 @@ import (
 				for r in s.reads
 				if _tableToEntity[r.table] != _|_
 				let eName = _tableToEntity[r.table]
-				if list.Contains(_publicEntityNames, eName) {
+				if _publicEntitySet[eName] != _|_ {
 					(eName): true
 				}
 			}

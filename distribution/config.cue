@@ -41,7 +41,7 @@ import (
 
 #Tools: {
 	...
-	"github:cue-lang/cue":     "0.18.0-rc.4"
+	"github:cue-lang/cue":     "0.18.0"
 	"github:denoland/deno":    "v2.9.7"
 	"github:go-task/task":     "v3.54.0"
 	"github:nushell/nushell":  "0.116.1"

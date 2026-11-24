@@ -333,6 +333,19 @@ async function cueJson(cwd: string, args: string[]): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(result.stdout));
 }
 
+const moduleNameCache = new Map<string, string>();
+
+async function readModuleName(root: string): Promise<string> {
+  const manifest = join(root, "cue.mod/module.cue");
+  const key = `${root}\0${await Deno.readTextFile(manifest)}`;
+  const cached = moduleNameCache.get(key);
+  if (cached !== undefined) return cached;
+  const mod = await cueJson(root, ["export", manifest, "-e", "module", "--out", "json"]);
+  if (typeof mod !== "string" || mod === "") throw new Error(`${manifest}: module must be a string`);
+  moduleNameCache.set(key, mod);
+  return mod;
+}
+
 /** Importing the app leaves unreferenced deployment roots unevaluated. */
 export async function readDerivation(appDir: string, pkg: string, lifting: boolean): Promise<unknown> {
   const app = await Deno.realPath(appDir);
@@ -342,8 +355,7 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
     if (parent === root) throw new Error(`${app}: no enclosing CUE module`);
     root = parent;
   }
-  const module = await cueJson(root, ["export", join(root, "cue.mod/module.cue"), "-e", "module", "--out", "json"]);
-  if (typeof module !== "string" || module === "") throw new Error(`${root}/cue.mod/module.cue: module must be a string`);
+  const module = await readModuleName(root);
   const versionAt = module.lastIndexOf("@");
   const modulePath = versionAt < 0 ? module : module.slice(0, versionAt);
   const version = versionAt < 0 ? "" : module.slice(versionAt);
