@@ -62,9 +62,13 @@ cluster: surface: targets: pingstub: {
 // shows the appliance applied the program's pgroll set.
 code: state: migrations: "040_ping_count": operations: [{sql: {onComplete: true, up: """
 	CREATE TABLE IF NOT EXISTS ping_count (id int PRIMARY KEY, answered bigint NOT NULL);
-	CREATE OR REPLACE FUNCTION count_pings() RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+	CREATE OR REPLACE FUNCTION count_pings() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+	BEGIN
+	  -- A row the drain refuses, so the appliance's durable retry has a failure to carry.
+	  IF EXISTS (SELECT 1 FROM ping WHERE answer = 'poison') THEN RAISE EXCEPTION 'poison ping'; END IF;
 	  INSERT INTO ping_count VALUES (1, (SELECT count(*) FROM ping WHERE status = 'answered'))
 	  ON CONFLICT (id) DO UPDATE SET answered = EXCLUDED.answered WHERE ping_count.answered IS DISTINCT FROM EXCLUDED.answered;
+	END;
 	$$;
 	GRANT EXECUTE ON FUNCTION count_pings() TO service;
 	"""}}]

@@ -1,1 +1,1 @@
-{"server":true,"tokenRoles":["anon","app_user","service"]}
+{"server":true,"tokenRoles":["anon","app_user","service"],"replays":[{"name":"native-totals","group":"native-totals"}]}

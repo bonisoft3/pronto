@@ -9,7 +9,7 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { bridgedReadProgram, emitFiles } from "./effects-fixtures.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
-const DAPRD = "daprio/daprd:1.16.1@sha256:b977660c4503fe9872b0a94a33067df0dfe0a84878dc054acd8caff82a8c4125";
+const DAPRD = "daprio/daprd:1.17.20@sha256:75c322ad017a0efe4bdfeabdef6b509171087ed8734fd754c2ef70f4b3293921";
 const DENO = "denoland/deno:debian-2.9.7@sha256:fa335acdf6b72106eda2cb6a8cb5f4187e7630e357467489db4b2e7352d5e432";
 const MECHA = new URL("../../libraries/mecha/", import.meta.url);
 const AIRLOCK = new URL("services/airlock/", MECHA);

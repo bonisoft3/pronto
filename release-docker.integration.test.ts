@@ -4,7 +4,7 @@
 // testdata/appliance: a row machine whose effect an embedded bridge answers, and
 // a drain, whose function a forward migration creates, counting the answers off
 // the change feed. Building it needs Docker and the monorepo.
-import { assertStringIncludes, assertEquals } from "jsr:@std/assert@1.0.11";
+import { assert, assertStringIncludes, assertEquals } from "jsr:@std/assert@1.0.11";
 import { fromFileUrl, join } from "jsr:@std/path@1.0.8";
 
 const ROOT = fromFileUrl(new URL("../../", import.meta.url));
@@ -47,6 +47,7 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
   const image = `ghcr.io/bonisoft3/${name}:latest`;
   const container = `${name}-run`;
   const volume = `${name}-data`;
+  const bus = `${name}-redis`;
   await copyTree(join(ROOT, "apps", "yogurt"), app);
   try {
     // The fixture beside yogurt's own program, under the copy's name.
@@ -64,7 +65,7 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
 
     await must(join(ROOT, "plugins/sayt/sayt.sh"), ["generate"], { cwd: app });
     await must("mise", ["exec", "--", "docker", "compose", "build", "release-docker"], { cwd: app });
-    await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
+    await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, "-v", `${bus}:/var/lib/redis`, image]);
 
     const psql = (sql: string) => must("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1", "-U", "postgres", "-d", name], { stdin: sql });
     const up = () => until("the appliance", async () => (await run("docker", ["exec", container, "sh", "-c", "portcheck --port 9997 && portcheck --port 3000 && httpcheck http://127.0.0.1:3002/v1/health"])).ok, (v) => v, 180);
@@ -77,6 +78,7 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
 
     await t.step("PostgreSQL keeps acknowledged writes durable", async () => {
       assertEquals(await psql("SELECT current_setting('fsync') || '|' || current_setting('synchronous_commit') || '|' || current_setting('full_page_writes')"), "on|on|on");
+      assertEquals(await psql("SELECT current_setting('max_slot_wal_keep_size')"), "1GB");
     });
 
     await t.step("Caddy uses the configured certificate directory", async () => {
@@ -102,7 +104,7 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
     });
     await t.step("a replacement container keeps Electric's shapes on the volume", async () => {
       await must("docker", ["rm", "-f", container]);
-      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
+      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, "-v", `${bus}:/var/lib/redis`, image]);
       await up();
       const shape = await must("docker", ["exec", container, "curl", "-fsSi", "http://127.0.0.1:3002/v1/shape?table=ping&offset=-1&secret=dev-electric-secret"]);
       assertStringIncludes(shape, id(6));
@@ -138,21 +140,91 @@ Deno.test({ name: "the docker appliance migrates, runs effects through an embedd
       await must("docker", ["exec", container, "sh", "-c", 'kill -9 $(pgrep -f "[p]ing-stub.ts")']);
       assertEquals(await ping(id(3)), "answered|from-the-stub");
     });
+    const redis = (args: string) => must("docker", ["exec", container, "sh", "-c", `redis-cli -p $(pgrep -a redis-server | grep -o ':[0-9]*' | head -1 | tr -d :) ${args}`]);
+    await t.step("Redis runs with maxmemory and noeviction", async () => {
+      const maxmemory = (await redis("CONFIG GET maxmemory")).split("\n")[1];
+      const policy = (await redis("CONFIG GET maxmemory-policy")).split("\n")[1];
+      assert(Number(maxmemory) > 0, `expected maxmemory > 0, got ${maxmemory}`);
+      assertEquals(policy, "noeviction");
+    });
+    const group = `${name}-ping-count`;
+    // A field of one consumer group, as redis-cli prints XINFO GROUPS: names and values a line each.
+    const groupField = async (stream: string, of: string, field: string) => {
+      const lines = (await redis(`XINFO GROUPS ${stream}`)).split("\n");
+      const at = lines.findIndex((line, i) => line === "name" && lines[i + 1] === of);
+      if (at < 0) return "";
+      const end = lines.findIndex((line, i) => i > at + 1 && line === "name");
+      const block = lines.slice(at, end < 0 ? undefined : end);
+      return block[block.indexOf(field) + 1] ?? "";
+    };
+    const retried = () => groupField(`${group}-retry`, "mecha", "pending");
+    await t.step("a drain's refused change leaves the stream for durable retry, and lands once fixed", async () => {
+      await until("settled ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "3", 90);
+      await psql(`UPDATE ping SET answer = 'poison' WHERE id = '${id(1)}'`);
+      await until("the refused change's hand-off", async () => Number(await redis(`XLEN ${group}-retry`)), (n) => n > 0, 90);
+      // The stream moved on: the refused change is no longer the drain's to hold.
+      assertEquals(await until("the drain's pending list", () => groupField("cdc-events", group, "pending"), (v) => v === "0", 30), "0");
+      await until("Dapr redelivering it", retried, (v) => Number(v) > 0, 60);
+      await psql(`UPDATE ping SET answer = 'from-the-stub' WHERE id = '${id(1)}'`);
+      assertEquals(await until("the redelivery's success", retried, (v) => v === "0", 120), "0");
+    });
+    await t.step("a start redrives what durable retry dead-lettered", async () => {
+      await redis(`EVAL "local e = redis.call('XRANGE', 'cdc-events', '-', '+', 'COUNT', 1)[1] redis.call('XADD', KEYS[1], '*', unpack(e[2])) return 1" 1 ${group}-dead`);
+      await must("docker", ["restart", container]);
+      await up();
+      assertEquals(await until("the dead letters' return", async () => Number(await redis(`XLEN ${group}-dead`)), (n) => n === 0, 90), 0);
+      assertEquals(await until("their redelivery", retried, (v) => v === "0", 120), "0");
+      assertStringIncludes((await run("docker", ["logs", container])).out + (await run("docker", ["logs", container])).err, "durable retry at start");
+    });
+    await t.step("a replacement container keeps the bus's stream on the volume", async () => {
+      const added = async () => Number((await redis("XINFO STREAM cdc-events")).match(/entries-added\n(\d+)/)![1]);
+      await until("settled ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "3", 90);
+      await must("docker", ["exec", container, "sh", "-c", 'kill -STOP $(pgrep -f "[r]edpanda-connect")']);
+      assertEquals(await ping(id(8)), "answered|from-the-stub");
+      await until("the drain's unread change", () => redis("XINFO GROUPS cdc-events"), (v) => /lag\n[1-9]/.test(v), 30);
+      const before = await added();
+      await must("docker", ["rm", "-f", container]);
+      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, "-v", `${bus}:/var/lib/redis`, image]);
+      await up();
+      // An in-memory Redis starts the stream over; its log on the volume keeps every entry it had added.
+      assert((await added()) >= before, `the stream restarted at ${await added()}, below ${before}`);
+      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "4", 90), "4");
+    });
     await t.step("a replacement container keeps the ledger and answers new rows", async () => {
       await must("docker", ["rm", "-f", container]);
-      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, image]);
+      await must("docker", ["run", "-d", "--name", container, "-v", `${volume}:/var/lib/pgsql/data`, "-v", `${bus}:/var/lib/redis`, image]);
       await up();
       const shape = await must("docker", ["exec", container, "curl", "-fsSi", "http://127.0.0.1:3002/v1/shape?table=ping&offset=-1&secret=dev-electric-secret"]);
       assertStringIncludes(shape, id(6));
       assertStringIncludes(shape, `electric-handle: ${shapeHandle}`);
       assertEquals(await ping(id(4)), "answered|from-the-stub");
-      assertEquals(await psql("SELECT count(*) FROM airlock.external_effect_ledger WHERE outcome->>'kind' = 'done'"), "5");
-      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "4", 60), "4");
+      assertEquals(await psql("SELECT count(*) FROM airlock.external_effect_ledger WHERE outcome->>'kind' = 'done'"), "6");
+      assertEquals(await until("ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "5", 60), "5");
       assertEquals(await psql("SELECT count(*) FROM pgroll.migrations WHERE name = '040_ping_count' AND done"), "1");
+    });
+    await t.step("a lost slot is recreated on Conduit's start and readers rebuild", async () => {
+      const slot = `${name}_conduit_slot`;
+      await must("docker", ["rm", "-f", container]);
+      await must("docker", ["run", "-d", "--name", container, "-e", "PG_MAX_SLOT_WAL_KEEP_SIZE=1MB", "-v", `${volume}:/var/lib/pgsql/data`, "-v", `${bus}:/var/lib/redis`, image]);
+      await up();
+      assertEquals(await psql("SELECT current_setting('max_slot_wal_keep_size')"), "1MB");
+      await until("conduit running", async () => (await run("docker", ["exec", container, "pgrep", "-f", "[c]onduit run"])).ok, (v) => v, 30);
+      await must("docker", ["exec", container, "sh", "-c", 'kill -STOP $(pgrep -f "[c]onduit run")']);
+      await psql(`SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '${slot}' AND active_pid IS NOT NULL;`);
+      await psql("UPDATE ping_count SET answered = 999 WHERE id = 1;");
+      await until("lost slot", async () => {
+        await psql("SELECT pg_logical_emit_message(true, 'test', repeat('x', 4096)); SELECT pg_switch_wal(); CHECKPOINT;");
+        return await psql(`SELECT wal_status FROM pg_replication_slots WHERE slot_name = '${slot}'`);
+      }, (status) => status === "lost", 60);
+      await must("docker", ["exec", container, "sh", "-c", 'kill -9 $(pgrep -f "[c]onduit run")']);
+      await until("recreated slot", () => psql(`SELECT wal_status FROM pg_replication_slots WHERE slot_name = '${slot}'`), (status) => status !== "" && status !== "lost", 60);
+      assertEquals(await until("rebuilt ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "5", 90), "5");
+      assertEquals(await ping(id(9)), "answered|from-the-stub");
+      assertEquals(await until("post-rebuild ping_count", () => psql("SELECT answered FROM ping_count"), (v) => v === "6", 90), "6");
     });
   } finally {
     await run("docker", ["rm", "-f", container]);
-    await run("docker", ["volume", "rm", volume]);
+    await run("docker", ["volume", "rm", volume, bus]);
     await Deno.remove(app, { recursive: true });
   }
 } });

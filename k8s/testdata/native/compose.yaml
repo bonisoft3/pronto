@@ -16,6 +16,10 @@ services:
       CONDUIT_DB_TYPE: inmemory
   redis:
     image: native-redis:test
+  mesh-events:
+    image: native-mesh-events:test
+    environment:
+      REDIS_HOST: redis:6379
   transform:
     image: native-transform:test
     environment:

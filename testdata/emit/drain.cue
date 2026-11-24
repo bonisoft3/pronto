@@ -24,7 +24,7 @@ _drainedFiles: (pronto.#emit & {
 }).files
 _drainFile: "docker/emit-profile-refresh.yaml"
 
-drainEmitted: _drainedFiles[_drainFile].data.output.http_client.url & "${CRUD_URL}/rpc/refresh_profiles"
+drainEmitted: _drainedFiles[_drainFile].data.output.switch.cases[5].output.http_client.url & "${CRUD_URL}/rpc/refresh_profiles"
 drainRun: list.Contains([for p in _drainedCluster.state.pipelines {p.file}], _drainFile) & true
 drainRunsFeed: list.Contains([for t, _ in _drainedCluster.surface.targets {t}], "conduit") & true
 drainLinted: list.Contains(_drainedLoop.surface.pipelineFiles, _drainFile) & true

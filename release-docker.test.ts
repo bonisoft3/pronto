@@ -83,6 +83,9 @@ Deno.test("the appliance runs the patched Electric with storage on the database 
   assertStringIncludes(electric.command, "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}");
   assertStringIncludes(electric.command, "ELECTRIC_MANUAL_TABLE_PUBLISHING=true");
   assertStringIncludes(electric.command, "LD_LIBRARY_PATH=/electric-libs");
+  assertStringIncludes(electric.command, "electric_slot_default");
+  assertStringIncludes(electric.command, "wal_status");
+  assertStringIncludes(electric.command, "pg_drop_replication_slot");
   assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":electric" && c.srcs[0] === "/lib/*-linux-gnu/libtinfo.so.6*" && c.dst === "/electric-libs/"));
   assert(rd.dockerfile.cmd.includes("electric"));
   assertStringIncludes(rd.dockerfile.preamble.join("\n"), "ENV PRONTO_UPSTREAM_ELECTRIC=127.0.0.1:3002");
@@ -233,8 +236,21 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
   assert(!JSON.stringify(packages.value).includes("redis-server="));
   const redisCopy = rd.dockerfile.copy.find((entry: { from?: { name?: string } }) => entry.from?.name?.startsWith("redis:"));
   assert(redisCopy?.from?.name, "the appliance must copy the pinned Redis binaries used by Compose");
-  assertStringIncludes(redisCopy.from.name, "redis:8.2.11-bookworm@sha256:");
+  assertStringIncludes(redisCopy.from.name, "redis:8.4.8-trixie@sha256:");
   assertEquals(redisCopy.srcs, ["/usr/local/bin/redis-server", "/usr/local/bin/redis-cli"]);
+});
+
+// The appliance ran Redis as compose does, `--appendonly no`: a restart dropped
+// every entry Dapr had acknowledged to Conduit and no reader had acknowledged,
+// so derived rows those changes owed were never written.
+Deno.test("the appliance's bus keeps what it acknowledged across a restart, in a directory of its own", async () => {
+  const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') + '\napp: state: drains: "settle-count": {on: ["payment"], call: "count_settled"}\n';
+  const rd = await releaseDocker(code);
+  const overlay = overlayOf(rd);
+  const redis = overlay.processes.redis;
+  for (const s of ["--appendonly yes", "--appendfsync always", "--aof-load-corrupt-tail-max-size", '--maxmemory "$${REDIS_MAXMEMORY:-256mb}"', "--maxmemory-policy noeviction", '--dir /var/lib/redis', 'mkdir -p /var/lib/redis', '--port "$$REDIS_PORT"']) assertStringIncludes(redis.command, s);
+  assertStringIncludes(overlay.processes.database.command, "max_slot_wal_keep_size=${PG_MAX_SLOT_WAL_KEEP_SIZE:-1GB}");
+  assert(!("redis" in overlayOf(await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'))).processes), "a program without a change feed starts no bus");
 });
 
 // The appliance runs computations on RisingWave; DuckDB snapshots are used
@@ -284,6 +300,9 @@ Deno.test("release-docker runs a program's computations on RisingWave", async ()
   assert(rd.dockerfile.epilogue.some((line) => line.includes("touch /compute-app/extensions/.installed-v1.5.6")), "compute would install extensions at start");
   assert(rd.dockerfile.epilogue.some((line) => line.includes("/compute-app/step-worker.ts")), "bounded worker must pass the offline dependency check");
   const overlay = overlayOf(rd).processes;
+  // process-compose v1.122.0 drops base env entries with `=` in values (e.g.
+  // COMPUTATIONS) when merging a process across `-f` files.
+  assertEquals(overlay.compute, undefined);
   assertStringIncludes(overlay.risingwave.command, "/usr/local/bin/appliance-risingwave.sh");
   assert(!overlay.risingwave.command.includes("$"), "process-compose command must not rely on variable expansion");
   assert(
@@ -308,6 +327,11 @@ Deno.test("release-docker runs a program's computations on RisingWave", async ()
           "    depends_on:",
           "      database:",
           "        condition: process_healthy",
+          "    availability:",
+          "      restart: on_failure",
+          "      max_restarts: 15",
+          "    environment:",
+          "    - 'COMPUTATIONS=[{\"pattern\":\"^a==$\"}]'",
           ...(withTransform
             ? [
               "  transform:",
@@ -324,8 +348,18 @@ Deno.test("release-docker runs a program's computations on RisingWave", async ()
       const ran = await new Deno.Command("sh", { args: ["-c", cmd] }).output();
       assert(ran.success, new TextDecoder().decode(ran.stderr));
       const updated = await Deno.readTextFile(pc);
-      assertStringIncludes(updated, "risingwave:");
-      assertStringIncludes(updated, "process_healthy");
+      const parsed = parse(updated) as {
+        processes: {
+          compute: {
+            depends_on: Record<string, { condition: string }>;
+            availability: { restart?: string; max_restarts?: number; exit_on_end?: boolean };
+            environment: string[];
+          };
+        };
+      };
+      assertEquals(parsed.processes.compute.depends_on.risingwave, { condition: "process_healthy" });
+      assertEquals(parsed.processes.compute.availability, { restart: "on_failure", max_restarts: 15, exit_on_end: true });
+      assertEquals(parsed.processes.compute.environment, ['COMPUTATIONS=[{"pattern":"^a==$"}]']);
       if (withTransform) {
         assert(!updated.includes("events.yaml"), updated);
         assertStringIncludes(updated, "'docker/p.yaml'");

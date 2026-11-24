@@ -2719,6 +2719,42 @@ _cdcBeforeField: "__before"
 // marked with that trace too. Unset metadata sends no header.
 _traceHeader: include_patterns: ["^traceparent$"]
 
+// Durable retry (mecha's change-capture): which input a record came by, and
+// the record as it came, so a failure hands the record itself to its group's
+// retry stream and Dapr's redelivery reaches the same stream at /replay.
+#retryInput: [{mutation: """
+	meta cdc_via = if @redis_stream.or("") != "" { "stream" } else if @http_server_request_path.or("") != "" { "replay" } else { "wake" }
+	meta cdc_original = content().string()
+	"""}]
+#replayInput: http_server: {path: "/replay", timeout: "5m"}
+
+// A release turns durable retry on by naming the group in CDC_RETRY_GROUPS;
+// elsewhere a failed record is replayed in memory, as without it.
+#retryOutput: {
+	let O = self
+	group: string
+	main:  _
+	on:    "env(\"CDC_RETRY_GROUPS\").or(\"[]\").parse_json().contains(\(json.Marshal(O.group)))"
+	_handoff: {
+		redis_streams: {
+			url:      "${REDIS_URL}"
+			stream:   "\(O.group)-retry"
+			body_key: "data"
+			metadata: exclude_prefixes: [""]
+		}
+		processors: [{mapping: "root = @cdc_original"}]
+	}
+	out: switch: cases: [
+		// A redelivery that fails answers Dapr an error, so it counts the attempt.
+		{check: "@cdc_via == \"replay\" && @cdc_failed != null", output: reject: "${! @cdc_failed }"},
+		{check: "@cdc_via == \"replay\"", output: O.main},
+		{check: "@cdc_via == \"wake\"", output: fallback: [O.main, {drop: {}, processors: [{crash: "\(O.group): startup sweep output failed: ${! @fallback_error }"}]}]},
+		{check: "@cdc_via == \"stream\" && @cdc_failed != null && \(O.on)", output: O._handoff},
+		{check: "@cdc_via == \"stream\" && \(O.on)", output: fallback: [O.main, O._handoff]},
+		{output: O.main},
+	]
+}
+
 #rpkPipeline: {
 	let R = self
 	p:           #Pipeline
@@ -2752,15 +2788,55 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}]
 		result_map: "root.rows = this"
 	}
+	// The start's sweep: every source row as the bus would carry its insert,
+	// already in carrier form, which is what PostgREST serves. Each row's
+	// transform reads the aggregate once per sweep, from cdc-trace.yaml's
+	// cache. A key whose source rows are all gone is not swept.
+	_sweep: [
+		{
+			"try": [
+				{
+					http: {
+						url:      "${CRUD_URL}/\(R.sourceTable)"
+						verb:     "GET"
+						metadata: _traceHeader
+						if R.authOn {
+							headers: Authorization: "Bearer ${SERVICE_JWT}"
+						}
+					}
+				},
+				if R.p.key != _|_ {
+					{mapping: """
+						let key = \(json.Marshal(R.p.key))
+						let rows = this.enumerated().fold({}, item -> item.tally.assign({
+							(if item.value.value.exists($key) && item.value.value.get($key) != null { "k:" + item.value.value.get($key).string() } else { "i:" + item.value.index.string() }): item.value.value
+						})).values()
+						root = $rows.map_each(r -> {"data": r.assign({"__table": \(json.Marshal(R.sourceTable))}).format_json(no_indent: true, escape_html: false).string()})
+						"""}
+				}
+				if R.p.key == _|_ {
+					{mapping: "root = this.map_each(r -> {\"data\": r.assign({\"__table\": \(json.Marshal(R.sourceTable))}).format_json(no_indent: true, escape_html: false).string()})"}
+				}
+				{unarchive: format: "json_array"},
+			]
+		},
+		{catch: [{crash: "\(R.p.name): startup sweep failed: ${! error() }"}]},
+	]
 	out: {
-		input: redis_streams: {
-			url:            "${REDIS_URL}"
-			streams:        ["cdc-events"]
-			body_key:       "data"
-			consumer_group: R.p.group
-		}
-		input: processors: (#cdcTraceJoin & {consumer: R.p.group}).out
+		input: sequence: inputs: [
+			// Finish the startup sweep before opening live stream or replay
+			// inputs so slower initial writes never overwrite newer live events.
+			{generate: {count: 1, interval: "", mapping: "root = {\"wake\": \"start\"}"}},
+			{broker: inputs: [{redis_streams: {
+				url:            "${REDIS_URL}"
+				streams:        ["cdc-events"]
+				body_key:       "data"
+				consumer_group: R.p.group
+			}}, #replayInput]},
+		]
+		input: processors: list.Concat([#retryInput, (#cdcTraceJoin & {consumer: R.p.group}).out])
 		pipeline: processors: [
+			{switch: [{check: "@cdc_via == \"wake\"", processors: R._sweep}]},
 			// Ahead of the fetch on purpose: cdc-events carries every table and
 			// each stream reads all of it, so a message the mapping will discard
 			// otherwise costs a PostgREST GET first. Which messages are its own
@@ -2775,15 +2851,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// transform's output in hand instead of the row that refused.
 			{
 				"try": [
-					{bloblang: "let carriers = \(json.Marshal(R.carriers))\n" + _cdcTypesAsset},
-					R._fetch,
+					{switch: [
+						{check: "@cdc_via == \"wake\"", processors: [{branch: {processors: [{cached: {cache: "cdc_sweep", key: "${! @cdc_consumer }", processors: R._fetch.branch.processors}}], result_map: R._fetch.branch.result_map}}]},
+						{processors: [{bloblang: "let carriers = \(json.Marshal(R.carriers))\n" + _cdcTypesAsset}, R._fetch]},
+					]},
 					{bloblang: R.p.transform.bloblang},
 				]
 			},
 			// A failed processor leaves the message untouched and carries on, so
 			// without this a throwing mapping silently POSTs the CloudEvent
 			// envelope and the only trace is PostgREST rejecting a column named
-			// `data`. Name the pipeline and the input, then drop: the read is
+			// `data`. Name the pipeline and the input; durable retry keeps the
+			// record for its retry stream, and otherwise it drops: the read is
 			// absolute, so the next event for that key repairs the sink.
 			{
 				catch: [
@@ -2793,11 +2872,40 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							message: "\(R.p.name): transform failed (${! error() }) on ${! content() }"
 						}
 					},
-					{mapping: "root = deleted()"},
+					{
+						switch: [
+							{check: "@cdc_via == \"wake\"", processors: [{crash: "\(R.p.name): startup sweep failed: ${! error() }"}]},
+						]
+					},
+					{mapping: """
+						meta cdc_failed = error()
+						root = if (@cdc_via == "stream" && \((#retryOutput & {group: R.p.group, main: null}).on)) || @cdc_via == "replay" { this } else { deleted() }
+						"""},
+				]
+			},
+			// Collapse swept rows to one deduplicated bulk upsert so startup
+			// never sends redundant or quadratic per-key writes.
+			{
+				switch: [
+					{
+						check: "@cdc_via == \"wake\""
+						processors: [
+							{archive: format: "json_array"},
+							{mapping: """
+								meta cdc_via = "wake"
+								let pk = \(json.Marshal(R._onConflict))
+								let flat = this.map_each(m -> if m.type() == "array" { m } else { [m] }).flatten()
+								let deduped = $flat.fold({}, item -> item.tally.assign({
+									item.value.get($pk).string(): item.value
+								})).values()
+								root = if $deduped.length() > 0 { $deduped } else { deleted() }
+								"""},
+						]
+					},
 				]
 			},
 		]
-		output: retry: {
+		let _main = {retry: {
 			max_retries: 3
 			backoff:     {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
 			output: http_client: {
@@ -2816,7 +2924,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 				successful_on: [200, 201]
 			}
-		}
+		}}
+		output: (#retryOutput & {group: R.p.group, main: _main}).out
 	}
 }
 
@@ -2893,8 +3002,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// Rows queued before change capture began, or while the stream was
 			// down past the bus's retention, were never heard.
 			{generate: {count: 1, interval: "", mapping: "root = {\"wake\": \"start\"}"}},
+			#replayInput,
 		]
-		input: processors: (#cdcTraceJoin & {consumer: "\(R.app)-\(R.d.name)"}).out
+		input: processors: list.Concat([#retryInput, (#cdcTraceJoin & {consumer: "\(R.app)-\(R.d.name)"}).out])
 		pipeline: {
 			threads: 1
 			processors: [{mapping: """
@@ -2903,7 +3013,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				root = if $row.exists("wake") || \(json.Marshal(R.d.on)).contains($table) { {"body": \(json.Marshal(R.d.body)), "trace": @traceparent.or("")} } else { deleted() }
 				"""}]
 		}
-		output: http_client: {
+		let _main = {http_client: {
 			// PostgREST direct, as every stream reaches it.
 			url:           "${CRUD_URL}/rpc/\(R.d.call)"
 			verb:          "POST"
@@ -2922,7 +3032,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// The bodies are equal, so the batch's is one of them.
 				processors: [{archive: format: "json_array"}, {resource: "cdc_trace_batch"}, {mapping: "root = this.index(0).body"}]
 			}
-		}
+		}}
+		output: (#retryOutput & {group: "\(R.app)-\(R.d.name)", main: _main}).out
 	}
 }
 
@@ -4109,8 +4220,9 @@ _pgrollDir: "services/database/pgroll"
 				}], "\n\n")
 			}
 			pipelines: [for n, kind in (#streams & {code: D.code}).out {
-				if kind == "drain" {group: "\(D.code.meta.name)-\(n)"}
+				if kind == "drain" {group: "\(D.code.meta.name)-\(n)", replay: true}
 				if kind == "pipeline" if D.code.state.pipelines[n].trigger == "cdc" {group: D.code.state.pipelines[n].group}
+				if kind == "pipeline" if D.code.state.pipelines[n].trigger == "cdc" if D.code.state.pipelines[n].raw == _|_ {replay: true}
 				name: "\(D.code.meta.name)-\(n)"
 				file: "docker/\(D.code.meta.name)-\(n).yaml"
 			}]
@@ -5779,6 +5891,8 @@ _pgrollDir: "services/database/pgroll"
 							call: d.call
 							body: d.body}],
 					])
+					let replays = [for p in E.cluster.state.pipelines if p.replay != _|_ if p.group != _|_ {name: p.name, group: p.group}]
+					if len(replays) > 0 {"replays": replays}
 				}
 
 				// The container hatches the door routes to, by app id: a release

@@ -725,8 +725,10 @@ What fixes its shape:
 - **Persistence and updates.** The image declares no built-in volumes; every
   data directory defaults to the container's writable layer unless the operator
   opts in with Docker-managed named volumes (`-v <name>:/var/lib/pgsql/data` and,
-  when the program declares computations, `-v <name>:/var/lib/duckstream`, never
-  bind mounts). In production, mount both `PGDATA` and `COMPUTE_STATE_DIR` on
+  when the program declares computations, `-v <name>:/var/lib/duckstream`, and
+  when it declares drains, pipelines or computations, `-v <name>:/var/lib/redis`,
+  never bind mounts). In production, mount `PGDATA`, `COMPUTE_STATE_DIR` and
+  `/var/lib/redis`, where the change bus logs every write before it replies, on
   named volumes: an update stops the running container and starts the new image
   on the same volumes, applying pending migrations and reattaching RisingWave to
   its persisted Hummock state and PostgreSQL replication slots without cold

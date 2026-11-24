@@ -113,13 +113,14 @@ import (
 			spec: {
 				instances: 1
 				postgresql: parameters: {
-					wal_level:             "logical"
-					max_replication_slots: "128"
-					max_wal_senders:       "128"
-					max_connections:       "200"
-					fsync:                 "on"
-					synchronous_commit:    "on"
-					full_page_writes:      "on"
+					wal_level:              "logical"
+					max_replication_slots:  "128"
+					max_wal_senders:        "128"
+					max_slot_wal_keep_size: "1GB"
+					max_connections:        "200"
+					fsync:                  "on"
+					synchronous_commit:     "on"
+					full_page_writes:       "on"
 				}
 				imageName: (#appImage & {svc: "database"}).out
 				// mecha's database image derives from the official postgres image,

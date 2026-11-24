@@ -429,7 +429,7 @@ export def render-manifests [
 	} else { {services: {}} }
 	let runtime = (runtime-services $compose)
 	let airlock = (airlock-services $compose $facts)
-	{App: ({database: {tokenRoles: $facts.tokenRoles, declaredRoles: ($facts.declaredRoles? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge (if ($airlock | is-empty) { {} } else { {airlock: $airlock} }))} | to json | save -f $roles_file
+	{App: ({database: {tokenRoles: $facts.tokenRoles, declaredRoles: ($facts.declaredRoles? | default [])}, runtime: $runtime, replays: ($facts.replays? | default []), doors: ($facts.doors? | default [])} | merge (if ($airlock | is-empty) { {} } else { {airlock: $airlock} }))} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

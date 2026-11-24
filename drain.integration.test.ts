@@ -16,10 +16,17 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
   equal(config.input, { broker: { inputs: [
     { redis_streams: { url: "${REDIS_URL}", streams: ["cdc-events"], body_key: "data", consumer_group: "test-projection" } },
     { generate: { count: 1, interval: "", mapping: 'root = {"wake": "start"}' } },
-  ] }, processors: [{ mutation: 'meta cdc_consumer = "test-projection"' }, { resource: "cdc_stream_trim" }, { resource: "cdc_trace_join" }] });
+    { http_server: { path: "/replay", timeout: "5m" } },
+  ] }, processors: [
+    { mutation: 'meta cdc_via = if @redis_stream.or("") != "" { "stream" } else if @http_server_request_path.or("") != "" { "replay" } else { "wake" }\nmeta cdc_original = content().string()' },
+    { mutation: 'meta cdc_consumer = "test-projection"' },
+    { resource: "cdc_stream_trim" },
+    { resource: "cdc_trace_join" },
+  ] });
   equal(config.pipeline.threads, 1);
-  equal(config.output.http_client.max_in_flight, 1);
-  equal(config.output.http_client.batching.period, "1s");
+  const mainHttp = config.output.switch.cases[5].output.http_client;
+  equal(mainHttp.max_in_flight, 1);
+  equal(mainHttp.batching.period, "1s");
 
   const body = { batch_size: 50 };
   const call = { body, trace: "" };
@@ -38,9 +45,10 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
     name, target_processors: "/pipeline/processors", input_batch: [{ content: input }],
     output_batches: accept ? [[{ json_equals: call }]] : [],
   }));
+  const batchTarget = "/output/switch/cases/5/output/http_client/batching/processors";
   tests.push({
     name: "a burst requests one batch of work",
-    target_processors: "/output/http_client/batching/processors",
+    target_processors: batchTarget,
     input_batch: Array.from({ length: 20 }, () => ({ content: JSON.stringify(call) })),
     output_batches: [[{ json_equals: body, bloblang: '!@.exists("traceparent")' }]],
   });
@@ -50,13 +58,13 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
   const T2 = "00-1af7651916cd43dd8448eb211c80319c-c7ad6b7169203331-01";
   tests.push({
     name: "a batch of one transaction's trace continues it",
-    target_processors: "/output/http_client/batching/processors",
+    target_processors: batchTarget,
     input_batch: [T1, "", T1].map((trace) => ({ content: JSON.stringify({ body, trace }) })),
     output_batches: [[{ json_equals: body, metadata_equals: { traceparent: T1 } }]],
   });
   tests.push({
     name: "a batch answering several traces continues the first",
-    target_processors: "/output/http_client/batching/processors",
+    target_processors: batchTarget,
     input_batch: ["", T1, T2].map((trace) => ({ content: JSON.stringify({ body, trace }) })),
     output_batches: [[{ json_equals: body, metadata_equals: { traceparent: T1 } }]],
   });

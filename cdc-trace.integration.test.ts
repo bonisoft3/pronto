@@ -8,7 +8,7 @@ import { deepStrictEqual as equal } from "node:assert/strict";
 import { created } from "./docker-copy.ts";
 
 const decoder = new TextDecoder();
-const REDIS = "redis:8.2.11-bookworm@sha256:b0b01167ff47bc3868e56a967895a26be4230891a1f42a78ab61cdd227accc8d";
+const REDIS = "redis:8.4.8-trixie@sha256:90cb779e1f814f1123532293f7a7a18a6a48bdc01aa0a9d54ce9f3d61b71018f";
 const T1 = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 const T2 = "00-1af7651916cd43dd8448eb211c80319c-c7ad6b7169203331-01";
 
@@ -90,7 +90,8 @@ Deno.test("a pipeline's calls carry their row's transaction trace, and markers a
       return groups.length === 1 && groups[0].lag === 0 && groups[0].pending === 0 && posts.size >= 4;
     }, "the stream settling");
     equal(Object.fromEntries(posts), { 1: T1, 2: T1, 3: null, 4: T2 });
-    equal(gets.toSorted(), [T1, T1, T2, null].toSorted());
+    // One untraceable GET from the startup sweep plus four per-row fetches.
+    equal(gets.toSorted(), [T1, T1, T2, null, null].toSorted());
   } finally {
     for (const c of containers.toReversed()) await run("docker", "rm", "-f", c);
     await run("docker", "network", "rm", net);

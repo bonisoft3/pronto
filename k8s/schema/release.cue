@@ -89,6 +89,10 @@ package schema
 		serviceToken: bool
 		jwtSecret:    *false | bool
 	}
+	// Streams enrolled in durable retry (from .pronto/cluster.json):
+	// mesh-events subscribes to each <group>-retry topic and posts
+	// redeliveries to /<name>/replay on transform:4195.
+	replays: *[] | [...{name: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", group: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"}]
 	// Present where the app's compose project runs the airlock, filled by the
 	// release from that project and the app's .pronto/cluster.json.
 	airlock?: {

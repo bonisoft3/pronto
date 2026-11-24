@@ -622,12 +622,32 @@ def test_native_runtime [] {
 	assert not ($rendered | str contains "dev-password")
 	assert not ($rendered | str contains "dev-token")
 	let deployments = ($docs | where kind == "Deployment")
-	for name in [compute risingwave conduit redis transform] {
+	for name in [compute risingwave conduit redis mesh-events transform] {
 		let spec = ($deployments | where metadata.name == $"native-($name)" | first | get spec)
 		assert equal $spec.replicas 1
 		assert equal $spec.strategy.type "Recreate"
 	}
 	assert equal ($docs | where kind == "PersistentVolumeClaim" | get metadata.name | sort) [native-redis]
+	let sub_cm = ($docs | where kind == "ConfigMap" and metadata.name == "native-mesh-events-subscriptions" | first)
+	let retry_yaml = $sub_cm.data."retry.yaml"
+	assert ($retry_yaml | str contains "kind: Subscription")
+	assert ($retry_yaml | str contains "topic: native-totals-retry")
+	assert ($retry_yaml | str contains "default: /native-totals/replay")
+	assert ($retry_yaml | str contains "deadLetterTopic: native-totals-dead")
+	assert ($retry_yaml | str contains "scopes:\n  - mechaed")
+	let mesh_events = ($deployments | where metadata.name == native-mesh-events | first)
+	assert (($mesh_events.spec.template.metadata.annotations."checksum/subscriptions"? | default "") | is-not-empty)
+	assert equal $mesh_events.spec.template.spec.volumes.0 {name: subscriptions, configMap: {name: native-mesh-events-subscriptions}}
+	assert equal $mesh_events.spec.template.spec.containers.0.volumeMounts.0 {name: subscriptions, mountPath: /mesh-events/subscriptions, readOnly: true}
+	assert equal ($mesh_events.spec.template.spec.containers.0.env | where name == MESH_SUBSCRIPTIONS_DIR | first | get value) /mesh-events/subscriptions
+	assert equal ($mesh_events.spec.template.spec.containers.0.env | where name == MESH_APP_ADDRESS | first | get value) transform
+	assert equal ($mesh_events.spec.template.spec.containers.0.env | where name == MESH_APP_PORT | first | get value) "4195"
+	let transform = ($deployments | where metadata.name == native-transform | first | get spec.template.spec.containers.0)
+	assert equal ($transform.env | where name == CDC_RETRY_GROUPS | first | get value) '["native-totals"]'
+	assert equal ($transform.env | where name == CDC_REPLAY_PORT | first | get value) "4195"
+	assert equal $transform.ports.0.containerPort 4195
+	let transform_svc = ($docs | where kind == "Service" and metadata.name == "transform" | first)
+	assert equal $transform_svc.spec.ports.0.port 4195
 	let rw_container = ($deployments | where metadata.name == native-risingwave | first | get spec.template.spec.containers.0)
 	assert ($rw_container.volumeMounts? == null)
 	assert equal $rw_container.args ["single_node"]
@@ -642,6 +662,10 @@ def test_native_runtime [] {
 	assert equal ($conduit | where name == CONDUIT_DB_TYPE | first | get value) postgres
 	assert equal ($conduit | where name == CONDUIT_DB_POSTGRES_CONNECTION_STRING | first | get value) '$(DATABASE_URL)'
 	assert equal ($docs | where kind == Cluster | first | get spec.postgresql.parameters.max_replication_slots) "128"
+	assert equal ($docs | where kind == Cluster | first | get spec.postgresql.parameters.max_slot_wal_keep_size) "1GB"
+	let redis = ($deployments | where metadata.name == native-redis | first | get spec.template.spec.containers.0)
+	assert equal $redis.args ["redis-server" "--appendonly" "yes" "--appendfsync" "always" "--aof-load-corrupt-tail-max-size" "65536" "--maxmemory" "$(REDIS_MAXMEMORY)" "--maxmemory-policy" "noeviction"]
+	assert equal ($redis.env | where name == REDIS_MAXMEMORY | first | get value) "256mb"
 	let refused = (try { runtime-services {services: {compute: {environment: {DUCKSTREAM_ENGINE: duckdb-snapshot}}}}; false } catch { true })
 	assert $refused
 	let gcp = (do { nu ($pronto_dir | path join gcp release.nu) --dry-run --app $app.dir } | complete)
@@ -649,6 +673,9 @@ def test_native_runtime [] {
 	assert ($gcp.stdout | str contains "us-central1-docker.pkg.dev/test-project/pronto/native-compute:latest")
 	assert ($gcp.stdout | str contains "storageClassName: standard-rwo")
 	assert ($gcp.stdout | str contains "kind: PersistentVolumeClaim")
+	assert ($gcp.stdout | str contains "native-mesh-events-subscriptions")
+	assert ($gcp.stdout | str contains "CDC_RETRY_GROUPS")
+	assert ($gcp.stdout | str contains "MESH_SUBSCRIPTIONS_DIR")
 }
 
 
