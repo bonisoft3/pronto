@@ -211,6 +211,27 @@ export function attachNetworkTrap(
     }
   };
 
+  const pruneDetachedFrames = (detachedFrame?: any) => {
+    for (const req of [...pendingRequests]) {
+      try {
+        const reqFrame = typeof req.frame === "function" ? req.frame() : null;
+        if (
+          reqFrame &&
+          (reqFrame === detachedFrame ||
+            (typeof reqFrame.isDetached === "function" && reqFrame.isDetached()))
+        ) {
+          pendingRequests.delete(req);
+        }
+      } catch {
+        // Service Worker requests throw on req.frame(); keep tracking them.
+      }
+    }
+  };
+
+  const onFrameDetached = (frame: any) => {
+    pruneDetachedFrames(frame);
+  };
+
   const onPageError = (err: Error) => {
     errors.push(`Browser unhandled page error: ${err.message}`);
   };
@@ -219,6 +240,7 @@ export function attachNetworkTrap(
   page.on("requestfinished", onRequestFinished);
   page.on("response", onResponse);
   page.on("requestfailed", onRequestFailed);
+  page.on("framedetached", onFrameDetached);
   page.on("pageerror", onPageError);
 
   return {
@@ -230,6 +252,7 @@ export function attachNetworkTrap(
         page.off("requestfinished", onRequestFinished);
         page.off("response", onResponse);
         page.off("requestfailed", onRequestFailed);
+        page.off("framedetached", onFrameDetached);
         page.off("pageerror", onPageError);
       }
     },
@@ -245,8 +268,10 @@ export function attachNetworkTrap(
     },
     waitForPendingAssets: async (timeoutMs = 45000) => {
       const deadline = Date.now() + timeoutMs;
+      pruneDetachedFrames();
       while ((pendingRequests.size > 0 || pendingChecks > 0 || recoveries.size > 0) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 20));
+        pruneDetachedFrames();
       }
       if (pendingRequests.size > 0) {
         const urls = [...pendingRequests].map((r) =>

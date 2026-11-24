@@ -1465,3 +1465,44 @@ Deno.test("attachNetworkTrap exempts cross-origin https: image failures only whe
   assertEquals(strict.trap.errors.length, 1);
   strict.trap.detach();
 });
+
+// Regression: when a multi-navigation journey navigates away while an embedded child
+// iframe (e.g. /shell/tag.html -> 307 /shell/tag) is mid-redirect, Chromium tears down
+// the child frame without always emitting requestfinished/requestfailed for the redirected
+// child-frame request; detached child frames must drop their orphaned pending requests while
+// live frames and Service Worker requests (which throw on req.frame()) remain tracked.
+Deno.test("attachNetworkTrap drops pending requests from detached child frames while keeping live and SW requests", async () => {
+  const listeners: Record<string, ((...args: any[]) => void)[]> = {};
+  const page = {
+    on: (evt: string, fn: (...args: any[]) => void) => { (listeners[evt] ??= []).push(fn); },
+    off: (evt: string, fn: (...args: any[]) => void) => { listeners[evt] = (listeners[evt] || []).filter((f) => f !== fn); },
+  };
+  const trap = attachNetworkTrap(page, { targetOrigin: "https://snapcards.fun" });
+
+  let tagDetached = false;
+  const tagFrame = { isDetached: () => tagDetached };
+  const tagReq = { url: () => "https://snapcards.fun/shell/tag", headers: () => ({}), frame: () => tagFrame };
+  const swReq = {
+    url: () => "https://snapcards.fun/_immutable-abc.js",
+    headers: () => ({}),
+    frame: () => { throw new Error("Service Worker requests do not have an associated frame"); },
+  };
+
+  listeners["request"]?.forEach((fn) => fn(tagReq));
+  listeners["request"]?.forEach((fn) => fn(swReq));
+
+  tagDetached = true;
+  listeners["framedetached"]?.forEach((fn) => fn(tagFrame));
+
+  // swReq is still pending until requestfinished fires.
+  await trap.waitForPendingAssets(30);
+  assertEquals(trap.errors.length, 1);
+  assertEquals(trap.errors[0].includes("_immutable-abc.js"), true);
+  assertEquals(trap.errors[0].includes("/shell/tag"), false);
+
+  trap.errors.length = 0;
+  listeners["requestfinished"]?.forEach((fn) => fn(swReq));
+  await trap.waitForPendingAssets(30);
+  trap.assertNoErrors();
+  trap.detach();
+});
