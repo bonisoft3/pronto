@@ -6,7 +6,7 @@ is built; [More ways in](#more-ways-in) and most of [Recovery and step-up](#reco
 token contract, the device cookie and the provider settings are mecha's
 [auth service reference](https://github.com/bonisoft3/mecha/blob/v0.34.0/services/auth/README.md);
 the classes, copy keys and `data-auth-action` controls an app may style or
-place are omnishell's [guide](https://github.com/bonisoft3/omnishell/blob/v0.33.0/GUIDE.md#signing-in). An app
+place are omnishell's [guide](https://github.com/bonisoft3/omnishell/blob/v0.34.0/GUIDE.md#signing-in). An app
 never draws its own sign-in: the terminal does, the same in every app.
 
 ## What the reader sees
