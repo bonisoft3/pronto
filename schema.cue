@@ -83,8 +83,7 @@ import (
 #colorRoles: ["primary", "secondary", "accent", "danger", "neutral",
 	"surface", "border", "surface-muted"]
 
-// The five Apple-aligned navigation postures emit.cue renders at `:where(...)`
-// specificity:
+// The navigation postures emit.cue renders at `:where(...)` specificity:
 //   - `topbar`: fluid full-width sticky horizontal toolbar across viewports
 //   - `tabbar`: centered floating top pill capsule on tablet/desktop (>= 640px)
 //               that adapts to a pinned bottom tab bar on compact phones (< 640px)
@@ -93,8 +92,9 @@ import (
 //   - `dock`: centered floating pill capsule anchored near the bottom edge
 //             across viewports, leaving the top edge chrome-free
 //   - `custom`: zero-specificity link/control resets only; app CSS owns geometry
+//   - `none`: no shell navigation strip is mounted; app owns the full viewport
 // Required with no default so every app chooses its chrome explicitly.
-#NavPosture: "topbar" | "tabbar" | "sidebar" | "dock" | "custom"
+#NavPosture: "topbar" | "tabbar" | "sidebar" | "dock" | "custom" | "none"
 
 // Named 24x24 stroke icons Omnishell's chrome renders in `body > nav` links
 // (`plugins/omnishell/interpreter/chrome.js` `CHROME_ICONS`). Held equal to
@@ -411,8 +411,8 @@ import (
 	component: [string]: #Reference
 	// Which colour the terminal's own chrome resolves to, optional brand title
 	// rendered at the inline start of `body > nav`, and which navigation posture
-	// (`topbar`, `tabbar`, `sidebar`, `dock`, or `custom`) `design.css` emits at
-	// `:where(...)` specificity. `nav` has no default: every app chooses its
+	// (`topbar`, `tabbar`, `sidebar`, `dock`, `custom`, or `none`) `design.css` emits
+	// at `:where(...)` specificity. `nav` has no default: every app chooses its
 	// chrome explicitly.
 	shell: {
 		bg:        *"neutral" | string
@@ -423,6 +423,10 @@ import (
 		titleKey?: string & !=""
 		if titleKey != _|_ {
 			title: string & !=""
+		}
+		if nav == "none" {
+			title?:    _|_
+			titleKey?: _|_
 		}
 	}
 }

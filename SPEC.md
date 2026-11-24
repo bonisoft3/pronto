@@ -28,7 +28,7 @@ app must explicitly author the eight core semantic colour roles (`primary`,
 `secondary`, `accent`, `danger`, `neutral`, `surface`, `border`,
 `surface-muted`, plus any domain-specific roles) in `colors`, provide a matching
 `dark` twin for every `colors` key (`dark` is closed over `colors`), and choose
-`shell.nav` (`"topbar" | "tabbar" | "sidebar" | "dock" | "custom"`). `shell`
+`shell.nav` (`"topbar" | "tabbar" | "sidebar" | "dock" | "custom" | "none"`). `shell`
 may also declare `title` (and `titleKey` under `meta.i18n`) to place a brand
 wordmark at the inline start of `body > nav`, while each `#Screen` (and each
 `entries` link) may declare `icon` (`#NavIcon`) and `iconOnly: true` for named

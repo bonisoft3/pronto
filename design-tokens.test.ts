@@ -51,7 +51,7 @@ const EMITTER = new URL("emit.cue", HERE);
 // slots from the schema's own `#colorRoles` list so role discovery and bucket
 // admission probes never restate role names here.
 const probe = (expr: string) =>
-  `package probe\n\nimport pronto "bonisoft.org/plugins/pronto"\n\n#Design: pronto.#Design\n#Base: pronto.#Design & {\n\tcolors: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tdark: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tshell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom"\n}\n#App: pronto.#App\n\nout: ${expr}\n`;
+  `package probe\n\nimport pronto "bonisoft.org/plugins/pronto"\n\n#Design: pronto.#Design\n#Base: pronto.#Design & {\n\tcolors: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tdark: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tshell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom" | "none"\n}\n#App: pronto.#App\n\nout: ${expr}\n`;
 
 // The quotation this suite grades, hashed: every vendored theme stylesheet in
 // themeOrder, then each reading's token and the daisyUI meaning it quotes. It

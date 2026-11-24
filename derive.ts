@@ -981,7 +981,7 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
 
   if (!(await exists(`${appDir}/DESIGN.md`))) {
     problems.push(
-      'DESIGN.md: no such file — author DESIGN.md (with YAML frontmatter declaring `colors` + matching `dark` twins for `primary, secondary, accent, danger, neutral, surface, border, surface-muted`, plus `shell.nav`: `"topbar" | "tabbar" | "sidebar" | "dock" | "custom"`)',
+      'DESIGN.md: no such file — author DESIGN.md (with YAML frontmatter declaring `colors` + matching `dark` twins for `primary, secondary, accent, danger, neutral, surface, border, surface-muted`, plus `shell.nav`: `"topbar" | "tabbar" | "sidebar" | "dock" | "custom" | "none"`)',
     );
   }
   if (exp.statics.some((s) => s.file === "journal.html") && !(await exists(`${appDir}/journal.html`))) {

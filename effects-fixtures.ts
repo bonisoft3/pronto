@@ -77,7 +77,7 @@ app: pronto.#App & {
         primary: *"#f5f5f5" | string, secondary: *"#aaaaaa" | string, accent: *"#66aaff" | string, danger: *"#ff6666" | string,
         neutral: *"#111111" | string, surface: *"#1a1a1a" | string, border: *"#333333" | string, "surface-muted": *"#242424" | string
       }
-      shell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom"
+      shell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom" | "none"
     }
     flows: {}
   }
