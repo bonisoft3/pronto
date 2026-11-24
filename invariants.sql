@@ -697,4 +697,20 @@ WHERE (s.file LIKE '%.js' OR s.file LIKE '%.mjs')
   AND NOT EXISTS (SELECT 1 FROM script_declared d WHERE d.path = s.file)
   AND NOT EXISTS (SELECT 1 FROM script_platform p WHERE p.path = s.file)
 
+UNION ALL
+
+-- CLOSED against CLOSED. Declaring a navigation posture other than "none"
+-- when the program puts nothing in the strip (at most one strip route, no
+-- brand title, and no auth) leaves a dead posture in DESIGN.md that paints
+-- an empty strip if anything mounts <nav>.
+SELECT 'error',
+       'DESIGN.md',
+       'shell.nav is "' || nav || '" but the program puts nothing in the strip ('
+         || strip_routes || ' strip route(s), no shell.title, no auth) — set shell.nav: "none"'
+FROM shell_chrome
+WHERE nav <> 'none'
+  AND NOT branded
+  AND strip_routes <= 1
+  AND NOT has_auth
+
 ORDER BY path, message

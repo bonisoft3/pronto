@@ -180,7 +180,6 @@ Deno.test("shell.nav emits zero-specificity :where(...) rules for topbar, tabbar
   assertStringIncludes(customCss, ":where(body > nav a) { color: inherit; text-decoration: none; }");
   assertStringIncludes(customCss, ":where(body > nav .shell-nav-icon) { flex: none;");
   assertStringIncludes(customCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-person, .shell-passkey, .shell-auth-choice, .shell-provider))");
-  assertStringIncludes(customCss, ":where(body > nav:not(:has(> .shell-brand, > a + a, > .shell-me > :not([hidden])))) { display: none; }");
   assertFalse(FLOW_PHYSICAL.test(customCss));
 
   const noneFiles = await emitFiles(navProgram("none"));

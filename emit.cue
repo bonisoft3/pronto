@@ -5247,7 +5247,6 @@ _pgrollDir: "services/database/pgroll"
 		\(E._signinCss)\(E._consentCss)
 		:where(body > nav > a[data-display="icon-only"]) { padding-inline: var(--shell-nav-icon-pad-x, 6px); justify-content: center; gap: 0; }
 		:where(body > nav[hidden]) { display: none; }
-		:where(body > nav:not(:has(> .shell-brand, > a + a, > .shell-me > :not([hidden])))) { display: none; }
 
 		/* Not a preference to weigh against the design: durations collapse
 		   and the interpreter's exit path, which waits on running animations,

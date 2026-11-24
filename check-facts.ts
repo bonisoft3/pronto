@@ -123,6 +123,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   },
   exception_reason: { reason: "VARCHAR" },
   design_budget: { pending_literals: "BIGINT" },
+  shell_chrome: { nav: "VARCHAR", branded: "BOOLEAN", strip_routes: "BIGINT", has_auth: "BOOLEAN" },
   vendor_source: { name: "VARCHAR", origin: "VARCHAR", version: "VARCHAR" },
   vendor_declaration: { source: "VARCHAR", token: "VARCHAR", value: "VARCHAR" },
   vendor_exclusion: { source: "VARCHAR", pattern: "VARCHAR", reason: "VARCHAR" },
