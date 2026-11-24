@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1.0.11";
 import { replayDatabase, type UpgradeFixture } from "./check-replay.ts";
 
-const DATABASE = "bonitao/mecha-database:0.33.0@sha256:7b4439d7a5aac1c109a17c3302dfd5097ac46114ac2a91279b69b37573f92584";
+const DATABASE = "bonitao/mecha-database:0.34.0@sha256:1e65261fd9507f7c935a939c43916fb3a61f335cf50002478b31a8d643a103df";
 
 async function docker(args: string[]) {
   const result = await new Deno.Command("docker", { args, stdout: "piped", stderr: "piped" }).output();
