@@ -116,7 +116,7 @@ const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.j
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
 const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', EDGE_CAPABILITIES_CUE, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities failed')
-const { assets, seedBlobs, blobs, images, signIn } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string }> }
+const { assets, seedBlobs, blobs, images, signIn } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string; credential?: true }> }
 const routeScreens: Record<string, string> = {}
 for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
 const imagePlan = imagePlanRefusal(routeScreens, images)
@@ -235,14 +235,26 @@ async function assetlinksApkKeyHashes(publicDir: string): Promise<string> {
 const androidApkKeyHashes = Deno.env.get('ANDROID_APK_KEY_HASHES') ?? await assetlinksApkKeyHashes(publicDir)
 const nativeSchemes = Deno.env.get('NATIVE_SCHEMES') ?? ((shell.native || androidApkKeyHashes !== '') && shell.app ? shell.app : '')
 const authProviders = Object.keys(signIn)
+// A deployment signing in through the operator's broker in place of the
+// program's own clients (a staging host whose origin no client registers):
+// each provider but Bluesky, whose client is the origin anyway, as
+// identity.#Signin's broker writes it.
+const broker = Deno.env.get('OIDC_BROKER')
+if (broker !== undefined && !/^https:\/\/[^/]+$/.test(broker)) fail(`OIDC_BROKER is ${JSON.stringify(broker)}, not an https origin`)
 const authVars: Record<string, string> = {
   ...(authProviders.length ? {
     OIDC_PROVIDERS: authProviders.join(','),
     ...Object.fromEntries(authProviders.flatMap((p) => {
       const upper = p.toUpperCase()
-      const cfg = signIn[p] ?? {}
+      const cfg = broker !== undefined && p !== 'bluesky'
+        ? { issuer: broker, client: 'origin', scope: 'openid profile email', params: `provider=${p}` }
+        : signIn[p] ?? {}
       const entries: [string, string][] = []
-      for (const [setting, own] of [['ISSUER', cfg.issuer], ['CLIENT_ID', cfg.client], ['SCOPE', cfg.scope], ['AUTHORIZE_PARAMS', cfg.params]] as const) {
+      // Bluesky's client is the origin; a deployment may name its entryway and AppView.
+      const settings = p === 'bluesky'
+        ? [['ENTRYWAY', undefined], ['APPVIEW', undefined]] as const
+        : [['ISSUER', cfg.issuer], ['CLIENT_ID', cfg.client], ['SCOPE', cfg.scope], ['AUTHORIZE_PARAMS', cfg.params], ['CREDENTIAL', cfg.credential ? 'true' : undefined]] as const
+      for (const [setting, own] of settings) {
         const value = Deno.env.get(`OIDC_${upper}_${setting}`) || own
         if (value) entries.push([`OIDC_${upper}_${setting}`, value])
       }
@@ -466,7 +478,7 @@ ${shell.presenter ? `    // A presenter's module import of this origin is answer
     }
     const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
-        /^\\/(?:_immutable-|(?:shell|omnishell|messages|docs)\\/)/.test(url.pathname) ||
+        /^\\/(?:_immutable-|(?:shell|omnishell|messages|docs|auth)\\/)/.test(url.pathname) ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response
     const result = new Response(response.body, response)

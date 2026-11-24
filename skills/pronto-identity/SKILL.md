@@ -51,7 +51,14 @@ verbs are green:
    ```
 
    The broker is the operator's; the app runs none. `launch` and `integrate`
-   offer guest and passkey only; a release turns the providers on.
+   offer guest and passkey only; a release turns the providers on. With no
+   broker, the app's own client signs it in:
+   `signin: {providers: ["google"], clients: google: {client: "<id>.apps.googleusercontent.com", credential: true}}`
+   draws Google's own button and its prompt, for a web client whose
+   JavaScript origins are the app's (registered in the Google Cloud console).
+   It has no redirect, so the program may name no native host. `bluesky` in
+   `providers` needs no client and no broker (AT Protocol's client is the
+   app's origin), only a public origin; it has no native sign-in yet.
 2. Add a decision for the sign-in to `ir.html` (and `code.decisions` in CUE); `saytw generate` re-pins `meta.ir.sha256` automatically.
 3. The nav's Sign in opens in place onto each provider beside the passkey. An
    app that hides the nav places `data-auth-provider="<name>"` and

@@ -3475,6 +3475,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if P.client != _|_ {client: P.client}
 				if P.scope != _|_ {scope: P.scope}
 				if P.params != _|_ {params: P.params}
+				if P.credential != _|_ {credential: P.credential}
 			}
 		}
 	}}
@@ -4505,7 +4506,6 @@ _pgrollDir: "services/database/pgroll"
 			units:       true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
 			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
-			providers:   true & [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {len(E.code.capabilities.auth.providers) == 0}, true][0]
 		}
 	}
 
@@ -5032,6 +5032,23 @@ _pgrollDir: "services/database/pgroll"
 		:where(body > nav .shell-delete) { font-weight: 400; color: color-mix(in srgb, currentColor 60%, transparent); }
 		:where(body > nav .shell-delete[data-confirm]) { font-weight: 600; color: var(--danger, #b91c1c); }
 		:where(body > nav .shell-delete:not([data-confirm]) .shell-delete-confirm, body > nav .shell-delete[data-confirm] .shell-delete-ask) { display: none; }
+		/* The ways to sign in: a quiet list under its heading, Set up recovery above it when asked. */
+		:where(body > nav .shell-ways) { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-sm, 8px) var(--sp-sm, 12px);
+		  border-block-start: 1px solid var(--shell-rule); }
+		:where(body > nav .shell-ways-title) { margin: 0; font-size: 0.85em; font-weight: 600; opacity: 0.7; }
+		:where(body > nav .shell-recovery) { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: var(--sp-sm, 10px);
+		  border-radius: var(--r-md, 8px); background: color-mix(in srgb, var(--accent, currentColor) 10%, transparent); }
+		:where(body > nav :is(.shell-ways, .shell-recovery, .shell-way-add, .shell-ways-note)[hidden]) { display: none; }
+		:where(body > nav .shell-way-list) { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+		:where(body > nav .shell-way) { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+		:where(body > nav .shell-way-name) { font-weight: 600; }
+		:where(body > nav .shell-way-detail) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.7; font-size: 0.9em; }
+		:where(body > nav .shell-way-add) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-block-start: 4px; }
+		:where(body > nav .shell-way-add-title) { flex-basis: 100%; font-size: 0.85em; opacity: 0.7; }
+		:where(body > nav :is(.shell-way-remove, .shell-later, .shell-way-passkey, .shell-way-provider)) { font: inherit; color: inherit; cursor: pointer;
+		  min-height: 36px; padding: 4px 12px; border: 1px solid var(--shell-rule); border-radius: 999px; background: none; }
+		:where(body > nav :is(.shell-way-remove, .shell-later, .shell-way-passkey, .shell-way-provider):hover) { background: color-mix(in srgb, currentColor 7%, transparent); }
+		:where(body > nav .shell-ways-note) { margin: 0; font-size: 0.9em; opacity: 0.8; }
 		/* Asking a name in place of the ways in, and renaming in place of the chip. */
 		:where(body > nav .shell-name-form) { display: flex; flex-direction: column; gap: var(--sp-sm, 10px); }
 		:where(body > nav .shell-name-back) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
@@ -5090,6 +5107,11 @@ _pgrollDir: "services/database/pgroll"
 		  width: 100%; min-height: 48px; box-sizing: border-box; padding: 0 var(--sp-md, 16px);
 		  border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; text-decoration: none; }
 		:where(body > nav .shell-signin-ways .shell-provider) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
+		/* A provider's own button: the auth service's page, framed at the button's height,
+		   in the panel, on a required sign-in's screen, or where an app's own control stood. */
+		:where(.shell-provider-button .shell-provider-frame, .shell-login .login-provider-button .shell-provider-frame) { display: block; width: 100%; height: 44px; border: 0; color-scheme: normal; }
+		/* Its prompt the browser draws (FedCM): the page asking takes no room. */
+		:where(body > .shell-provider-prompt) { position: fixed; width: 0; height: 0; border: 0; }
 		:where(body > nav .shell-signin-ways .shell-provider:hover) { background: color-mix(in srgb, currentColor 6%, transparent); text-decoration: none; }
 		:where(body > nav .shell-provider-mark) { width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center;
 		  border: 1.8px solid currentColor; font-size: 0.7em; font-weight: 800; line-height: 1; }
@@ -5291,7 +5313,7 @@ _pgrollDir: "services/database/pgroll"
 		  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
 		}
 		.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
-		.shell-login .login-provider ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+		.shell-login :is(.login-provider, .login-provider-button) ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
 		.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
 		.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
 		.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }
@@ -6722,9 +6744,13 @@ _pgrollDir: "services/database/pgroll"
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
+			// A provider's own button is the auth service's page, under the
+			// policy it states: Google's script needs markup sinks the
+			// terminal's Trusted Types withhold.
+			_buttonsAt: [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.provider != _|_ for p, v in E.code.capabilities.auth.provider if v.credential != _|_ {"/auth/oidc/\(p)/button"}]
 			// The tag frame carries its own policy as its meta.
 			_tagFrameAt: [if E._envelope.googleTag.enabled {"/\(E._envelope.googleTag.frame)"}]
-			_fenced:     list.Concat([_unitPaths, _presenterAt, _tagFrameAt])
+			_fenced:     list.Concat([_unitPaths, _presenterAt, _buttonsAt, _tagFrameAt])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				// The ladder's pages answer with their own policy (E._ladderPolicy),
 				// so the terminal's names every path but theirs.
@@ -7208,7 +7234,8 @@ _pgrollDir: "services/database/pgroll"
 				      - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"\(pagesDir)
 				"""
 
-			let authProviders = [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers {strings.ToUpper(p)}]
+			// Bluesky's client is the origin, so a deployment holds nothing of its.
+			let authProviders = [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers if p != "bluesky" {strings.ToUpper(p)}]
 			let edgeEnvironment = {
 				for _, h in E.code.capabilities.hatches if h.edge != _|_ for binding in h.edge.environment {(binding): binding}
 				for p in authProviders for s in ["CLIENT_ID", "CLIENT_SECRET", "ISSUER"] {("OIDC_\(p)_\(s)"): "OIDC_\(p)_\(s)"}

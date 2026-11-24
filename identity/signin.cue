@@ -27,9 +27,16 @@ package identity
 	let S = self
 	signin: {
 		// The operator's broker as readers reach it, which is also its issuer.
-		broker: #Url
-		// The providers the app offers, each one the broker offers.
+		broker?: #Url
+		// The providers the app offers: each one the broker offers, or, with
+		// no broker, each signed in directly by the app's own client. Bluesky
+		// is neither's: AT Protocol's client is the app's origin, so it needs
+		// no client and no broker.
 		providers: *["google"] | [string & =~"^[a-z][a-z0-9]*$", ...string & =~"^[a-z][a-z0-9]*$"]
+		// With no broker, the app's own client at each provider; `credential`
+		// signs Google in by its own button (Identity Services, FedCM where
+		// the browser has it), for a client registered to the app's origins.
+		clients?: [string]: {client: string, credential?: true}
 	}
 
 	code: {
@@ -42,13 +49,21 @@ package identity
 				providers: S.signin.providers
 				provider: {
 					...
-					for p in S.signin.providers {
-						(p): {
-							...
-							issuer: S.signin.broker
-							client: "origin"
-							scope:  "openid profile email"
-							params: "provider=\(p)"
+					for p in S.signin.providers if p == "bluesky" {
+						(p): {}
+					}
+					for p in S.signin.providers if p != "bluesky" {
+						if S.signin.broker != _|_ {
+							(p): {
+								...
+								issuer: S.signin.broker
+								client: "origin"
+								scope:  "openid profile email"
+								params: "provider=\(p)"
+							}
+						}
+						if S.signin.broker == _|_ {
+							(p): S.signin.clients[p]
 						}
 					}
 				}

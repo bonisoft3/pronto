@@ -2120,7 +2120,12 @@ import (
 			// registered there (`origin` for a public client named by the
 			// app's origin), the scope and further authorization parameters.
 			// Without a client here the deployment must give one. Never a
-			// secret, and never the terminal's.
+			// secret, and never the terminal's. `credential` signs Google in by
+			// its own button (Identity Services, FedCM where the browser has
+			// it) for a client registered to the app's origins, which the
+			// terminal is handed; Google's script runs in the auth service's
+			// page the terminal frames, never the app's. It has no redirect, so
+			// no native host signs in by it.
 			provider?: [string]~(Name,_): {
 				_providersPresent: true & (providers != _|_)
 				_named:            true & list.Contains(providers, Name)
@@ -2129,6 +2134,8 @@ import (
 				client?:           string
 				scope?:            string
 				params?:           string
+				credential?:       true
+				if credential != _|_ {_credentialIsGoogle: Name & "google"}
 			}
 		}
 		// The native hosts the app ships beside the web one, each for its
@@ -2883,13 +2890,16 @@ import (
 
 	_authProviders: [if (A.capabilities & null) == _|_ if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
 	_authTargetViolations: list.Concat([
-		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
-			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
-		}],
 		// An iOS host ships on the App Store, which requires Sign in with Apple
 		// beside any other provider (App Review Guideline 4.8).
 		[if (A.capabilities & null) == _|_ if list.Contains(A.capabilities.native, "ios") if len(_authProviders) > 0 if !list.Contains(_authProviders, "apple") {
 			"an iOS host ships on the App Store, which requires Sign in with Apple beside \(_authProviders[0]) (App Review Guideline 4.8): add apple to capabilities.auth.providers"
+		}],
+		[if (A.capabilities & null) == _|_ if len(A.capabilities.native) > 0 if A.capabilities.auth != _|_ if A.capabilities.auth.provider != _|_ for p, v in A.capabilities.auth.provider if v.credential != _|_ {
+			"\(p) signs in by its own button (credential), which no native host draws: drop credential or capabilities.native"
+		}],
+		[if (A.capabilities & null) == _|_ if len(A.capabilities.native) > 0 if list.Contains(_authProviders, "bluesky") {
+			"bluesky offers no native sign-in yet: drop it or capabilities.native"
 		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true

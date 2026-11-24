@@ -257,12 +257,15 @@ Deno.test('a new deployment can propagate before its release is checked, while p
 // An opaque-origin sandboxed realm iframe (/shell/units/...) navigated with
 // sec-fetch-mode: navigate must not receive top-level shell Link preload hints
 // carrying crossorigin=anonymous, which abort with net::ERR_FAILED under origin "null".
-Deno.test('edge.ts omits shell preload Link headers on /shell/units/* and /docs/* HTML assets', async () => {
+Deno.test('edge.ts omits shell preload Link headers on /shell/units/*, /docs/* and the auth service\'s HTML', async () => {
   const edgeSource = await Deno.readTextFile(new URL('./edge.ts', import.meta.url))
-  assert.match(edgeSource, /\/\^\\\\\/\(\?:_immutable-\|\(\?:shell\|omnishell\|messages\|docs\)\\\\\/\)\/\.test\(url\.pathname\)/)
-  const guard = new RegExp('^/(?:_immutable-|(?:shell|omnishell|messages|docs)/)')
+  assert.match(edgeSource, /\/\^\\\\\/\(\?:_immutable-\|\(\?:shell\|omnishell\|messages\|docs\|auth\)\\\\\/\)\/\.test\(url\.pathname\)/)
+  const guard = new RegExp('^/(?:_immutable-|(?:shell|omnishell|messages|docs|auth)/)')
   assert.equal(guard.test('/shell/units/camera-lens/index.html'), true)
   assert.equal(guard.test('/docs/ir.html'), true)
+  // Regression: the app's stylesheet hints reached the auth service's button
+  // page, whose policy refuses them.
+  assert.equal(guard.test('/auth/oidc/google/button'), true)
   assert.equal(guard.test('/camera'), false)
   assert.equal(guard.test('/gallery'), false)
 })

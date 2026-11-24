@@ -2,7 +2,7 @@
 
 How a reader of a pronto app becomes someone: what the app shows, the ways
 in it offers, what a session carries, and where each piece runs. Most of it
-is built; [More ways in](#more-ways-in) and [Recovery and step-up](#recovery-and-step-up) are the plan, marked as such. The
+is built; [More ways in](#more-ways-in) and most of [Recovery and step-up](#recovery-and-step-up) are the plan, marked as such. The
 token contract, the device cookie and the provider settings are mecha's
 [auth service reference](https://github.com/bonisoft3/mecha/blob/v0.33.0/services/auth/README.md);
 the classes, copy keys and `data-auth-action` controls an app may style or
@@ -51,7 +51,8 @@ One account per browser. Three postures, one control at the nav's end:
 | --- | --- | --- |
 | **Guest** | mecha's auth service mints it | every mode with tables |
 | **Passkey** | mecha's auth service, the passkey bound to the app's own domain | every mode on a secure origin |
-| **Identity providers** (Google; Apple where an app names it) | the identity broker, through mecha's auth service as an OpenID Connect provider | edge, container and cloud tiers; refused on `pages` |
+| **Identity providers** (Google; Apple where an app names it) | the identity broker, or the app's own client, through mecha's auth service as an OpenID Connect provider | edge, container and cloud tiers; refused on `pages` |
+| **Bluesky** | mecha's auth service, by AT Protocol's OAuth, the app's origin its client | edge, container and cloud tiers, on a public origin; refused on `pages` |
 
 **Passkeys** are discoverable credentials, one per account, named by the
 person's name. The browser is asked to lead with this device
@@ -140,8 +141,53 @@ asks, the second deletes the account and every row it owns
 (`DELETE /auth/account`, which cascades), forgets it on this device, and
 signs the device out.
 
-An app names the operator's broker (`signin: broker: <url>`) and runs none
-of its own.
+An app signs in through the operator's broker (`signin: broker: <url>`),
+running none of its own, or, with no broker, through its own client at each
+provider (`signin: clients: <name>: {client}`). Its own client gives up the
+broker's per-app subject (a provider names a person alike to every client
+of one project) and gains what only a client of the app's own origins can
+do: Google's own button (`credential: true`), the app's way in to Google
+with no redirect. The app registers its origins with its client at the
+provider (snapcards' is the Google Cloud project `snapcards-fun`).
+
+**Google's own button** is drawn by Google's script (Identity Services, FedCM
+where the browser has it), which knows the person and so reads "Continue as
+…" once they have signed in to Google in that browser:
+
+- **Never in the app's page.** Google's script writes markup the terminal's
+  Trusted Types refuse, so it runs in the auth service's own page, under a
+  policy that admits it, which the terminal frames; the door leaves that
+  page's policy be, and the app's page admits nothing of Google's.
+- **The button** takes the place of Google's link in the panel and on a
+  required sign-in's screen, framed afresh each time the panel opens; an
+  app's own `data-auth-provider="google"` control gives way to it when
+  pressed.
+- **The prompt** ("One Tap"), the browser's own account chooser, is offered
+  once a page not signed in sees a person's first key or press outside the
+  panel, and only where the browser draws it (FedCM). A crawler, a
+  prerender, or a visit no one touches loads nothing of Google's and costs
+  the auth service nothing; the browser's own cooldown spaces it after a
+  dismissal, and signing in another way withdraws it.
+- **The token** the button hands the page signs the device in only with the
+  secret its nonce was made from, which only this browser's cookie holds
+  (mecha's auth README): a token taken elsewhere signs no one in. A guest's
+  work goes with it as it would by redirect.
+- **What it cannot do:** there is no redirect, so a native host, whose sheet
+  starts one, cannot sign in by it, and a program with a native host and a
+  `credential` is refused. Snapcards' Android app is a TWA of the web one, so
+  snapcards names no native host.
+
+**Bluesky** signs a person in by AT Protocol's OAuth, through its client
+library, with no broker, registration or secret: the client is the app's
+origin, named by the metadata document the auth service serves there
+(mecha's auth README). The person picks their account on Bluesky's pages,
+so an account on a server of its own cannot sign in yet, and comes back as
+the DID Bluesky vouches for,
+which names them alike wherever their account moves; their display name and
+avatar are read from Bluesky's public AppView. The sign-in asks for nothing
+of their repository, keeps no token, and is offered only where a release
+serves the app on a public origin, which the person's server fetches the
+client from; no native host signs in by it yet.
 
 ## What a session says
 
@@ -206,7 +252,7 @@ passkey and its identity providers, as today.
     - **Native hosts**, later: Android's SMS User Consent and Retriever
       APIs.
 - **Any way may be the only one.** None is "the recovery method": getting back
-  in is signing in by another way the account has. A person's panel gains
+  in is signing in by another way the account has. A person's panel has
   **Ways to sign in**, to add or remove one while signed in; accounts are
   still never merged.
 - **Assurance.** NIST SP 800-63B-4 classes delivery over the phone network as
@@ -225,7 +271,11 @@ passkey and its identity providers, as today.
 
 ## Recovery and step-up
 
-*Planned, not built.*
+*Built*: Ways to sign in — passkeys and providers, added and removed while
+signed in — and asking to set up recovery, below (mecha's
+[auth service](https://github.com/bonisoft3/mecha/blob/v0.33.0/services/auth/README.md#ways-in)).
+*Planned*: recovery codes, the waiting period, telling the other ways, the
+broker's ways and step-up.
 
 ### Recovery
 
@@ -248,27 +298,29 @@ matters:
 
 - **Signing in**: any of the account's ways. The session says which (`amr`,
   `acr`), and what needs more asks for more — step-up, below.
-- **Adding a way** needs a recent sign-in at that way's level or above: an SMS
-  session may add an email or a password, not a passkey or Google — else a SIM
-  taken over would buy a passkey. Kratos's `privileged_session_max_age` holds
-  the "recent" for the broker's ways.
+- **Adding a way** needs a recent sign-in — this device's, within ten
+  minutes — at that way's level or above: an SMS session may add an email or
+  a password, not a passkey or Google — else a SIM taken over would buy a
+  passkey. Today's ways (passkeys, Google, Apple, Bluesky) stand at one
+  level. Kratos's `privileged_session_max_age` holds the "recent" for the
+  broker's ways.
 - **Every way added or removed is told to the account's other ways**, through
   a channel independent of the one used, as NIST requires, and to other
   systems as OpenID Shared Signals events: CAEP's credential change, RISC's
   recovery information changed. Kratos's hooks after settings and recovery
   are where they leave from; Ory sends no Shared Signals of its own.
 - **Removing a way** follows the adding rule; the last way goes only with the
-  account.
+  account, and the way this device came in by only from a sign-in by another.
 
-**Set up recovery** is asked in the panel when a reader **returns** — a
-session taken up again from the device, a face tapped — to an account that has
-**had an external effect** (an effect of level 4, through the airlock: a
-payment, an order, a message), which the airlock stamps on the account so
-every device knows it. Not now backs off exponentially — a day, two, four, …
-up to about two months — on the account, reset when recovery is set up. It
-stops for good once the account is **recoverable**: two ways or more, or one
-and recovery codes. A burner — one password, by choice — dismisses it and is
-asked less and less.
+**Set up recovery** is asked in the panel, which opens on it, when a reader
+**signs in** to an account that had **an external effect** before that
+sign-in (an effect of level 4, through the airlock: a payment, an order, a
+message). The airlock's claim stamps the account of the request that moved
+the machine, so every device knows it; the service's own moves stamp none.
+Not now backs off exponentially — a day, two, four, … up to about two months
+— on the account. It stops once the account is **recoverable**: two ways or
+more (or one and recovery codes, once they are built). A burner — one
+password, by choice — dismisses it and is asked less and less.
 
 ### Step-up
 
