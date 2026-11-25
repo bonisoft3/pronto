@@ -141,7 +141,7 @@ pdfmake's own default font, Roboto, whose four faces its bundle carries: a
 Worker reads no file, so a font is code. The PDF comes back as an effect's
 answer carries bytes, `{"$blob": {base64, type: "application/pdf"}}`, since a
 handler's `sink.fetch` reads its sink's answer as JSON or text
-([the airlock](https://github.com/bonisoft3/mecha/blob/v0.35.0/services/airlock/README.md)); the
+([the airlock](https://github.com/bonisoft3/mecha/blob/v0.35.1/services/airlock/README.md)); the
 handler answers it as it is, and the airlock stores the PDF in the cluster's
 blob plane and settles the URL it serves it at:
 

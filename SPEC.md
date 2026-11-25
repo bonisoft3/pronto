@@ -537,7 +537,7 @@ deletes the state's schedules on a cancel. The tick delivers
 `xstate.after.<delay>.<state>` at the later of its instant and the fire's
 `clock()`. Its first adoption is held to the same check: every instance in a
 state with an `after` has a schedule for each of the state's delays
-([Mecha's machines](https://github.com/bonisoft3/mecha/blob/v0.35.0/docs/machines.md#timers)).
+([Mecha's machines](https://github.com/bonisoft3/mecha/blob/v0.35.1/docs/machines.md#timers)).
 
 **A terminal chart is closed over the entity's row.** `context` is refused:
 other columns start from the entity's field defaults. The emitted
