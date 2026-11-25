@@ -58,7 +58,7 @@
     "preambleCopyContexts": [
       {
         "name": "bayt",
-        "image": "bonitao/bayt-runtime:1.5.3@sha256:9560b4a6d6e40fe15a951ef14b5d10dcd613c3efa73ef1847072add962d60760"
+        "image": "bonitao/bayt-runtime:1.5.4@sha256:5bda4d9d7a43bdeca9ccaa0597eaf542f1a14d7f55c84e8cd79cbf19a40cffdd"
       },
       {
         "name": "alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"

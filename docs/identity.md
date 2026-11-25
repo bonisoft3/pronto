@@ -4,9 +4,9 @@ How a reader of a pronto app becomes someone: what the app shows, the ways
 in it offers, what a session carries, and where each piece runs. Most of it
 is built; [More ways in](#more-ways-in) and most of [Recovery and step-up](#recovery-and-step-up) are the plan, marked as such. The
 token contract, the device cookie and the provider settings are mecha's
-[auth service reference](https://github.com/bonisoft3/mecha/blob/v0.34.0/services/auth/README.md);
+[auth service reference](https://github.com/bonisoft3/mecha/blob/v0.35.0/services/auth/README.md);
 the classes, copy keys and `data-auth-action` controls an app may style or
-place are omnishell's [guide](https://github.com/bonisoft3/omnishell/blob/v0.34.0/GUIDE.md#signing-in). An app
+place are omnishell's [guide](https://github.com/bonisoft3/omnishell/blob/v0.35.0/GUIDE.md#signing-in). An app
 never draws its own sign-in: the terminal does, the same in every app.
 
 ## What the reader sees
@@ -131,7 +131,7 @@ holds the subject is offered, never merged, the app showing it from the
 ticket's `login_required` answer and switching with the ticket that answer
 carries. Merging a guest's rows into an account needs the app's own say in
 what merges, which no app declares yet. The contract
-is mecha's [auth README](https://github.com/bonisoft3/mecha/blob/v0.34.0/services/auth/README.md).
+is mecha's [auth README](https://github.com/bonisoft3/mecha/blob/v0.35.0/services/auth/README.md).
 No screen draws a sign-in: a native host has no terminal chip, so its
 projection (`project-native.ts`) writes the account sheet its rail or bar
 opens from the program's `auth` — a passkey, each provider, the way out and
@@ -215,7 +215,7 @@ attestation.
 The browser keeps the session in `localStorage`, every tab the same reader,
 and the auth service keeps it in an HttpOnly cookie that brings it back when
 the token lapses or storage is cleared — the
-[device session](https://github.com/bonisoft3/mecha/blob/v0.34.0/services/auth/README.md#device-session).
+[device session](https://github.com/bonisoft3/mecha/blob/v0.35.0/services/auth/README.md#device-session).
 What only the device knows of its guest (that it wrote, that it was shown)
 outlives the token the cookie renews. The faces are the device's own list
 (`pronto-device-accounts`), never the server's.
@@ -286,7 +286,7 @@ Kratos reports `amr` in its own words (`code`, `password`, `oidc`).
 
 *Built*: Ways to sign in — passkeys and providers, added and removed while
 signed in — and asking to set up recovery, below (mecha's
-[auth service](https://github.com/bonisoft3/mecha/blob/v0.34.0/services/auth/README.md#ways-in)).
+[auth service](https://github.com/bonisoft3/mecha/blob/v0.35.0/services/auth/README.md#ways-in)).
 *Planned*: recovery codes, the waiting period, telling the other ways, the
 broker's ways and step-up.
 

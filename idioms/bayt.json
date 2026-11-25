@@ -134,7 +134,7 @@
           }
         },
         "self": {
-          "version": "v0.49.1"
+          "version": "v0.49.2"
         },
         "doctor": {
           "do": "use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto"
@@ -1552,7 +1552,7 @@
         "manual": true,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.34.0@sha256:cd4cd6fc4b2b8eec05a1f3628c00d9c06eb943b0e6abb1b9bc900250680e5c01}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.35.0@sha256:a91ae9b6b96eb354197725f50a727a0f36faa5772c284adc0852d32e189d6440}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
@@ -1924,7 +1924,7 @@
             "copy": {
               "from": {
                 "name": "bayt",
-                "image": "bonitao/bayt-runtime:1.5.3@sha256:9560b4a6d6e40fe15a951ef14b5d10dcd613c3efa73ef1847072add962d60760"
+                "image": "bonitao/bayt-runtime:1.5.4@sha256:5bda4d9d7a43bdeca9ccaa0597eaf542f1a14d7f55c84e8cd79cbf19a40cffdd"
               },
               "srcs": [
                 "."
@@ -2770,7 +2770,7 @@
             "copy": {
               "from": {
                 "name": "bayt",
-                "image": "bonitao/bayt-runtime:1.5.3@sha256:9560b4a6d6e40fe15a951ef14b5d10dcd613c3efa73ef1847072add962d60760"
+                "image": "bonitao/bayt-runtime:1.5.4@sha256:5bda4d9d7a43bdeca9ccaa0597eaf542f1a14d7f55c84e8cd79cbf19a40cffdd"
               },
               "srcs": [
                 "."
@@ -4153,7 +4153,7 @@
         "manual": false,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.34.0@sha256:cd4cd6fc4b2b8eec05a1f3628c00d9c06eb943b0e6abb1b9bc900250680e5c01}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.35.0@sha256:a91ae9b6b96eb354197725f50a727a0f36faa5772c284adc0852d32e189d6440}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}

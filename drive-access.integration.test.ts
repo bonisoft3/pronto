@@ -4,7 +4,7 @@ import { driveProgram } from "./drive-access-fixture.ts";
 
 // Drive's roles and groups as the emitter writes them, on mecha's database.
 // Each request enters as PostgREST enters it.
-const DATABASE = "bonitao/mecha-database:0.34.0@sha256:1e65261fd9507f7c935a939c43916fb3a61f335cf50002478b31a8d643a103df";
+const DATABASE = "bonitao/mecha-database:0.35.0@sha256:848b00d3e43564b2c17a535a2afbf8699ee0221a5f4cc8f92a1a265cd57a2a55";
 
 async function docker(args: string[], input?: string) {
   const child = new Deno.Command("docker", { args, stdin: input === undefined ? "null" : "piped", stdout: "piped", stderr: "piped" }).spawn();

@@ -49,7 +49,7 @@ services:
         idioms-caddy_srcs: service:idioms-caddy_srcs
         idioms-served_srcs: service:idioms-served_srcs
         bayt: >-
-          ${BAYT_RUNTIME:-docker-image://bonitao/bayt-runtime:1.5.3@sha256:9560b4a6d6e40fe15a951ef14b5d10dcd613c3efa73ef1847072add962d60760}
+          ${BAYT_RUNTIME:-docker-image://bonitao/bayt-runtime:1.5.4@sha256:5bda4d9d7a43bdeca9ccaa0597eaf542f1a14d7f55c84e8cd79cbf19a40cffdd}
         workspaceroot-pronto-sources_srcs: >-
           ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}
         libraries_mecha-database-image_bayt: >-
