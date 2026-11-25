@@ -2121,6 +2121,10 @@ import (
 			// among the nav's, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()
+			// Opts in to the provider's automatic FedCM One Tap prompt after
+			// the first interaction; off by default so sign-in opens only when
+			// asked.
+			prompt?: bool
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client
@@ -2237,8 +2241,11 @@ import (
 			// which the program defines beside it. That service is part of every
 			// launch, and the tree every container door serves carries
 			// `publicAttributes` ([[docs/edge-hatches#The cluster's door]]).
+			let _doorRoute = string & =~"^(/\\.well-known/[A-Za-z0-9._-]+|/[A-Za-z][A-Za-z0-9_-]*)$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice|health|omnishell|shell)$"
 			door?: {
-				route:            string & =~"^/[A-Za-z][A-Za-z0-9_-]*$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice|health|omnishell|shell)$"
+				route?:           _doorRoute
+				routes?:          [_doorRoute, ..._doorRoute]
+				_allRoutes:       [string, ...string] & list.Concat([[if route != _|_ {route}], [if routes != _|_ for r in routes {r}]])
 				port:             int & >0 & <65536
 				publicAttributes: *{} | {[string & =~"^data-[a-z][a-z0-9-]*$"]: string & =~"^[A-Za-z0-9_.:-]*$"}
 			}

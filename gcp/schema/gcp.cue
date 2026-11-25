@@ -118,6 +118,9 @@ import (
 	// Those the program declares for another issuer's tokens, which crud tells
 	// the floor at every request; filled by the release, empty where none.
 	database: declaredRoles: *[] | [...string]
+	// Additional PostgreSQL databases on the same Cloud SQL instance, each given
+	// its own `<id>-<db>-dsn` Secret Manager secret.
+	database: extra: *[] | [...=~"^[a-z][a-z0-9_]{0,62}$"]
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -147,6 +150,12 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Secret Manager secret names mounted as environment variables.
+		secrets:    *{} | {[=~"^[A-Z_][A-Z0-9_]*$"]: string}
+		dependsOn:  *[] | [...string]
+		extraPorts: *[] | [...(int & >1024 & <65536)]
+		healthPath?: =~"^/"
+		healthPort?: int & >1024 & <65536
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
@@ -182,6 +191,7 @@ import (
 		"airlock:9997":   "127.0.0.1:\(#Ports.airlock)"
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
+		for n, c in R._inside for p in c.extraPorts {"\(n):\(p)": "127.0.0.1:\(p)"}
 	}
 	// What a sidecar apart reaches its peers by, as compose names them: the
 	// gateway through the door, and another sidecar apart at its own address.
@@ -190,7 +200,7 @@ import (
 		"http://crud:3000": "https://\(R.runHost)/crud"
 		for n, c in R._apart {"http://\(n):\(c.port)": "https://\(R._apartHost[n])"}
 	}
-	_sidecarPorts: [for _, c in R._inside for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
+	_sidecarPorts: [for _, c in R._inside for p in list.Concat([[c.port], c.extraPorts, [if c.metrics != _|_ {c.metrics.port}], [if c.healthPort != _|_ if c.healthPort != c.port && !list.Contains(c.extraPorts, c.healthPort) {c.healthPort}]]) {p}]
 	// A port the cluster's containers hold, or one two sidecars share, would
 	// leave one of them unable to listen in the shared instance.
 	_sidecarClashes: list.Concat([
@@ -232,7 +242,10 @@ import (
 	names: {
 		instance:   "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
 		connection: "\(R._project):\(R.region):\(instance)"
-		database:   R.name
+		database:             R.name
+		extraDatabases:         R.database.extra
+		extraDatabaseSecrets:   {for db in R.database.extra {(db): "\(R._id)-\(db)-dsn"}}
+		extraDatabasePasswords: {for db in R.database.extra {(db): "\(R._id)-\(db)-password"}}
 		// Previews share one, made once by the project's owner with only what
 		// a revision needs (docs/release-targets.md#previews), so the release
 		// that makes a preview needs no say over the project's IAM.
@@ -363,6 +376,7 @@ import (
 					if R.airlock.enabled {
 						airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.tsbifrost {"tsbifrost"}]])
 					}
+					for n, c in R._inside if len(c.dependsOn) > 0 {(n): c.dependsOn}
 				})
 			}
 			spec: {
@@ -525,17 +539,24 @@ import (
 	let sidecarOf = {
 		n: string
 		c: _
+		let plainEnv = [for k, v in c.env if c.secrets[k] == _|_ {[
+			if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
+			if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
+			if R._origin != "" && strings.Contains(v, "$ORIGIN") {{name: k, value: strings.Replace(v, "$ORIGIN", R._origin, -1)}},
+			{name: k, value: v},
+		][0]}]
+		let secretEnv = [for k, v in c.secrets {(secretOf & {env: k, secret: v}).out}]
+		let allEnv = list.Concat([plainEnv, secretEnv])
 		out: {
 			name:  n
 			image: (imageOf & {svc: n}).out
-			if len(c.env) > 0 {
-				env: [for k, v in c.env {[
-					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
-					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
-					{name: k, value: v},
-				][0]}]
+			if len(allEnv) > 0 {
+				env: allEnv
 			}
-			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+			startupProbe: [
+				if c.healthPath != _|_ {{httpGet: {path: c.healthPath, port: [if c.healthPort != _|_ {c.healthPort}, c.port][0]}, periodSeconds: 2, failureThreshold: 60}},
+				{tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60},
+			][0]
 		}
 	}
 	let gmpCollector = {
@@ -595,7 +616,7 @@ import (
 	// and before the service rolls, as the k8s release's migrate Job: its image
 	// is the release's `schema`, migrate's with the database's initdb directory,
 	// so one job starts once, not twice.
-	let initdbEnv = [
+	let initdbEnv = list.Concat([[
 		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
 		{name: "PGUSER", value: "postgres"},
 		{name: "PGDATABASE", value: R.names.database},
@@ -604,8 +625,34 @@ import (
 		(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
 		(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
 		(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
-	]
+	], [for db in R.database.extra {(secretOf & {env: "EXTRA_DB_PASSWORD_\(strings.ToUpper(db))", secret: R.names.extraDatabasePasswords[db]}).out}]])
 	let initdbNames = [for e in initdbEnv {e.name}]
+	let extraDbSql = [if len(R.database.extra) > 0 {
+		strings.Join(list.Concat([[
+			"""
+				psql -v ON_ERROR_STOP=1 -XqAc "REVOKE CONNECT ON DATABASE \\"$POSTGRES_DB\\" FROM PUBLIC; GRANT CONNECT ON DATABASE \\"$POSTGRES_DB\\" TO authenticator, electric, postgres;"
+				""",
+		], [for db in R.database.extra {
+			let pwVar = "EXTRA_DB_PASSWORD_\(strings.ToUpper(db))"
+			"""
+				psql -v ON_ERROR_STOP=1 -Xq --set=db="\(db)" --set=pw="${\(pwVar)}" <<'__EXTRA_DB__'
+				SELECT format($$DO $role$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %L) THEN EXECUTE %L; ELSE EXECUTE %L; END IF; END $role$;$$, :'db', format('CREATE ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION PASSWORD %L', :'db', :'pw'), format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION PASSWORD %L', :'db', :'pw'))
+				\\gexec
+				SELECT format('GRANT %I TO postgres', :'db') \\gexec
+				SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', :'db') \\gexec
+				SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'db', :'db') \\gexec
+				__EXTRA_DB__
+				psql -v ON_ERROR_STOP=1 -Xq --dbname "\(db)" --set=db="\(db)" <<'__EXTRA_OWN__'
+				SELECT format('REVOKE ALL ON SCHEMA public FROM PUBLIC; GRANT ALL ON SCHEMA public TO %I; ALTER SCHEMA public OWNER TO %I;', :'db', :'db') \\gexec
+				SELECT format('ALTER TABLE public.%I OWNER TO %I', c.relname, :'db') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND pg_get_userbyid(c.relowner) = 'postgres' AND c.relkind IN ('r', 'p') \\gexec
+				SELECT format('ALTER SEQUENCE public.%I OWNER TO %I', c.relname, :'db') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND pg_get_userbyid(c.relowner) = 'postgres' AND c.relkind = 'S' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ('a', 'i')) \\gexec
+				SELECT format('ALTER VIEW public.%I OWNER TO %I', c.relname, :'db') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND pg_get_userbyid(c.relowner) = 'postgres' AND c.relkind = 'v' \\gexec
+				SELECT format('ALTER MATERIALIZED VIEW public.%I OWNER TO %I', c.relname, :'db') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND pg_get_userbyid(c.relowner) = 'postgres' AND c.relkind = 'm' \\gexec
+				SELECT format('ALTER ROUTINE %s OWNER TO %I', p.oid::regprocedure, :'db') FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND pg_get_userbyid(p.proowner) = 'postgres' \\gexec
+				__EXTRA_OWN__
+				"""
+		}]]), "\n")
+	}, ""][0]
 	job: {
 		apiVersion: "run.googleapis.com/v1"
 		kind:       "Job"
@@ -647,7 +694,7 @@ import (
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc \(strconv.Quote("GRANT " + strings.Join([for r in R.database.tokenRoles {"\"\(r)\""}], ", ") + " TO postgres WITH INHERIT FALSE, SET TRUE"))
-							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+							""" + [if extraDbSql != "" {"\n" + extraDbSql}, ""][0] + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
 						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
 							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
 							[for k, v in R.migrate.env {name: k, value: v}],
@@ -718,7 +765,11 @@ import (
 				uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 			}
 		}
+		let extraDbSecrets = [for _, s in R.names.extraDatabaseSecrets {s}]
 		oidcSecretKeys: list.Concat([[for _, v in R.auth.oidcSecrets {v}], [for _, v in R.airlock.secrets {v}]])
+		sidecarSecretKeys: list.SortStrings([for s, _ in {
+			for _, c in R.sidecars for _, v in c.secrets if !list.Contains(extraDbSecrets, v) {(v): true}
+		} {s}])
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
 		// Where each peer compose names is in the instance, which the release

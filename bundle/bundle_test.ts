@@ -1,6 +1,7 @@
 // The derived rows a pages release ships: derived.ts's SQL, and bundle.ts
 // carrying it into a page whose PGlite runs it after the migrations.
 import './edge-addresses_test.ts'
+import './edge-signin_test.ts'
 import './css-assets_test.ts'
 import './edge-jwt_test.ts'
 import './edge-templates_test.ts'
@@ -189,6 +190,56 @@ Deno.test('direct acknowledgments require single-message metadata; recovered nac
   assert.equal(settlement.observe(state(12, 12, 2), 328000).settled, false)
   assert.equal(settlement.observe(state(13, 13, 3), 640000).settled, false)
   assert.throws(() => pipelineState(direct(10), ['refresh'], new Map()), /batch-comparable/)
+})
+
+Deno.test('sequence and http_server inputs settle using Redpanda Connect real metric paths', () => {
+  const input = {
+    sequence: {
+      inputs: [
+        { generate: {} },
+        { broker: { inputs: [{ redis_streams: { url: '${REDIS_URL}' } }, { http_server: { path: '/replay' } }] } },
+      ],
+    },
+  }
+  const completions = inputCompletions(input, 'cover', { url: 'redis://redis:6379', aliases: new Set(['redis']) })
+  assert.equal(completions.get('cover:root.input.sequence'), 'single')
+  assert.equal(completions.get('cover:root.input.sequence.broker.inputs.0'), 'bus')
+  assert.equal(completions.get('cover:root.input.sequence.broker.inputs.1'), 'single')
+
+  const wakeMetrics = [
+    metric('input_connection_up', 1, 'cover', 'root.input.sequence'),
+    metric('input_received', 1, 'cover', 'root.input.sequence'),
+    metric('input_latency_ns_count', 1, 'cover', 'root.input.sequence'),
+  ].join('\n')
+  const wakeDone = pipelineState(wakeMetrics, ['cover'], completions)
+  assert.deepEqual(wakeDone.waiting, [])
+  assert.deepEqual(wakeDone.active, [])
+
+  const wakeInFlight = pipelineState(
+    wakeMetrics.replace(metric('input_latency_ns_count', 1, 'cover', 'root.input.sequence'), metric('input_latency_ns_count', 0, 'cover', 'root.input.sequence')),
+    ['cover'],
+    completions,
+  )
+  assert.deepEqual(wakeInFlight.active, ['stream cover to finish'])
+
+  const postWakeMetrics = [
+    wakeMetrics,
+    metric('input_connection_up', 1, 'cover', 'root.input.sequence.broker.inputs.0'),
+    metric('input_received', 2, 'cover', 'root.input.sequence.broker.inputs.0'),
+    metric('input_connection_up', 1, 'cover', 'root.input.sequence.broker.inputs.1'),
+    metric('input_received', 0, 'cover', 'root.input.sequence.broker.inputs.1'),
+    metric('input_latency_ns_count', 0, 'cover', 'root.input.sequence.broker.inputs.1'),
+  ].join('\n')
+  const postWakeDone = pipelineState(postWakeMetrics, ['cover'], completions)
+  assert.deepEqual(postWakeDone.waiting, [])
+  assert.deepEqual(postWakeDone.active, [])
+
+  const replayInFlight = pipelineState(
+    postWakeMetrics.replace(metric('input_received', 0, 'cover', 'root.input.sequence.broker.inputs.1'), metric('input_received', 1, 'cover', 'root.input.sequence.broker.inputs.1')),
+    ['cover'],
+    completions,
+  )
+  assert.deepEqual(replayInFlight.active, ['stream cover to finish'])
 })
 
 Deno.test('an authoritative restore suppresses derivation triggers, retains foreign keys and rolls back rows and trigger modes on failure', async () => {

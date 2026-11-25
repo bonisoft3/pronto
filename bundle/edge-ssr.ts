@@ -194,6 +194,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
         const headers = new Headers(response.headers)
         headers.set('Link', edgeHints(request, hints, routeAt, preferred))
         headers.set('Content-Security-Policy', DOCUMENT_POLICY)
+        headers.set('X-Frame-Options', 'DENY')
         const storedHeaders = new Headers(headers)
         headers.set('x-edge-cache', 'miss')
         if (!response.body) {
@@ -288,6 +289,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
           if (linkHeader) headers.set('Link', linkHeader)
           else headers.delete('Link')
           headers.set('Content-Security-Policy', DOCUMENT_POLICY)
+          headers.set('X-Frame-Options', 'DENY')
           if (age <= RENDER_FRESH_MS && renderedAt >= Number(lastWrite)) {
             headers.set('x-edge-cache', 'hit')
             return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })

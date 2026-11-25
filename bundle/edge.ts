@@ -26,6 +26,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, edgeRoutingRules, realmSubdomains, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
+import { signInVars } from './edge-signin.ts'
+import { readAppBrand } from '../identity/brand.ts'
+import { registerClients } from '../identity/register.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { databaseScript, writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
@@ -48,11 +51,16 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--name <worker-name>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--name <worker-name>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled] [--no-register]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
+let noRegister = false
 while (args.length) {
   const flag = args.shift()!
+  if (flag === '--no-register') {
+    noRegister = true
+    continue
+  }
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
@@ -234,33 +242,10 @@ async function assetlinksApkKeyHashes(publicDir: string): Promise<string> {
 
 const androidApkKeyHashes = Deno.env.get('ANDROID_APK_KEY_HASHES') ?? await assetlinksApkKeyHashes(publicDir)
 const nativeSchemes = Deno.env.get('NATIVE_SCHEMES') ?? ((shell.native || androidApkKeyHashes !== '') && shell.app ? shell.app : '')
-const authProviders = Object.keys(signIn)
-// A deployment signing in through the operator's broker in place of the
-// program's own clients (a staging host whose origin no client registers):
-// each provider but Bluesky, whose client is the origin anyway, as
-// identity.#Signin's broker writes it.
-const broker = Deno.env.get('OIDC_BROKER')
-if (broker !== undefined && !/^https:\/\/[^/]+$/.test(broker)) fail(`OIDC_BROKER is ${JSON.stringify(broker)}, not an https origin`)
+const authOrigin = domain ? `https://${domain}` : undefined
+const baseAuthVars = signInVars(signIn, (name) => Deno.env.get(name))
 const authVars: Record<string, string> = {
-  ...(authProviders.length ? {
-    OIDC_PROVIDERS: authProviders.join(','),
-    ...Object.fromEntries(authProviders.flatMap((p) => {
-      const upper = p.toUpperCase()
-      const cfg = broker !== undefined && p !== 'bluesky'
-        ? { issuer: broker, client: 'origin', scope: 'openid profile email', params: `provider=${p}` }
-        : signIn[p] ?? {}
-      const entries: [string, string][] = []
-      // Bluesky's client is the origin; a deployment may name its entryway and AppView.
-      const settings = p === 'bluesky'
-        ? [['ENTRYWAY', undefined], ['APPVIEW', undefined]] as const
-        : [['ISSUER', cfg.issuer], ['CLIENT_ID', cfg.client], ['SCOPE', cfg.scope], ['AUTHORIZE_PARAMS', cfg.params], ['CREDENTIAL', cfg.credential ? 'true' : undefined]] as const
-      for (const [setting, own] of settings) {
-        const value = Deno.env.get(`OIDC_${upper}_${setting}`) || own
-        if (value) entries.push([`OIDC_${upper}_${setting}`, value])
-      }
-      return entries
-    })),
-  } : {}),
+  ...(noRegister ? baseAuthVars : await registerClients(baseAuthVars, authOrigin, fetch, await readAppBrand(app, authOrigin ?? null))),
   ...(androidApkKeyHashes ? { ANDROID_APK_KEY_HASHES: androidApkKeyHashes } : {}),
   ...(nativeSchemes ? { NATIVE_SCHEMES: nativeSchemes } : {}),
 }

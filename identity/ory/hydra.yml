@@ -1,0 +1,26 @@
+# Hydra as the broker runs it: the OpenID Connect provider every app signs in
+# through, each app a public client of its own (PKCE, no secret) whose
+# subjects are pairwise, so no two apps can tell they share a person. Hosts,
+# the database and every secret come from the environment.
+oidc:
+  subject_identifiers:
+    supported_types: [pairwise]
+  dynamic_client_registration:
+    enabled: false
+oauth2:
+  pkce:
+    enforced: true
+    enforced_for_public_clients: true
+clients:
+  http:
+    disallow_private_ip_ranges: true
+ttl:
+  id_token: 5m
+  login_consent_request: 30m
+log:
+  level: warn
+  format: json
+# Discovery points callers at consent.ts's validated /broker-api/register endpoint.
+webfinger:
+  oidc_discovery:
+    client_registration_url: http://localhost:4456/broker-api/register

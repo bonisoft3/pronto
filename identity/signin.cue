@@ -22,6 +22,9 @@
 package identity
 
 #Url: string & =~"^https?://[A-Za-z0-9.-]+(:[0-9]+)?$"
+// An issuer as it names itself, which discovery compares exactly: one may end
+// in a slash.
+#Issuer: string & =~"^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$"
 
 #Signin: {
 	let S = self
@@ -36,7 +39,11 @@ package identity
 		// With no broker, the app's own client at each provider; `credential`
 		// signs Google in by its own button (Identity Services, FedCM where
 		// the browser has it), for a client registered to the app's origins.
-		clients?: [string]: {client: string, credential?: true}
+		// A client naming its own issuer is that issuer's, broker or not: the
+		// Ory broker's `email` (docs/decisions/2026-11-24-ory-broker.md).
+		clients?: [string]: {client: string, credential?: true, issuer?: #Issuer}
+		// Opts in to the automatic FedCM One Tap prompt; off by default.
+		prompt?: bool
 	}
 
 	code: {
@@ -47,13 +54,18 @@ package identity
 				...
 				service:   "/auth"
 				providers: S.signin.providers
+				if S.signin.prompt != _|_ {prompt: S.signin.prompt}
 				provider: {
 					...
 					for p in S.signin.providers if p == "bluesky" {
 						(p): {}
 					}
 					for p in S.signin.providers if p != "bluesky" {
-						if S.signin.broker != _|_ {
+						let own = [if S.signin.clients != _|_ if S.signin.clients[p] != _|_ if S.signin.clients[p].issuer != _|_ {true}, false][0]
+						if own {
+							(p): S.signin.clients[p] & {scope: "openid profile email"}
+						}
+						if S.signin.broker != _|_ if !own {
 							(p): {
 								...
 								issuer: S.signin.broker
@@ -62,7 +74,7 @@ package identity
 								params: "provider=\(p)"
 							}
 						}
-						if S.signin.broker == _|_ {
+						if S.signin.broker == _|_ if !own {
 							(p): S.signin.clients[p]
 						}
 					}

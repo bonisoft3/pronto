@@ -5115,6 +5115,8 @@ _pgrollDir: "services/database/pgroll"
 			  border: 1px solid transparent; border-radius: var(--r-md, 8px);
 			  background: var(--primary, CanvasText); color: var(--surface, Canvas); }
 			:where(.shell-consent-actions button[aria-pressed="true"])::before { content: "✓ " / ""; }
+			:where(.shell-consent-close) { min-width: 36px; min-height: 36px; padding: 0; display: grid; place-items: center; cursor: pointer;
+			  border: 0; border-radius: var(--r-md, 8px); background: transparent; color: inherit; font-size: 1.25rem; line-height: 1; }
 			:where(.shell-consent-open) { position: fixed; z-index: 2147483000; inset-inline-end: var(--sp-sm, 8px); inset-block-end: var(--sp-sm, 8px);
 			  width: 40px; height: 40px; padding: 0; display: grid; place-items: center; cursor: pointer;
 			  background: var(--surface, Canvas); color: var(--primary, CanvasText);
@@ -6882,7 +6884,10 @@ _pgrollDir: "services/database/pgroll"
 			_buttonsAt: [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.provider != _|_ for p, v in E.code.capabilities.auth.provider if v.credential != _|_ {"/auth/oidc/\(p)/button"}]
 			// The tag frame carries its own policy as its meta.
 			_tagFrameAt: [if E._envelope.googleTag.enabled {"/\(E._envelope.googleTag.frame)"}]
-			_fenced:     list.Concat([_unitPaths, _presenterAt, _buttonsAt, _tagFrameAt])
+			// Door hatches serve upstream responses that carry their own CSP (such as
+			// OAuth /start and /consent pages), so @terminal excludes their routes.
+			_doorPaths:  [for _, h in E.code.capabilities.hatches if h.door != _|_ for r in h.door._allRoutes for p in [r, "\(r)/*"] {p}]
+			_fenced:     list.Concat([_unitPaths, _presenterAt, _buttonsAt, _tagFrameAt, _doorPaths])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				// The ladder's pages answer with their own policy (E._ladderPolicy),
 				// so the terminal's names every path but theirs.
@@ -6897,6 +6902,7 @@ _pgrollDir: "services/database/pgroll"
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._doorPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._doorPolicy][0]
+				let doorHeaderPolicy = "\(policy); frame-ancestors 'none'"
 
 				// A realm's document is isolated by the seat's sandbox; loaded any
 				// other way it would run at this origin under no policy. So it
@@ -6913,7 +6919,7 @@ _pgrollDir: "services/database/pgroll"
 					"  @\(m) {\n    header_regexp Host ^\(s)\\.\n    path \(strings.Join(paths, " "))\n  }\n  header @\(m) Content-Security-Policy \"sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' {$ORIGIN}\"\n"
 				}], "")
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(subdomainRealms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(doorHeaderPolicy))\n  header @terminal X-Frame-Options \"DENY\"\n\(ladder)\(realms)\(subdomainRealms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			// A container hatch's door route, ahead of the platform's own
 			// routes' tail: dialed like every upstream, at its
@@ -6923,7 +6929,7 @@ _pgrollDir: "services/database/pgroll"
 				let matcher = "door_\(strings.Replace(hn, "-", "_", -1))"
 				let upstream = "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(hn, "-", "_", -1)))"
 				"""
-					  @\(matcher) path \(h.door.route) \(h.door.route)/*
+					  @\(matcher) path \(strings.Join([for r in h.door._allRoutes {"\(r) \(r)/*"}], " "))
 					  handle @\(matcher) {
 					    reverse_proxy {$\(upstream):\(hn):\(h.door.port)} {
 					      header_up dapr-app-id \(hn)

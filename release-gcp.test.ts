@@ -632,3 +632,62 @@ Deno.test("an existing database follows its configured tier, combining changes w
     ["--database-flags", "cloudsql.logical_decoding=on,max_connections=50"],
   ]);
 });
+
+Deno.test("extra databases and sidecars with secrets, dependencies, extra ports and HTTP probes", async () => {
+  const pushedBroker = `{${["caddy", "crud", "auth", "electric", "database", "hydra", "kratos", "consent"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const broker = `{
+    name: "broker", service: "ory-broker", project: "bonisoft3", domain: "id.bonisoft3.com", alwaysOn: true,
+    image: pushed: ${pushedBroker},
+    database: {tokenRoles: ["anon", "app_user", "service"], extra: ["kratos", "hydra"]},
+    electric: {cpu: 250, memory: "256Mi"},
+    sidecars: {
+      hydra: {
+        port: 4444, extraPorts: [4445], cpu: 500, memory: "256Mi",
+        dependsOn: ["cloud-sql-proxy"], healthPath: "/health/ready", healthPort: 4445,
+        secrets: {DSN: "broker-hydra-dsn", SECRETS_SYSTEM: "ory-broker-hydra-system"},
+        env: {DSN: "postgres://ignored", SERVE_PUBLIC_CORS_ENABLED: "false"},
+      },
+      kratos: {
+        port: 4433, extraPorts: [4434], cpu: 500, memory: "256Mi",
+        dependsOn: ["cloud-sql-proxy", "hydra"], healthPath: "/admin/health/ready", healthPort: 4434,
+        secrets: {DSN: "broker-kratos-dsn", SECRETS_COOKIE: "ory-broker-kratos-cookie"},
+      },
+      consent: {
+        port: 4456, cpu: 250, memory: "128Mi",
+        dependsOn: ["kratos", "hydra"], healthPath: "/health",
+        secrets: {BROKER_SECRET: "identity-broker-secret"},
+        env: {HYDRA_ADMIN: "http://hydra:4445", KRATOS_ADMIN: "http://kratos:4434"},
+      },
+    },
+  }`;
+  const plan = await built(broker, "plan");
+  assertEquals(plan.success, true, plan.stderr);
+  assertEquals(plan.value.names.extraDatabases, ["kratos", "hydra"]);
+  assertEquals(plan.value.names.extraDatabaseSecrets, { kratos: "broker-kratos-dsn", hydra: "broker-hydra-dsn" });
+  assertEquals(plan.value.names.extraDatabasePasswords, { kratos: "broker-kratos-password", hydra: "broker-hydra-password" });
+  assertEquals(plan.value.sidecarSecretKeys, ["identity-broker-secret", "ory-broker-hydra-system", "ory-broker-kratos-cookie"]);
+  assertEquals(plan.value.loopback["hydra:4445"], "127.0.0.1:4445");
+  assertEquals(plan.value.loopback["kratos:4434"], "127.0.0.1:4434");
+
+  const job = await built(broker, "job");
+  assertEquals(job.success, true, job.stderr);
+  const jobContainer = job.value.spec.template.spec.template.spec.containers[0];
+  assertEquals(jobContainer.env.find((e: { name: string }) => e.name === "EXTRA_DB_PASSWORD_KRATOS").valueFrom.secretKeyRef.name, "broker-kratos-password");
+  assertEquals(jobContainer.env.find((e: { name: string }) => e.name === "EXTRA_DB_PASSWORD_HYDRA").valueFrom.secretKeyRef.name, "broker-hydra-password");
+  assertStringIncludes(jobContainer.command[2], "NOSUPERUSER NOCREATEDB NOCREATEROLE");
+  assertStringIncludes(jobContainer.command[2], 'REVOKE CONNECT ON DATABASE');
+
+  const svc = await built(broker, "service");
+  assertEquals(svc.success, true, svc.stderr);
+  const containers = svc.value.spec.template.spec.containers;
+  assertEquals(containers.length, 8);
+  const deps = JSON.parse(svc.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.hydra, ["cloud-sql-proxy"]);
+  assertEquals(deps.kratos, ["cloud-sql-proxy", "hydra"]);
+  assertEquals(deps.consent, ["kratos", "hydra"]);
+  const hydra = containers.find((c: { name: string }) => c.name === "hydra");
+  assertEquals(hydra.startupProbe.httpGet, { path: "/health/ready", port: 4445 });
+  assertEquals(hydra.env.filter((e: { name: string }) => e.name === "DSN").length, 1);
+  assertEquals(hydra.env.find((e: { name: string }) => e.name === "DSN").valueFrom.secretKeyRef.name, "broker-hydra-dsn");
+  assert(!plan.value.serviceYaml.includes("postgres://"));
+});

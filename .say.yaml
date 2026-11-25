@@ -109,6 +109,9 @@ say:
           - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
           - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker"
           - do: "mise -C identity/hydra x -- sh -c 'export HYDRA_BIN=$(command -v hydra); cd ../.. && deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
+          # The Ory broker (identity/ory) end to end, every piece in Docker.
+          - do: "deno test --no-config --allow-net identity/ory/consent_test.ts identity/ory/start_test.ts identity/register_test.ts"
+          - do: "deno test --config deno.json --allow-net=localhost:4433,localhost:4434,localhost:4444,localhost:4445,localhost:4455,localhost:4456,localhost:8025 --allow-read --allow-run=docker --allow-env identity/ory/broker.integration.test.ts"
       outcome-obligations:
         priority: -1
         cmds:

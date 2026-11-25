@@ -1,7 +1,7 @@
 # GCP releases use the native Kubernetes stack when GKE is declared;
 # otherwise they run Cloud Run beside Cloud SQL.
 
-use ../k8s/release.nu [resolve-app PROGRAM_PROVIDERS]
+use ../k8s/release.nu [resolve-app PROGRAM_PROVIDERS register-clients]
 use ../release-schema.nu [fresh-schema-runtime]
 use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
@@ -109,6 +109,34 @@ def sql-drift [live: record, plan: record]: nothing -> list<string> {
 	] | flatten
 }
 
+# Cloud SQL instance creation through the Admin REST API: older gcloud SDKs
+# reject POSTGRES_18 in client-side flag parsing even though Cloud SQL serves it.
+def create-sql-instance [name: string, project: string, plan: record, root_password: string] {
+	let api = $"https://sqladmin.googleapis.com/v1/projects/($project)/instances"
+	let auth = [Authorization $"Bearer (gc auth print-access-token | str trim)"]
+	let flags = ($plan.sqlFlags | split row "," | each {|pair|
+		let kv = ($pair | split row "=")
+		{name: $kv.0, value: $kv.1}
+	})
+	let res = (http post --full --allow-errors --headers $auth --content-type application/json $api {
+		name: $name
+		region: $plan.region
+		databaseVersion: "POSTGRES_18"
+		rootPassword: $root_password
+		settings: {
+			tier: $plan.sqlTier
+			edition: "ENTERPRISE"
+			dataDiskSizeGb: "10"
+			dataDiskType: "PD_HDD"
+			databaseFlags: $flags
+		}
+	})
+	if $res.status >= 300 {
+		error make {msg: $"Cloud SQL create ($name) answered ($res.status): ($res.body | to json)"}
+	}
+	gc sql operations wait $res.body.name --project $project --timeout unlimited | ignore
+}
+
 def set-up-project [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
@@ -143,7 +171,7 @@ def set-up-project [plan: record] {
 		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
 			gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
 		}
-		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if (scraped $plan) { ["roles/monitoring.metricWriter"] } else { [] })
+		let roles = ["roles/cloudsql.client"] | append (if (scraped $plan) { ["roles/monitoring.metricWriter"] } else { [] })
 		for role in $roles {
 			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
 		}
@@ -166,7 +194,7 @@ def set-up-project [plan: record] {
 
 	if not (exists sql instances describe $n.instance --project $p) {
 		print $"gcp: (stamp) creating Cloud SQL ($n.instance) \(several minutes\)"
-		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
+		create-sql-instance $n.instance $p $plan $pg
 	}
 	let live = (gc sql instances describe $n.instance --project $p --format json | from json)
 	let patch = (sql-drift $live $plan)
@@ -179,6 +207,21 @@ def set-up-project [plan: record] {
 	if not (exists sql databases describe $n.database --instance $n.instance --project $p) {
 		gc sql databases create $n.database --instance $n.instance --project $p | ignore
 	}
+	for db in ($n.extraDatabases? | default []) {
+		if not (exists sql databases describe $db --instance $n.instance --project $p) {
+			gc sql databases create $db --instance $n.instance --project $p | ignore
+		}
+		let db_pw = (ensure-secret ($n.extraDatabasePasswords | get $db) $p)
+		ensure-secret ($n.extraDatabaseSecrets | get $db) $p $"postgres://($db):($db_pw)@127.0.0.1:5432/($db)?sslmode=disable" | ignore
+	}
+}
+
+# Bind secretAccessor on each secret this service or job mounts rather than project-wide.
+def bind-secrets [secrets: list<string>, sa: string, project: string] {
+	let member = $"serviceAccount:($sa)"
+	$secrets | uniq | par-each {|s|
+		gc secrets add-iam-policy-binding $s --project $project --member $member --role roles/secretmanager.secretAccessor --quiet | ignore
+	} | ignore
 }
 
 # What copies a tested preview's images into the release's registry: Google's
@@ -323,10 +366,12 @@ def empty-preview [plan: record] {
 	# Cloud SQL answers a database on a missing instance with a 403, not a
 	# 404: an app's first preview has no instance yet.
 	if not (exists sql instances describe $n.instance --project $plan.project) { return }
-	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
-		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
-		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
-		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
+	for db in ([$n.database] | append ($n.extraDatabases? | default [])) {
+		if (exists sql databases describe $db --instance $n.instance --project $plan.project) {
+			print $"gcp: (stamp) emptying the preview ($plan.preview): dropping database ($db) on ($n.instance)"
+			gc sql databases delete $db --instance $n.instance --project $plan.project | ignore
+			gc sql databases create $db --instance $n.instance --project $plan.project | ignore
+		}
 	}
 }
 
@@ -337,7 +382,7 @@ def delete-preview [plan: record] {
 	let n = $plan.names
 	stop-preview $plan
 	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
-	for secret in ($n.secrets | values | append (setup-marker $plan)) {
+	for secret in (($n.secrets | values) | append ($n.extraDatabaseSecrets? | default {} | values) | append ($n.extraDatabasePasswords? | default {} | values) | append (setup-marker $plan)) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
 	}
 	print $"gcp: (stamp) preview ($plan.preview) removed"
@@ -365,7 +410,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		return {}
 	}
 
-	let gcp_meta = (^cue export --expression '{name: GCP.name, oidc: [for k, _ in GCP.auth.oidc {k}], sidecars: {for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}}' --out json $app_info.cue_path | from json)
+	let gcp_meta = (^cue export --expression '{name: GCP.name, oidc: GCP.auth.oidc, sidecars: {for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}}' --out json $app_info.cue_path | from json)
 	let name = ($gcp_meta.name | str trim)
 	# The cluster's migrate step runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $services)
@@ -407,8 +452,14 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let auth_env = if ($compose.services.auth.environment.OIDC_PROVIDERS? | default "" | is-not-empty) or ($providers | is-empty) { $compose.services.auth.environment } else {
 		$compose.services.auth.environment | upsert OIDC_PROVIDERS ($providers | str join ",")
 	}
-	let fixed = $gcp_meta.oidc
-	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
+	let fixed_map = $gcp_meta.oidc
+	for e in ($fixed_map | transpose k v) {
+		if $e.v == "origin" {
+			error make {msg: $"GCP.auth.oidc cannot fix ($e.k) to 'origin'; declare it in program.cue so release@gcp can register a client_id"}
+		}
+	}
+	let fixed = ($fixed_map | columns)
+	let settings = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let auth_own = ($auth_env | transpose key value | where {|e| $e.key starts-with "AUTH_" } | reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let number = if $snapshot { "000000000000" } else { (gc projects describe $plan0.project --format "value(projectNumber)" | str trim) }
@@ -424,6 +475,11 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# others' addresses for one apart, which the service's address names. A key
 	# release.cue sets is the release's, over compose's, as auth.oidc's are.
 	let run_host = $"($plan0.service)-($number).($plan0.region).run.app"
+	# Registered for where readers are, as the plan's ORIGIN is: its domain, or its address.
+	let oidc = if $snapshot { $settings } else {
+		let registered = (register-clients ($settings | merge $fixed_map) $"https://($plan0.domain? | default $run_host)" $app_info.dir)
+		$fixed | reduce -f $registered {|k, acc| $acc | reject -o $k }
+	}
 	let peers = (plan-with $app_info.cue_path ({GCP: {runHost: $run_host}} | merge deep $base)).peers
 	let own = $gcp_meta.sidecars
 	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
@@ -444,7 +500,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 
 	let p = $plan.project
 	let r = $plan.region
-	for key in $plan.oidcSecretKeys {
+	for key in ($plan.oidcSecretKeys | append ($plan.sidecarSecretKeys? | default []) | uniq) {
 		if not (exists secrets describe $key --project $p) {
 			error make {msg: $"secret ($key) is missing: create it with `gcloud secrets create ($key) --project ($p) --data-file=-`"}
 		}
@@ -478,6 +534,20 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
+	if ($plan.preview? | is-empty) {
+		let base_secrets = ($plan.names.secrets | reject -o AIRLOCK_SEAL_KEY | values)
+		let mounted = (
+			$base_secrets
+			| append (if $plan.airlockSeal { [$plan.names.secrets.AIRLOCK_SEAL_KEY] } else { [] })
+			| append ($plan.names.extraDatabaseSecrets? | default {} | values)
+			| append ($plan.names.extraDatabasePasswords? | default {} | values)
+			| append $plan.oidcSecretKeys
+			| append ($plan.sidecarSecretKeys? | default [])
+			| append (if ($plan.scrapeConfig | is-not-empty) { [$plan.names.scrapeConfig] } else { [] })
+			| append ($plan.sidecarScrapeConfigs | columns)
+		)
+		bind-secrets $mounted $plan.names.serviceAccount $p
+	}
 	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
 	# The migrate job an earlier release ran apart, which this one's job does.
 	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }

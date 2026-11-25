@@ -94,16 +94,23 @@ export function snapshotSql(all: Table[], selected: string[] = []): string {
 
 type Metric = { name: string; labels: Record<string, string>; value: number }
 
-type Input = { generate?: { batch_size?: number }; redis_streams?: { url?: string }; broker?: { inputs: Input[] } }
+type Input = {
+  generate?: { batch_size?: number }
+  http_server?: Record<string, unknown>
+  redis_streams?: { url?: string }
+  broker?: { inputs: Input[] }
+  sequence?: { inputs: Input[] }
+}
 type Completion = 'single' | 'bus'
 type Bus = { url: string; aliases: ReadonlySet<string> }
 
 export function singleMessageInput(input: Input): boolean {
-  return input.generate !== undefined && (input.generate.batch_size ?? 1) === 1
+  return (input.generate !== undefined && (input.generate.batch_size ?? 1) === 1) || input.http_server !== undefined
 }
 
 export function inputCompletions(input: Input, stream: string, bus?: Bus, at = 'root.input'): Map<string, Completion> {
   if (input.broker) return new Map(input.broker.inputs.flatMap((child, i) => [...inputCompletions(child, stream, bus, `${at}.broker.inputs.${i}`)]))
+  if (input.sequence) return new Map(input.sequence.inputs.flatMap((child) => [...inputCompletions(child, stream, bus, `${at}.sequence`)]))
   if (singleMessageInput(input)) return new Map([[`${stream}:${at}`, 'single']])
   if (input.redis_streams?.url && bus) {
     const url = new URL(input.redis_streams.url.replaceAll('${REDIS_URL}', bus.url))

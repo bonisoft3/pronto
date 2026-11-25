@@ -81,38 +81,43 @@ No code of `identity/` runs in the app, and the terminal never sees the
 broker's settings. Adding it is the
 [pronto-identity skill](../skills/pronto-identity/SKILL.md).
 
-- **Tenants.** A tenant is an app's origin, which is also its client id: a
-  public client with PKCE and one exact redirect per provider,
-  `<origin>/auth/oidc/<provider>/callback`. The subject is pairwise (a keyed
-  hash of tenant, provider and the provider's subject), so one person is a
-  stranger to every other app. A tenant that publishes the HMAC TXT record
-  `identity/serve.sh txt` mints at `_pronto-identity.<host>` skips the
-  broker's confirmation page and receives the requested `profile` and verified
-  `email`; any other sees the page naming its origin first and receives `sub`
-  alone. `identity/broker/core.ts` decides all of it apart from the network.
-- **On Ory Hydra.** Hydra issues, signs and redeems every code and ID token.
-  The front (`identity/hydra/front.ts`) keeps what Hydra leaves to a login
-  app: the leg through the social provider and the pairwise subject. It
-  registers a tenant on its first sign-in and passes only Hydra's public
-  routes; the admin API is never public. Hand-written protocol code was the
-  alternative: its own code store in memory and its own token signing, where
-  Hydra holds both in a store that outlives a restart.
+- **Clients and trust.** Every released app registers its own pairwise public PKCE
+  client via Hydra Dynamic Client Registration ([register.ts](../identity/register.ts))
+  with one exact redirect per provider (`<origin>/auth/oidc/<provider>/callback`),
+  sending sanitized `client_name` and optional same-origin `logo_uri`
+  ([brand.ts](../identity/brand.ts); open DCR does not accept `metadata`).
+  Because subjects are pairwise (`supported_types: [pairwise]` and `sector_identifier_uri`
+  refused at `/consent`), no two apps can correlate a person. A tenant whose origin
+  holds a valid `_pronto-identity.<host>` TXT record with only exact app callback URLs
+  (or an operator client with `skip_consent`) skips the broker's confirmation screen,
+  receives requested `profile` and verified `email` claims, and gets custom visuals
+  from operator-managed Electric `AppBrand` rows (plus `skip_consent` client metadata);
+  untrusted clients prompt first via CSRF-protected `POST /consent` and receive only `sub`.
+- **On Ory Hydra and Kratos (`plugins/broker`).** Hydra issues, signs, and
+  redeems every code and token (`https://id.bonisoft3.com`, issuer with no trailing
+  slash) and advertises DCR via `webfinger.oidc_discovery.client_registration_url`.
+  Kratos handles identity credentials and verification codes (`code` passwordless +
+  recovery + verification; Google OIDC; passwords and unproven profile changes off)
+  behind custom pronto shell screens (`broker-ui.js` talking same-origin Kratos JSON
+  APIs), while `consent.ts` bridges `/start`, `/consent`, and `/broker-api/{brand,logo}`.
+  It runs as an 8-container Cloud Run service (`ory-broker`: `caddy`, `crud`, `auth`,
+  `electric`, `cloud-sql-proxy`, `hydra`, `kratos`, `consent`) backed by Cloud SQL
+  `broker-db` (PostgreSQL 18, `kratos` + `hydra` + `broker` DBs), deployed via
+  `./plugins/sayt/sayt.sh -d ./plugins/broker release@gcp --no-gate`.
 - **Local stacks sign in by what needs no one else.** An app's `launch` and
   `integrate` run no broker and turn on no provider (`OIDC_PROVIDERS` is
   the deployment's, empty there): a person comes in as a guest or with a
   passkey. A release turns on the providers its program offers, and the
   terminal draws only those the auth service names (`GET /auth/oidc`), so a
   way in shows where it works and nowhere else. Provider sign-in is tested
-  against the broker in the auth service's and the broker's own suites, and
-  end to end by an app's `verify` against its release. A local run against
-  the release broker would need it to trust a `localhost` app, which it
-  does not.
+  against the broker in the auth service's and `plugins/pronto/identity/ory/compose.yaml`'s
+  own suites, and end to end by an app's `verify` against its release.
 
 | Where | How | Broker |
 | --- | --- | --- |
 | an app's `launch` / `integrate` | none | none: guest and passkey |
-| the operator's machine | `identity/serve.sh` | Hydra on SQLite |
-| Cloud Run / k8s / Cloudflare | `identity/serve.sh release` (operator), `release@gcp` / `release@k8s` / `release@cloudflare` (apps) | Hydra on PostgreSQL, admin API private; apps connect as the `origin` public client or a direct `OIDC_<NAME>_CLIENT_ID` |
+| Ory broker CI / local suite | `docker compose -f plugins/pronto/identity/ory/compose.yaml` | Hydra + Kratos + Mailpit (`signin` tests) |
+| Cloud Run / k8s / Cloudflare | `./plugins/sayt/sayt.sh -d ./plugins/broker release@gcp --no-gate` (broker), `release@gcp` / `release@k8s` / `release@cloudflare` (apps) | Pronto app `plugins/broker` (`ory-broker` on `broker-db`), private admin APIs; apps register pairwise clients via DCR |
 | `pages` | refused at compile time (`_authTargetRefusal`) | the browser tier runs guest sessions; providers need edge, container or cloud |
 
 **Native hosts** (the Android and iOS apps) sign in through the same
@@ -162,11 +167,12 @@ where the browser has it), which knows the person and so reads "Continue as
   required sign-in's screen, framed afresh each time the panel opens; an
   app's own `data-auth-provider="google"` control gives way to it when
   pressed.
-- **The prompt** ("One Tap"), the browser's own account chooser, is offered
-  once a page not signed in sees a person's first key or press outside the
-  panel, and only where the browser draws it (FedCM). A crawler, a
-  prerender, or a visit no one touches loads nothing of Google's and costs
-  the auth service nothing; the browser's own cooldown spaces it after a
+- **The prompt** ("One Tap"), the browser's own account chooser, is opt-in
+  (`prompt: true` on `identity.#Signin` / `capabilities.auth`, off by default).
+  When enabled, a page not signed in offers it once after a person's first key
+  or press outside the panel, and only where the browser draws it (FedCM). A
+  crawler, a prerender, or a visit no one touches loads nothing of Google's and
+  costs the auth service nothing; the browser's own cooldown spaces it after a
   dismissal, and signing in another way withdraws it.
 - **The token** the button hands the page signs the device in only with the
   secret its nonce was made from, which only this browser's cookie holds
@@ -225,7 +231,14 @@ release refuses a way the release mode cannot serve.
 modes that run it, where Ory Kratos already holds them — passwords, one-time
 codes, recovery, rate limits, the sending — so mecha's auth service gains no
 second implementation of any of them. Without the broker an app offers guest,
-passkey and its identity providers, as today.
+passkey and its identity providers, as today. The broker is Ory's own pieces,
+unmodified, reached by an app as one OpenID Connect provider, `email`
+([[decisions/2026-11-24-ory-broker|the Ory broker]]): it runs in CI against an
+end-to-end test of emailed codes and is deployed at `https://id.bonisoft3.com`
+via `plugins/broker`, taking custom visuals only from operator-controlled
+`AppBrand` rows or first-party `skip_consent` clients; passwords wait for a
+flow that adds one only after the address is proven.
+Kratos reports `amr` in its own words (`code`, `password`, `oidc`).
 
 | Method (pronto's name) | Channels | `amr` (standard) | Notes |
 | --- | --- | --- | --- |

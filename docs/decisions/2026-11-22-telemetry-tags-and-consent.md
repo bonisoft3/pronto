@@ -138,14 +138,8 @@ little by it: a reader who ignores the bar is simply not measured. An app that h
 for itself states it as `mode: "none"` with an explicit `none.advertising`, so asking nobody
 is written down where a reviewer reads it.
 
-*The first view, and nothing heavier.* The bar appears on the first view, compact and
-non-blocking. Ignoring it is a refusal, and it stays until it is answered. A Reject is final
-until the reader reopens the choice, and Global Privacy Control is a Reject that shows no bar,
-unless the reader explicitly accepted: a standing browser default yields to an answer given on
-the site, as California's rules allow.
-A first-interaction trigger, asking at the first gesture that would send something rather
-than on arrival, is planned through the identity mechanism. So is an
-`{op: "identity", consent: …}` machine step that lets a flow ask at its own moment
+*Delayed first-interaction prompt and tab dismissal.* Advertising starts denied before any interaction, and the bar becomes eligible after the first trusted interaction with a short delay (2.5 s) rather than blocking initial paint; dismissing with `×` or `Escape` suppresses it for the browser tab (`sessionStorage`), while the corner shield reopens it anytime. A Reject is final until the reader reopens the choice, and Global Privacy Control is a Reject that shows no bar, unless the reader explicitly accepted: a standing browser default yields to an answer given on the site, as California's rules allow.
+An `{op: "identity", consent: …}` machine step that lets a flow ask at its own moment remains planned through the identity mechanism
 ([PR #2510](https://github.com/bonisoft3/pronto/pull/2510#issuecomment-7089537089)).
 
 *Native discloses at install.* An app store asks at install time, through structured data:

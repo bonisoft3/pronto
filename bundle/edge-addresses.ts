@@ -90,7 +90,7 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   const realms = Object.values(cfg.units ?? {})
     .filter((unit) => unit.isolation === 'realm').flatMap((unit) => unit.files)
   await Deno.writeTextFile(path.join(out, '_headers'), [
-    `/\n  Content-Security-Policy: ${policy}\n`,
+    `/\n  Content-Security-Policy: ${policy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`,
     ...(cfg.presenter ? [`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${cfg.presenter.policy}\n`] : []),
     // Both a document's addresses: the Worker serves its .html one from the bare.
     ...realms.flatMap((file) => [...new Set([file, extensionless(file)])])

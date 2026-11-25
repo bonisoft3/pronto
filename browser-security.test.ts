@@ -10,8 +10,14 @@ app: capabilities: resources: {
 `);
   const caddy = files["docker/Caddyfile"].text;
   assertStringIncludes(files["shell/index.html"].text, 'http-equiv="Content-Security-Policy"');
+  assertEquals(metaPolicy(files["shell/index.html"].text).includes("frame-ancestors"), false);
   assertStringIncludes(caddy, "require-trusted-types-for 'script'");
   assertStringIncludes(caddy, "frame-src 'self' https://www.openstreetmap.org;");
+  assertStringIncludes(caddy, "frame-ancestors 'none'");
+  assertStringIncludes(caddy, 'header @terminal X-Frame-Options "DENY"');
+  assertStringIncludes(caddy, 'request>uri regexp "\\?.*" ""');
+  assertStringIncludes(caddy, 'request>headers>Referer regexp "\\?.*" ""');
+  assertStringIncludes(caddy, 'resp_headers>Location regexp "\\?.*" ""');
   assertStringIncludes(caddy, "img-src 'self' data: blob: https:;");
   assertStringIncludes(caddy, "connect-src 'self';");
   assertStringIncludes(caddy, "font-src 'self' data:;");

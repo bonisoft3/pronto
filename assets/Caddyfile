@@ -90,7 +90,16 @@
   # gateway's), and every upstream is sent the span's own; the access log names
   # its traceID. The exporter reads the standard OTEL_* environment.
   import tracing-{$PRONTO_TRACING:off}
-  log
+  log {
+    format filter {
+      wrap json
+      fields {
+        request>uri regexp "\?.*" ""
+        request>headers>Referer regexp "\?.*" ""
+        resp_headers>Location regexp "\?.*" ""
+      }
+    }
+  }
   # The origin every absolute address the app answers is spelled against,
   # read by a template as `http.vars.origin`. The deployment's, never the
   # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").

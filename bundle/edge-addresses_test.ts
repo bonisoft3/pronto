@@ -97,7 +97,7 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
     assert.ok(!headers.includes('Cache-Control'))
     assert.ok(!headers.includes('/shell/*\n'))
-    assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
+    assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
     assert.deepEqual(f.hints.routes[0].screens, ['other'])
     // The Worker binds an optional segment only to its entries' values (routeAt), so the hints carry them.

@@ -519,6 +519,17 @@ export def auth-provider-environment [environment: record, providers: list<strin
 	}
 }
 
+# The release's own client of each issuer that registers its clients, in
+# place of the origin (../identity/register.ts): the release's settings with
+# the registered clients' ids.
+export def register-clients [settings: record, origin: string, app_dir?: string]: nothing -> record {
+	let dir = if ($app_dir | is-not-empty) { $app_dir } else if ("DESIGN.md" | path exists) { "." } else { "" }
+	let app_args = if ($dir | is-not-empty) { [--app $dir] } else { [] }
+	let registered = ($settings | to json | deno run --no-config --allow-net --allow-read ($k8s_dir | path join .. identity register.ts) $origin ...$app_args | complete)
+	if $registered.exit_code != 0 { error make { msg: $"registering ($origin)'s sign-in clients: ($registered.stderr | str trim)" } }
+	$registered.stdout | from json
+}
+
 export def opaque-secret [name: string, namespace: string, values: record, --labels: record = {}]: nothing -> record {
 	{
 		apiVersion: "v1", kind: "Secret"
@@ -1056,7 +1067,8 @@ export def main [
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
 	let providers = (do { cd $app_source_dir; ^cue export . -e $PROGRAM_PROVIDERS --out json } | from json)
-	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $providers)
+	let provided = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $providers)
+	let oidc = ($provided | update oidc (register-clients $provided.oidc $"https://($gateway_host)" $app_source_dir))
 	# An issuer the release trusts, TRUSTED_JWKS, for the roles the program
 	# declares: its public keys are checked here, before anything is applied,
 	# and digested so a change of keys rolls crud. Unset, crud verifies the

@@ -1,0 +1,148 @@
+# The broker on a developer's machine, every piece Ory's own and unmodified:
+# Kratos (who a person is, and how they prove it), Hydra (the OpenID Connect
+# provider apps sign in through), Ory's UI (the pages), on one PostgreSQL, with
+# Mailpit catching the courier's mail; consent alone is the broker's own step
+# (consent.ts, start.ts). Every port answers on localhost alone;
+# the issuer is http://localhost:4444, which Hydra admits only in --dev.
+#   docker compose -f plugins/pronto/identity/ory/compose.yaml up -d --wait
+name: pronto-broker
+x-dsn: &dsn "postgres://broker:broker@postgres:5432"
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+    volumes:
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "broker", "-d", "hydra"]
+      interval: 1s
+      retries: 60
+  mailpit:
+    image: axllent/mailpit:v1.27.0@sha256:fb84cfb1c3a33007cfdee8ba5a77b8c6c894de5b1a368372ddc5c965cf5c0b6d
+    ports:
+      - "127.0.0.1:8025:8025"
+  kratos-migrate:
+    image: oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643
+    command: migrate sql -e --yes
+    environment:
+      DSN: "postgres://broker:broker@postgres:5432/kratos?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  kratos:
+    image: oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643
+    command: serve --config /etc/ory/kratos.yml --watch-courier
+    volumes:
+      - ./kratos.yml:/etc/ory/kratos.yml:ro
+      - ./identity.schema.json:/etc/ory/identity.schema.json:ro
+    environment:
+      DSN: "postgres://broker:broker@postgres:5432/kratos?sslmode=disable"
+      SERVE_PUBLIC_BASE_URL: http://localhost:4433/
+      SERVE_ADMIN_BASE_URL: http://kratos:4434/
+      SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: http://localhost:4455/
+      SELFSERVICE_ALLOWED_RETURN_URLS: http://localhost:4455/
+      SELFSERVICE_FLOWS_ERROR_UI_URL: http://localhost:4455/error
+      SELFSERVICE_FLOWS_LOGIN_UI_URL: http://localhost:4455/login
+      SELFSERVICE_FLOWS_REGISTRATION_UI_URL: http://localhost:4455/registration
+      SELFSERVICE_FLOWS_SETTINGS_UI_URL: http://localhost:4455/settings
+      SELFSERVICE_FLOWS_RECOVERY_UI_URL: http://localhost:4455/recovery
+      SELFSERVICE_FLOWS_VERIFICATION_UI_URL: http://localhost:4455/verification
+      OAUTH2_PROVIDER_URL: http://hydra:4445
+      COURIER_SMTP_CONNECTION_URI: smtp://mailpit:1025/?disable_starttls=true
+      COURIER_SMTP_FROM_ADDRESS: broker@localhost
+      SECRETS_COOKIE: local-cookie-secret-for-a-machine-only
+      SECRETS_CIPHER: 32-local-cipher-secret-machine--
+    ports:
+      - "127.0.0.1:4433:4433"
+      - "127.0.0.1:4434:4434"
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4434/admin/health/ready"]
+      interval: 1s
+      retries: 60
+  hydra-migrate:
+    image: oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9
+    command: migrate sql up -e --yes
+    environment:
+      DSN: "postgres://broker:broker@postgres:5432/hydra?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  hydra:
+    image: oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9
+    command: serve all --config /etc/ory/hydra.yml --dev
+    volumes:
+      - ./hydra.yml:/etc/ory/hydra.yml:ro
+    environment:
+      DSN: "postgres://broker:broker@postgres:5432/hydra?sslmode=disable"
+      URLS_SELF_ISSUER: http://localhost:4444
+      URLS_LOGIN: http://localhost:4456/start
+      URLS_CONSENT: http://localhost:4456/consent
+      URLS_ERROR: http://localhost:4455/error
+      SECRETS_SYSTEM: local-system-secret-for-a-machine
+      OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT: local-pairwise-salt-for-a-machine
+    ports:
+      - "127.0.0.1:4444:4444"
+      - "127.0.0.1:4445:4445"
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4445/health/ready"]
+      interval: 1s
+      retries: 60
+  # The broker's own consent step (consent.ts): claims from the identity the
+  # login was accepted for, never the browser's current session.
+  consent:
+    image: denoland/deno:distroless-2.9.7@sha256:16583ef81ce73d6fdf806174fbda68bf4c57e914659ffe6b1c2b600ac2327962
+    # Unscoped net: Deno asks no narrower grant of a TXT lookup.
+    command: ["run", "--allow-net", "--allow-env=HYDRA_ADMIN,KRATOS_ADMIN,KRATOS_BROWSER,KRATOS_PROVIDERS,TRUST_ISSUER,PUBLIC_ORIGIN,BROKER_SECRET,PORT", "/app/ory/consent.ts"]
+    volumes:
+      - ./consent.ts:/app/ory/consent.ts:ro
+      - ./start.ts:/app/ory/start.ts:ro
+      - ../broker:/app/broker:ro
+      - ../brand.ts:/app/brand.ts:ro
+      - ../oidc.ts:/app/oidc.ts:ro
+    environment:
+      HYDRA_ADMIN: http://hydra:4445
+      KRATOS_ADMIN: http://kratos:4434
+      KRATOS_BROWSER: http://localhost:4433
+      TRUST_ISSUER: http://localhost:4444
+      BROKER_SECRET: a-local-broker-secret-of-at-least-32-chars
+      PORT: "4456"
+    ports:
+      - "127.0.0.1:4456:4456"
+    depends_on:
+      kratos:
+        condition: service_healthy
+      hydra:
+        condition: service_healthy
+  ui:
+    image: oryd/kratos-selfservice-ui-node:v26.2.0@sha256:46a7bac1ad0c67c692b37d0380613fd4618fd751afac2c5314aa8d3ae77ef1f0
+    environment:
+      PORT: "4455"
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_BROWSER_URL: http://localhost:4433
+      KRATOS_ADMIN_URL: http://kratos:4434
+      # No HYDRA_ADMIN_URL: it would turn on the UI's own consent route, which
+      # names the person from the browser's session; consent.ts is the only one.
+      COOKIE_SECRET: local-ui-cookie-secret-for-a-machine
+      CSRF_COOKIE_NAME: broker_csrf
+      CSRF_COOKIE_SECRET: local-ui-csrf-secret-for-a-machine
+    ports:
+      - "127.0.0.1:4455:4455"
+    depends_on:
+      kratos:
+        condition: service_healthy
+      hydra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4455/health/ready"]
+      interval: 1s
+      retries: 60

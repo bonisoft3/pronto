@@ -1,0 +1,49 @@
+version: v26.2.0
+# Kratos as the broker runs it: who a person is (an address), and the ways
+# they prove it — an emailed code, a social provider where one is configured. Hydra issues the tokens; Kratos accepts Hydra's login challenge
+# itself (oauth2_provider), so Ory's UI only draws the pages. Hosts, the
+# database and every secret come from the environment (compose.yaml for a
+# machine, a deployment's own for one serving apps).
+selfservice:
+  methods:
+    code:
+      enabled: true
+      config:
+        lifespan: 15m
+      passwordless_enabled: true
+    # Off until a password is added only after the address is proven: a
+    # password set at sign-up survives the address's owner later proving it
+    # by a code, so two people would share the account
+    # (docs/decisions/2026-11-24-ory-broker.md).
+    password:
+      enabled: false
+    oidc:
+      enabled: false
+    # Off until a change proves the new address before keeping it: an address
+    # changed unproven is one its owner may later sign in by a code to, so
+    # two people would share the account.
+    profile:
+      enabled: false
+  flows:
+    login:
+      lifespan: 15m
+    registration:
+      lifespan: 15m
+      after:
+        code:
+          hooks:
+            - hook: session
+    recovery:
+      enabled: true
+      use: code
+    verification:
+      enabled: true
+      use: code
+identity:
+  default_schema_id: person
+  schemas:
+    - id: person
+      url: file:///etc/ory/identity.schema.json
+log:
+  level: warning
+  format: json

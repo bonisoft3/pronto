@@ -52,6 +52,20 @@ Deno.test("with no broker, each provider is the app's own client, and Google's o
   assert(!apple.success, "credential on apple is refused");
 });
 
+Deno.test("a client naming its own issuer is that issuer's, beside a broker standing in for the rest", async () => {
+  // The Ory broker's `email`: an issuer and a client the operator registered
+  // for this app (docs/decisions/2026-11-24-ory-broker.md).
+  const both = `${BROKER}, providers: ["google", "email"], clients: email: {issuer: "https://auth.example.com/", client: "c-123"}`;
+  const env = await exported(signin(both), "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(env.value.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-https://id.example.com}");
+  // As the issuer names itself, which discovery compares exactly.
+  assertEquals(env.value.OIDC_EMAIL_ISSUER, "${OIDC_EMAIL_ISSUER:-https://auth.example.com/}");
+  assertEquals(env.value.OIDC_EMAIL_CLIENT_ID, "${OIDC_EMAIL_CLIENT_ID:-c-123}");
+  assertEquals(env.value.OIDC_EMAIL_SCOPE, "${OIDC_EMAIL_SCOPE:-openid profile email}");
+  assertEquals(env.value.OIDC_EMAIL_AUTHORIZE_PARAMS, "${OIDC_EMAIL_AUTHORIZE_PARAMS:-}");
+});
+
 Deno.test("the app's cluster runs no broker of its own", async () => {
   const targets = await exported(signin(BROKER), "_cluster.surface.targets");
   assertEquals(targets.success, true, targets.stderr);
