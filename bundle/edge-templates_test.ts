@@ -98,3 +98,19 @@ Deno.test('a realm document is served at its own address, where assets would red
   const onSub = await subAssets.fetch(new Request('https://payments.app.example/shell/units/pay/index.html'))
   assert.equal(onSub.headers.get('content-security-policy'), "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' https://app.example")
 })
+
+Deno.test('addressed origin templates preserve their hashed bytes across hosts', async () => {
+  for (const [name, contentType] of [['robots.txt', 'text/plain'], ['sitemap.xml', 'application/xml']]) {
+    const source = prepareEdgeTemplate(`${declaration}\n${name}: {{$o}}/regras`)
+    const bytes = new TextEncoder().encode(source)
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('')
+    const asset = originAssets({ fetch: () => Promise.resolve(new Response(bytes, { headers: { 'content-type': contentType, etag: '"source"', 'cache-control': 'public, max-age=31536000, immutable' } })) })
+    for (const host of ['https://app.example', 'https://preview.example']) {
+      const response = await asset.fetch(new Request(`${host}/_immutable-${hash}-${name}`))
+      assert.equal(await response.text(), source, 'origin binding must not mutate a content-addressed response')
+      assert.equal(response.headers.get('etag'), '"source"')
+      const logical = await asset.fetch(new Request(`${host}/${name}`))
+      assert.equal(await logical.text(), `${name}: ${host}/regras`)
+    }
+  }
+})

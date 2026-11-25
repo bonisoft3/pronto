@@ -56,6 +56,8 @@ export function originAssets(assets: Assets, realmDocuments: string[] = [], subd
         response = new Response(response.body, response)
         response.headers.set('content-security-policy', `sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' ${parentOrigin}`)
       }
+      // Origin binding belongs to logical URLs; an addressed response owes its exact bytes.
+      if (/\/_immutable-[a-f0-9]{64}-[^/]+$/.test(url.pathname)) return response
       if (response.status !== 200 || !/^(text\/(html|plain|xml)|application\/xml)(;|$)/i.test(response.headers.get('content-type') ?? '')) return response
       if (request.method === 'HEAD') {
         const result = new Response(null, response)

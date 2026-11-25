@@ -360,6 +360,12 @@ Cloudflare can turn eligible `Link` headers into HTTP 103 when the zone's
 is enabled. Emitting those headers does not establish that 103 is enabled on
 the deployed hostname; verify the interim response on the wire.
 
+Cloudflare binds the request origin only at logical document, `robots.txt` and
+`sitemap.xml` URLs. An `_immutable-<sha256>-...` URL returns its stored bytes,
+including any unbound template directive: substituting the origin there would
+invalidate the content address. Fetch the logical URL for an origin-bound
+representation.
+
 For a subsequent deployment, preserve the previous `public/` outside the new
 output tree and pass `edge.ts --assets-from <previous-public-dir>`. The build
 verifies and retains its immutable files, including earlier retained releases,
