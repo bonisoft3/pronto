@@ -3289,6 +3289,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				hosts: [if S.code.meta.googleTag != _|_ {S.code.meta.googleTag.hosts}, []][0]
 			}).terminal
 		}
+		if S.code.meta.googleTag != _|_ if S.code.meta.googleTag.conversions != _|_ {
+			conversions: {for name, label in S.code.meta.googleTag.conversions {(name): "\(S.code.meta.googleTag.id)/\(label)"}}
+		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
 		// resolved patterns on each route are what survives them.

@@ -1,7 +1,7 @@
 ---
 type: decision
 title: Telemetry, tags and consent
-description: Proposed, partially built (the tag frame and the consent bar) — one first-party collection path for product events and operational telemetry, routed by Vector to stores that differ in retention (DuckLake for product events, VictoriaMetrics and Jaeger for operations) and to advertising destinations server-side; tags are declared destinations, and the few that need the vendor's cookies run in an isolated same-origin tag frame, never in the app's document; consent is a framework screen and a replicated row enforced where events fan out, and Rill reads the lake.
+description: Proposed, partially built (the tag frame, the consent bar and the sign-up conversion) — one first-party collection path for product events and operational telemetry, routed by Vector to stores that differ in retention (DuckLake for product events, VictoriaMetrics and Jaeger for operations) and to advertising destinations server-side; tags are declared destinations, and the few that need the vendor's cookies run in an isolated same-origin tag frame, never in the app's document; consent is a framework screen and a replicated row enforced where events fan out, and Rill reads the lake.
 status: proposed, partially built
 ---
 
@@ -69,6 +69,9 @@ signals, Meta's Conversions API. Two delivery classes:
   ([[2026-10-03-external-effects|external effects]]), keyed by the click identifier stored
   with the user (`gclid`, `gbraid`, `wbraid`) and an idempotent transaction id. Google
   routes offline conversions and Customer Match through its Data Manager API since 2026.
+  Until that path exists, a conversion the terminal sees is reported from the tag frame,
+  keyed by the account's id: built for sign-up as `meta.googleTag.conversions`, its
+  contract in [[../component-contracts#google-ads-tag-metagoogletag|component contracts]].
 - *Signals* (page-level remarketing hits) are many and loss-tolerant: a Vector sink, the
   way server-side GTM and Zaraz fan out server to server.
 
@@ -182,3 +185,6 @@ models from a funnel declared in CUE (its steps, window and cohort).
 - Customer Match eligibility for the advertiser accounts.
 - The consent row: a framework-owned entity the terminal writes beside the device's copy,
   and how a guest's choice follows them into an account.
+- Sign-ups the terminal cannot see: a provider's sign-in by a guest that wrote nothing makes
+  its account under a new id, and only the auth service knows it made one. Its answer
+  saying so, or the airlock's conversion effect on the account's row, would count them.

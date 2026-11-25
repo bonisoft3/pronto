@@ -61,6 +61,7 @@ Deno.test("a Google tag leaves the terminal's policy Google-free and runs in a f
 
 const granted = { ad_storage: "granted", ad_user_data: "granted", ad_personalization: "granted", analytics_storage: "granted" };
 const denied = { ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied", analytics_storage: "denied" };
+const signup = { send_to: "AW-123/BAXr", transaction_id: "u1" };
 
 Deno.test("the app's bridge mounts the frame with the terminal's consent on a declared host alone, and tells it the page, its click ids and each route", async () => {
   const bridge = inlineScript((await emitFiles(googleTagProgram))["shell/index.html"].text);
@@ -81,7 +82,7 @@ Deno.test("the app's bridge mounts the frame with the terminal's consent on a de
 
   const elsewhere = run("http://localhost:8443/?gclid=x");
   elsewhere.window.gtag("consent", "update", granted);
-  elsewhere.window.gtag("event", "conversion");
+  elsewhere.window.gtag("event", "conversion", signup);
   assertEquals([elsewhere.body, elsewhere.sent, elsewhere.listeners.route], [[], [], undefined]);
 
   const app = run("https://shop.example/?gclid=G1&wbraid=W1&utm_source=ads");
@@ -109,6 +110,21 @@ Deno.test("the app's bridge mounts the frame with the terminal's consent on a de
   app.listeners.route({ navigationType: "replace" });
   assertEquals(app.sent.length, 3);
   assertThrows(() => app.window.gtag("config", "AW-123"), TypeError, "consent and event commands");
+  app.window.gtag("event", "conversion", signup);
+  assertEquals(app.sent.at(-1), [{ kind: "gtag", args: ["event", "conversion", signup] }, "https://shop.example"]);
+});
+
+Deno.test("a declared signup reaches the terminal as its send_to, and a label Google would not issue is refused", async () => {
+  const declared = (signup: string) => googleTagProgram + `app: meta: googleTag: conversions: signup: ${JSON.stringify(signup)}\n`;
+  assertEquals((await emitFiles(declared("BAXr-C_28")))["shell/shell.json"].data.conversions, { signup: "AW-123/BAXr-C_28" });
+  assertEquals("conversions" in (await emitFiles(googleTagProgram))["shell/shell.json"].data, false);
+  // A label pasted with its id, or with the snippet's quoting, would send to
+  // a conversion action that does not exist, which Google drops unreported.
+  for (const program of [declared("AW-123/BAXr"), declared("BAXr'"), declared(""), googleTagProgram + `app: meta: googleTag: conversions: purchase: "BAXr"\n`]) {
+    const res = await cue(["export", "-", "-e", "app"], program);
+    assertEquals(res.success, false, program.split("\n").at(-2));
+    assertStringIncludes(res.stderr, "googleTag.conversions");
+  }
 });
 
 Deno.test("the tag frame answers its parent alone, and states consent before it configures the page it is told", async () => {

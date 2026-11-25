@@ -1874,6 +1874,11 @@ import (
 #GoogleTag: {
 	id:    =~"^AW-[0-9]+$"
 	hosts: [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
+	// Conversion actions of this account the terminal reports, by the label
+	// that follows the id in their `send_to`, at moments only it sees:
+	// `signup` when a guest becomes a person, its account's id the
+	// transaction Google de-duplicates on.
+	conversions?: signup?: =~"^[A-Za-z0-9_-]+$"
 }
 
 // The reader's consent to advertising: the app's tags storing and sending
