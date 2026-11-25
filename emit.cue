@@ -7378,11 +7378,11 @@ _pgrollDir: "services/database/pgroll"
 				      - uses: actions/download-artifact@v8
 				        with:
 				          name: github-pages
-				          path: .pages-artifact
+				          path: ${{ runner.temp }}/pages-artifact
 				      - run: |
-				          mkdir -p \(pagesPrefix)dist/browser
-				          tar -xf .pages-artifact/artifact.tar -C \(pagesPrefix)dist/browser
-				          rm -rf .pages-artifact
+				          mkdir -p dist/browser
+				          tar -xf "${{ runner.temp }}/pages-artifact/artifact.tar" -C dist/browser
+				          rm -rf "${{ runner.temp }}/pages-artifact"\(pagesDir)
 				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
 				        with:
 				          version: v\(distribution.#SaytVersion)\(pagesSetup)

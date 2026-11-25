@@ -152,3 +152,4 @@ installedPagesSetup: _pagesInstalled & =~"\n      - run: sayt setup\n        wor
 // Upload and deploy run in separate jobs so deploy-pages never races
 // Artifacts v4 metadata indexing within the upload job.
 installedPagesSplit: _pagesInstalled & =~"\n  pages-build:\n[\\s\\S]*actions/upload-pages-artifact@v5[\\s\\S]*\n  pages:\n    needs: pages-build\n[\\s\\S]*actions/deploy-pages@v5"
+installedPagesUnpackDir: _pagesInstalled & =~"tar -xf \"\\$\\{\\{ runner\\.temp \\}\\}/pages-artifact/artifact\\.tar\" -C dist/browser\n          rm -rf \"\\$\\{\\{ runner\\.temp \\}\\}/pages-artifact\"\n        working-directory: [.]"
