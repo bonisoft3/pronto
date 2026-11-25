@@ -310,6 +310,10 @@ Deno.test("release-docker runs a program's computations on RisingWave", async ()
     "missing /usr/local/bin/appliance-risingwave.sh standalone launcher",
   );
   assert(
+    !rd.dockerfile.preamble.some((l) => l.includes("min_sst_retention_time_sec")),
+    "a five-minute SST GC grace rejected completed twelve-minute compactions and repeated them indefinitely; retain RisingWave's default",
+  );
+  assert(
     ![...rd.dockerfile.preamble, ...rd.dockerfile.epilogue].some((l) => /^\s*VOLUME\b/i.test(l)),
     "release-docker must not declare built-in VOLUME mounts",
   );
