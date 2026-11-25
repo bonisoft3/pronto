@@ -1129,12 +1129,6 @@ import (
 						database: {
 							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on", "-c", "shared_buffers=512MB", "-c", "max_slot_wal_keep_size=${PG_MAX_SLOT_WAL_KEEP_SIZE:-1GB}"]])}).out
 						}
-						// A release turns on the providers the program offers, which
-						// the local stack leaves off (mecha's OIDC_PROVIDERS):
-						// process-compose appends this list to the base's.
-						if len(B.cluster.capabilities.signIn) > 0 {
-							auth: environment: ["OIDC_PROVIDERS=${OIDC_PROVIDERS:-\(strings.Join([for p, _ in B.cluster.capabilities.signIn {p}], ","))}"]
-						}
 						// The bus keeps what it acknowledged to Conduit across a restart:
 						// its log written before each reply in Debian's directory for it,
 						// a cut or torn tail repaired on load.
@@ -1501,6 +1495,16 @@ import (
 							if _compute {"RUN --network=none deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts /compute-app/step-worker.ts && touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
 							if _risingwave {
 								#"RUN nu -c 'let f = "/.bayt/process-compose.yaml"; open $f | upsert processes.compute.depends_on.risingwave {condition: "process_healthy"} | upsert processes.compute.availability.exit_on_end true | if ("transform" in $in.processes) { update processes.transform.entrypoint {|p| $p.processes.transform.entrypoint | each {|a| $a | str replace " ($$cdir | path join '\''events.yaml'\'')" "" } } } else { $in } | to yaml | save -f $f'"#
+							},
+							// A release turns on the providers the program offers, which the
+							// local stack leaves off (mecha's OIDC_PROVIDERS). Rewrite the
+							// base file instead of merging `auth` via the overlay:
+							// process-compose v1.122.0 drops base env entries whose value
+							// contains `=` (such as OIDC_GOOGLE_AUTHORIZE_PARAMS) when
+							// merging a process across `-f` files.
+							if len(B.cluster.capabilities.signIn) > 0 {
+								let _providers = strings.Join([for p, _ in B.cluster.capabilities.signIn {p}], ",")
+								#"RUN nu -c 'let f = "/.bayt/process-compose.yaml"; open $f | update processes.auth.environment {|p| $p.processes.auth.environment | where {|x| not ($x | str starts-with "OIDC_PROVIDERS=") } | append "OIDC_PROVIDERS=${OIDC_PROVIDERS:-\#(_providers)}" } | to yaml | save -f $f'"#
 							},
 							// A bridge's port is no port an appliance process takes, the ones bayt
 							// assigns the app included, and no other bridge's.

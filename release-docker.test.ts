@@ -681,12 +681,45 @@ Deno.test("the appliance's clock ends on a refused poke, so it restarts", async 
 
 // Regression: the appliance's auth ran the local stack's environment, which
 // turns on no provider, so a docker release offered none of its program's.
+// Rewriting the base file keeps auth out of the overlay so process-compose
+// v1.122.0 does not drop base env entries containing `=` (e.g.
+// OIDC_GOOGLE_AUTHORIZE_PARAMS).
 Deno.test("the appliance turns on the providers the program offers, which the deployment may still name", async () => {
   const withGoogle = paymentProgram()
     .replace("targets: []", 'targets: ["docker"]')
     .replace("capabilities: {hatches: {},", `capabilities: {auth: {required: false, service: "/auth", providers: ["google"], provider: google: {issuer: "https://id.example.com", client: "origin"}}, hatches: {},`);
-  const auth = overlayOf(await releaseDocker(withGoogle)).processes.auth;
-  assertEquals(auth.environment, ["OIDC_PROVIDERS=${OIDC_PROVIDERS:-google}"]);
-  const without = overlayOf(await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'))).processes;
-  assertEquals("auth" in without, false);
+  const rd = await releaseDocker(withGoogle);
+  assertEquals("auth" in overlayOf(rd).processes, false);
+  const rewrite = rd.dockerfile.epilogue.find((l) => l.startsWith("RUN nu -c") && l.includes("processes.auth.environment"))!;
+  assert(rewrite, "missing process-compose.yaml auth rewrite");
+  const dir = await Deno.makeTempDir();
+  try {
+    const pc = `${dir}/process-compose.yaml`;
+    await Deno.writeTextFile(
+      pc,
+      [
+        "processes:",
+        "  auth:",
+        "    environment:",
+        "    - OIDC_GOOGLE_AUTHORIZE_PARAMS=${OIDC_GOOGLE_AUTHORIZE_PARAMS:-provider=google}",
+        "    - OIDC_PROVIDERS=${OIDC_PROVIDERS:-}",
+        "",
+      ].join("\n"),
+    );
+    const cmd = rewrite.slice(4).replaceAll("/.bayt/process-compose.yaml", pc);
+    const ran = await new Deno.Command("sh", { args: ["-c", cmd] }).output();
+    assert(ran.success, new TextDecoder().decode(ran.stderr));
+    const updated = parse(await Deno.readTextFile(pc)) as {
+      processes: { auth: { environment: string[] } };
+    };
+    assertEquals(updated.processes.auth.environment, [
+      "OIDC_GOOGLE_AUTHORIZE_PARAMS=${OIDC_GOOGLE_AUTHORIZE_PARAMS:-provider=google}",
+      "OIDC_PROVIDERS=${OIDC_PROVIDERS:-google}",
+    ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+  const without = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
+  assertEquals("auth" in overlayOf(without).processes, false);
+  assert(!without.dockerfile.epilogue.some((l) => l.includes("processes.auth.environment")));
 });
