@@ -5095,29 +5095,36 @@ _pgrollDir: "services/database/pgroll"
 		if E._design.shell.nav == "dock" || E._design.shell.nav == "tabbar" {"-1"},
 		"1",
 	][0]
-	// The consent bar and the control that reopens it (omnishell consent.js):
-	// a strip along the bottom that leaves the page usable. Accept and Reject
+	// The consent card and the control that reopens it (omnishell consent.js):
+	// a floating bottom-end card that leaves the page usable. Accept and Reject
 	// wear one style: a refusal no harder to see or reach than consent.
-	// Joined to the sign-in rules, so an app without a bar emits no line.
+	// Joined to the sign-in rules, so an app without consent emits no line.
 	_consentCss: [if E.code.meta.consent != _|_ if E.code.meta.consent.mode == "bar" {
 		"\n" + """
 			.shell-consent[hidden], .shell-consent-open[hidden] { display: none; }
-			:where(.shell-consent) { position: fixed; z-index: 2147483000; inset-inline: 0; inset-block-end: 0;
-			  box-sizing: border-box; padding: var(--sp-sm, 8px) var(--sp-md, 16px);
-			  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-sm, 8px) var(--sp-md, 16px);
-			  background: var(--surface, Canvas); color: var(--primary, CanvasText);
-			  border-block-start: 1px solid var(--shell-rule, currentColor); box-shadow: var(--shadow-2, none);
-			  font-size: .875rem; line-height: 1.4; }
-			:where(.shell-consent p) { margin: 0; flex: 0 1 48rem; }
+			:where(.shell-consent) { position: fixed; z-index: 2147483000;
+			  inset-inline-end: var(--sp-md, 16px); inset-block-end: var(--sp-md, 16px);
+			  width: min(22rem, calc(100vw - 2 * var(--sp-md, 16px))); box-sizing: border-box;
+			  padding: var(--sp-md, 16px); display: flex; flex-direction: column; gap: 12px;
+			  background: var(--shell-panel-bg, var(--surface, Canvas)); color: var(--primary, CanvasText);
+			  border: 1px solid var(--shell-rule, currentColor); border-radius: var(--r-lg, 16px);
+			  box-shadow: var(--shadow-2, 0 8px 24px color-mix(in srgb, currentColor 14%, transparent));
+			  font-size: .875rem; line-height: 1.45; text-align: start; }
+			:where(.shell-consent-head) { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm, 8px); }
+			:where(.shell-consent-title) { font-size: .95rem; font-weight: 700; }
+			:where(.shell-consent p) { margin: 0; }
 			:where(.shell-consent a) { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
-			:where(.shell-consent-actions) { display: flex; gap: var(--sp-sm, 8px); }
-			:where(.shell-consent-actions button) { font: inherit; font-weight: 600; min-height: 36px; min-width: 7rem; padding: 6px 16px; cursor: pointer;
+			:where(.shell-consent-actions) { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-sm, 8px); }
+			:where(.shell-consent-actions button) { font: inherit; font-weight: 600; min-height: 38px; padding: 6px 12px; cursor: pointer;
 			  border: 1px solid transparent; border-radius: var(--r-md, 8px);
 			  background: var(--primary, CanvasText); color: var(--surface, Canvas); }
 			:where(.shell-consent-actions button[aria-pressed="true"])::before { content: "✓ " / ""; }
-			:where(.shell-consent-close) { min-width: 36px; min-height: 36px; padding: 0; display: grid; place-items: center; cursor: pointer;
-			  border: 0; border-radius: var(--r-md, 8px); background: transparent; color: inherit; font-size: 1.25rem; line-height: 1; }
-			:where(.shell-consent-open) { position: fixed; z-index: 2147483000; inset-inline-end: var(--sp-sm, 8px); inset-block-end: var(--sp-sm, 8px);
+			:where(.shell-consent-close) { flex: none; width: 32px; height: 32px; margin: -6px; padding: 0;
+			  display: grid; place-items: center; cursor: pointer;
+			  border: 0; border-radius: var(--r-md, 8px); background: transparent; color: inherit; }
+			:where(.shell-consent-close:hover) { background: color-mix(in srgb, currentColor 7%, transparent); }
+			:where(.shell-consent-close svg) { width: 16px; height: 16px; }
+			:where(.shell-consent-open) { position: fixed; z-index: 2147483000; inset-inline-end: var(--sp-md, 16px); inset-block-end: var(--sp-md, 16px);
 			  width: 40px; height: 40px; padding: 0; display: grid; place-items: center; cursor: pointer;
 			  background: var(--surface, Canvas); color: var(--primary, CanvasText);
 			  border: 1px solid var(--shell-rule, currentColor); border-radius: 50%; box-shadow: var(--shadow-2, none); }
@@ -5239,12 +5246,18 @@ _pgrollDir: "services/database/pgroll"
 		  width: 100%; min-height: 48px; box-sizing: border-box; padding: 0 var(--sp-md, 16px);
 		  border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; text-decoration: none; }
 		:where(body > nav .shell-signin-ways .shell-provider) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
-		/* A provider's own button: the auth service's page, framed at the button's height,
-		   in the panel, on a required sign-in's screen, or where an app's own control stood. */
-		:where(.shell-provider-button .shell-provider-frame, .shell-login .login-provider-button .shell-provider-frame) { display: block; width: 100%; height: 44px; border: 0; color-scheme: normal; }
+		/* A credential provider overlays its invisible FedCM frame over the styled link/button
+		   so the UI never flips while keeping FedCM user activation inside the auth service's frame. */
+		:where(.shell-provider-wrap) { position: relative; display: block; width: 100%; }
+		:where(.shell-way-add .shell-provider-wrap) { width: auto; }
+		:where(.shell-provider-active) { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; opacity: 0; }
+		:where(.shell-provider-active[data-pending]) { pointer-events: none; }
+		:where(body > nav .shell-signin-ways .shell-provider-wrap:hover .shell-provider) { background: color-mix(in srgb, currentColor 6%, transparent); }
+		:where(body > nav .shell-signin-ways .shell-provider-wrap:focus-within .shell-provider) { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
 		/* Its prompt the browser draws (FedCM): the page asking takes no room. */
 		:where(body > .shell-provider-prompt) { position: fixed; width: 0; height: 0; border: 0; }
 		:where(body > nav .shell-signin-ways .shell-provider:hover) { background: color-mix(in srgb, currentColor 6%, transparent); text-decoration: none; }
+		:where(body > nav .shell-more-icon) { flex: none; width: 20px; height: 20px; }
 		:where(body > nav .shell-provider-mark) { width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center;
 		  border: 1.8px solid currentColor; font-size: 0.7em; font-weight: 800; line-height: 1; }
 		:where(body > nav .shell-signin-ways .shell-passkey) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
@@ -5445,7 +5458,7 @@ _pgrollDir: "services/database/pgroll"
 		  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
 		}
 		.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
-		.shell-login :is(.login-provider, .login-provider-button) ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+		.shell-login :is(.login-provider, .shell-provider-wrap) ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
 		.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
 		.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
 		.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }

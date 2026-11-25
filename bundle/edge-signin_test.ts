@@ -31,3 +31,18 @@ Deno.test('with no deployment broker, the program\'s settings stand, under a dep
 Deno.test('a deployment broker that is no https origin is refused', () => {
   assert.throws(() => signInVars({ google: {} }, env({ OIDC_BROKER: 'http://b.test' })), /not an https origin/)
 })
+
+Deno.test('a deployment OIDC_PROVIDERS narrows declared providers and refuses undeclared ones', () => {
+  const signIn = {
+    google: { client: 'c.apps.googleusercontent.com', credential: true },
+    email: { issuer: 'https://id.bonisoft3.com', client: 'origin', scope: 'openid profile email' },
+  }
+  const narrowed = signInVars(signIn, env({ OIDC_BROKER: 'https://id.bonisoft3.com', OIDC_PROVIDERS: 'email' }))
+  assert.deepEqual(narrowed, {
+    OIDC_PROVIDERS: 'email',
+    OIDC_EMAIL_ISSUER: 'https://id.bonisoft3.com',
+    OIDC_EMAIL_CLIENT_ID: 'origin',
+    OIDC_EMAIL_SCOPE: 'openid profile email',
+  })
+  assert.throws(() => signInVars(signIn, env({ OIDC_PROVIDERS: 'apple' })), /does not declare/)
+})

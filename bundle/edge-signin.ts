@@ -11,8 +11,15 @@ export function signInVars(
   signIn: Record<string, SignInSetting | undefined>,
   env: (name: string) => string | undefined,
 ): Record<string, string> {
-  const providers = Object.keys(signIn)
-  if (providers.length === 0) return {}
+  const declared = Object.keys(signIn)
+  if (declared.length === 0) return {}
+  const requested = env('OIDC_PROVIDERS')
+  const providers = requested !== undefined && requested.trim() !== ''
+    ? requested.split(',').map((s) => s.trim()).filter(Boolean)
+    : declared
+  for (const p of providers) {
+    if (!declared.includes(p)) throw new Error(`OIDC_PROVIDERS names ${p}, which this app does not declare`)
+  }
   const broker = env('OIDC_BROKER')
   if (broker !== undefined && !/^https:\/\/[^/]+$/.test(broker)) throw new Error(`OIDC_BROKER is ${JSON.stringify(broker)}, not an https origin`)
   const vars: Record<string, string> = { OIDC_PROVIDERS: providers.join(',') }

@@ -155,20 +155,22 @@ do: Google's own button (`credential: true`), the app's way in to Google
 with no redirect. The app registers its origins with its client at the
 provider (snapcards' is the Google Cloud project `snapcards-fun`).
 
-**Google's own button** is drawn by Google's script (Identity Services, FedCM
-where the browser has it), which knows the person and so reads "Continue as
-…" once they have signed in to Google in that browser:
+**Google's native FedCM sign-in** keeps the panel's own styled "Google" button
+without rendering flips, and layers an invisible same-origin FedCM frame over
+it when the panel opens:
 
-- **Never in the app's page.** Google's script writes markup the terminal's
-  Trusted Types refuse, so it runs in the auth service's own page, under a
-  policy that admits it, which the terminal frames; the door leaves that
-  page's policy be, and the app's page admits nothing of Google's.
-- **The button** takes the place of Google's link in the panel and on a
-  required sign-in's screen, framed afresh each time the panel opens; an
-  app's own `data-auth-provider="google"` control gives way to it when
-  pressed.
-- **The prompt** ("One Tap"), the browser's own account chooser, is opt-in
-  (`prompt: true` on `identity.#Signin` / `capabilities.auth`, off by default).
+- **Never in the app's page.** No third-party Google script runs in the app's
+  page or the auth service's frame; the frame talks directly to Google's
+  `fedcm.json` endpoint under a strict policy of its own, so the app's page
+  admits nothing of Google's.
+- **Top-right FedCM + active button.** Opening the panel starts FedCM passive
+  mode (the browser's top-right chooser) when the browser supports it, and
+  clicking the Google option switches cleanly to FedCM active mode. Where FedCM
+  is unavailable, disabled, or errors out, it falls back to the OIDC redirect
+  flow (`/auth/oidc/google/start`).
+- **The prompt** ("One Tap"), the browser's own account chooser on page
+  interaction, remains opt-in (`prompt: true` on `identity.#Signin` /
+  `capabilities.auth`, off by default).
   When enabled, a page not signed in offers it once after a person's first key
   or press outside the panel, and only where the browser draws it (FedCM). A
   crawler, a prerender, or a visit no one touches loads nothing of Google's and
