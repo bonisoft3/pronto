@@ -99,7 +99,9 @@ export function extractAssetsFromHtml(html: string): ExtractedAssets {
     try {
       const parsed = JSON.parse(mapMatch[1]);
       const imports = parsed?.imports ?? {};
-      for (const val of Object.values(imports)) {
+      for (const [key, val] of Object.entries(imports)) {
+        // /@native/bridge is a synthetic native ABI digest marker, not a served HTTP asset.
+        if (key === "/@native/bridge") continue;
         if (typeof val === "string") {
           if (val.includes("_immutable-")) {
             immutableAssets.add(val.startsWith("/") ? val : `/${val}`);

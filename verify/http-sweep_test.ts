@@ -401,6 +401,25 @@ Deno.test("extractAssetsFromHtml extracts importmap and tag assets", () => {
   assertEquals(assets.catalogues, ["/messages/pt-BR.json"]);
 });
 
+Deno.test("extractAssetsFromHtml skips synthetic /@native/bridge ABI marker", () => {
+  const html = `
+    <html>
+      <head>
+        <script type="importmap" id="pronto-assets">
+          {
+            "imports": {
+              "shell": "/_immutable-1111111111111111-shell.js",
+              "/@native/bridge": "/_immutable-0a965b664f1baba7f3c9899804f4c72b4e425f8a64ad5e34df201183cf490506-bridge"
+            }
+          }
+        </script>
+      </head>
+    </html>
+  `;
+  const assets = extractAssetsFromHtml(html);
+  assertEquals(assets.immutableAssets, ["/_immutable-1111111111111111-shell.js"]);
+});
+
 Deno.test("verifyHttp populates asset matrix from deployed entry document for container platforms", async () => {
   const entryHtml = `
     <html>

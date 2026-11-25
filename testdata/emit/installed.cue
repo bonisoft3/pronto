@@ -149,3 +149,6 @@ _pagesInstalled: (pronto.#emit & {
 	build:    _installedBuild
 }).files[".github/workflows/cd.yml"].text
 installedPagesSetup: _pagesInstalled & =~"\n      - run: sayt setup\n        working-directory: [.]\n      - run: sayt release@pages"
+// Upload and deploy run in separate jobs so deploy-pages never races
+// Artifacts v4 metadata indexing within the upload job.
+installedPagesSplit: _pagesInstalled & =~"\n  pages-build:\n[\\s\\S]*actions/upload-pages-artifact@v5[\\s\\S]*\n  pages:\n    needs: pages-build\n[\\s\\S]*actions/deploy-pages@v5"

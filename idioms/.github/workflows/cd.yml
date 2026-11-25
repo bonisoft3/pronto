@@ -29,11 +29,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pages:
+  pages-build:
     runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       # The released sayt at the version the toolchain pins, its mise cached.
@@ -44,11 +41,32 @@ jobs:
         working-directory: .
       - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"
         working-directory: .
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: ./dist/browser
+  pages:
+    needs: pages-build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+          path: .pages-artifact
+      - run: |
+          mkdir -p ./dist/browser
+          tar -xf .pages-artifact/artifact.tar -C ./dist/browser
+          rm -rf .pages-artifact
+      - uses: bonisoft3/sayt/.github/actions/sayt/install@v0.49.2
+        with:
+          version: v0.49.2
+      - run: sayt setup
+        working-directory: .
       - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"
         working-directory: .

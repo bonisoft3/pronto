@@ -7352,11 +7352,8 @@ _pgrollDir: "services/database/pgroll"
 			let pagesSetup = "\n      - run: sayt setup\(pagesDir)"
 
 			let pagesJob = """
-				  pages:
+				  pages-build:
 				    runs-on: ubuntu-24.04
-				    environment:
-				      name: github-pages
-				      url: ${{ steps.deploy.outputs.page_url }}
 				    steps:
 				      - uses: actions/checkout@v7
 				      # The released sayt at the version the toolchain pins, its mise cached.
@@ -7364,12 +7361,31 @@ _pgrollDir: "services/database/pgroll"
 				        with:
 				          version: v\(distribution.#SaytVersion)\(pagesSetup)
 				      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"\(pagesDir)
-				      - uses: actions/configure-pages@v5
-				      - uses: actions/upload-pages-artifact@v4
+				      - uses: actions/configure-pages@v6
+				      - uses: actions/upload-pages-artifact@v5
 				        with:
 				          path: \(pagesPrefix)dist/browser
+				  pages:
+				    needs: pages-build
+				    runs-on: ubuntu-24.04
+				    environment:
+				      name: github-pages
+				      url: ${{ steps.deploy.outputs.page_url }}
+				    steps:
 				      - id: deploy
-				        uses: actions/deploy-pages@v4
+				        uses: actions/deploy-pages@v5
+				      - uses: actions/checkout@v7
+				      - uses: actions/download-artifact@v8
+				        with:
+				          name: github-pages
+				          path: .pages-artifact
+				      - run: |
+				          mkdir -p \(pagesPrefix)dist/browser
+				          tar -xf .pages-artifact/artifact.tar -C \(pagesPrefix)dist/browser
+				          rm -rf .pages-artifact
+				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
+				        with:
+				          version: v\(distribution.#SaytVersion)\(pagesSetup)
 				      - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"\(pagesDir)
 				"""
 
