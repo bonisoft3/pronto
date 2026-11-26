@@ -400,12 +400,18 @@ body > nav .shell-me [hidden] { display: none; }
   width: 100%; min-height: 48px; box-sizing: border-box; padding: 0 var(--sp-md, 16px);
   border-radius: var(--r-md, 12px); font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; text-decoration: none; }
 :where(body > nav .shell-signin-ways .shell-provider) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
-/* A provider's own button: the auth service's page, framed at the button's height,
-   in the panel, on a required sign-in's screen, or where an app's own control stood. */
-:where(.shell-provider-button .shell-provider-frame, .shell-login .login-provider-button .shell-provider-frame) { display: block; width: 100%; height: 44px; border: 0; color-scheme: normal; }
+/* A credential provider overlays its invisible FedCM frame over the styled link/button
+   so the UI never flips while keeping FedCM user activation inside the auth service's frame. */
+:where(.shell-provider-wrap) { position: relative; display: block; width: 100%; }
+:where(.shell-way-add .shell-provider-wrap) { width: auto; }
+:where(.shell-provider-active) { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; opacity: 0; }
+:where(.shell-provider-active[data-pending]) { pointer-events: none; }
+:where(body > nav .shell-signin-ways .shell-provider-wrap:hover .shell-provider) { background: color-mix(in srgb, currentColor 6%, transparent); }
+:where(body > nav .shell-signin-ways .shell-provider-wrap:focus-within .shell-provider) { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
 /* Its prompt the browser draws (FedCM): the page asking takes no room. */
 :where(body > .shell-provider-prompt) { position: fixed; width: 0; height: 0; border: 0; }
 :where(body > nav .shell-signin-ways .shell-provider:hover) { background: color-mix(in srgb, currentColor 6%, transparent); text-decoration: none; }
+:where(body > nav .shell-more-icon) { flex: none; width: 20px; height: 20px; }
 :where(body > nav .shell-provider-mark) { width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center;
   border: 1.8px solid currentColor; font-size: 0.7em; font-weight: 800; line-height: 1; }
 :where(body > nav .shell-signin-ways .shell-passkey) { background: transparent; color: inherit; border: 1px solid var(--shell-rule); }
@@ -534,7 +540,7 @@ body:has(.shell-login) { background: var(--login-surface, var(--surface)); }
   transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
 .shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
-.shell-login :is(.login-provider, .login-provider-button) ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+.shell-login :is(.login-provider, .shell-provider-wrap) ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
 .shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
 .shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
 .shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }

@@ -537,7 +537,7 @@ deletes the state's schedules on a cancel. The tick delivers
 `xstate.after.<delay>.<state>` at the later of its instant and the fire's
 `clock()`. Its first adoption is held to the same check: every instance in a
 state with an `after` has a schedule for each of the state's delays
-([Mecha's machines](https://github.com/bonisoft3/mecha/blob/v0.35.1/docs/machines.md#timers)).
+([Mecha's machines](https://github.com/bonisoft3/mecha/blob/v0.36.0/docs/machines.md#timers)).
 
 **A terminal chart is closed over the entity's row.** `context` is refused:
 other columns start from the entity's field defaults. The emitted
@@ -551,7 +551,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.35.0/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.36.0/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal
