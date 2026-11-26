@@ -127,6 +127,22 @@ Deno.test("a declared signup reaches the terminal as its send_to, and a label Go
   }
 });
 
+Deno.test("a declared link conversion reaches the terminal as its send_to, beside signup, and a name or label it cannot carry is refused", async () => {
+  const declared = (name: string, label: string) => googleTagProgram + `app: meta: googleTag: conversions: links: ${JSON.stringify(name)}: ${JSON.stringify(label)}\n`;
+  assertEquals((await emitFiles(declared("github", "WcE5-C_x")))["shell/shell.json"].data.conversions, { links: { github: "AW-123/WcE5-C_x" } });
+  assertEquals(
+    (await emitFiles(declared("github", "WcE5") + `app: meta: googleTag: conversions: signup: "BAXr"\n`))["shell/shell.json"].data.conversions,
+    { signup: "AW-123/BAXr", links: { github: "AW-123/WcE5" } },
+  );
+  // A name is what a link's data-conversion spells, so it is an attribute
+  // value check markup can match; a label is signup's.
+  for (const program of [declared("GitHub", "WcE5"), declared("", "WcE5"), declared("github", "AW-123/WcE5"), declared("github", "")]) {
+    const res = await cue(["export", "-", "-e", "app"], program);
+    assertEquals(res.success, false, program.split("\n").at(-2));
+    assertStringIncludes(res.stderr, "googleTag.conversions.links");
+  }
+});
+
 Deno.test("the tag frame answers its parent alone, and states consent before it configures the page it is told", async () => {
   const script = inlineScript((await emitFiles(googleTagProgram))["shell/tag.html"].text);
   const run = (hostname: string, framed: boolean) => {

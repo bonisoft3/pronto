@@ -14,7 +14,7 @@ export const staticWorker = (realmDocuments: string[], subdomainRealms: Record<s
     const navigation = (req.method === 'GET' || req.method === 'HEAD') &&
       (req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))
     if (navigation && !['/_immutable-', '/shell/', '/omnishell/', '/messages/'].some(prefix => path.startsWith(prefix))) {
-      return env.ASSETS.fetch(new Request(new URL('/', req.url), req))
+      return env.ASSETS.fetch(new Request(new URL('/shell', req.url), req))
     }
     const result = new Response(req.method === 'HEAD' ? null : res.body, res)
     result.headers.set('cache-control', 'no-store')

@@ -69,15 +69,24 @@ const REALM_POLICY = "sandbox allow-scripts allow-popups allow-popups-to-escape-
  * carries the target's ICE servers. */
 export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers, domain, nativeBridge, ed25519PrivateKey }: { previous?: string; iceServers: IceServer[]; domain?: string; nativeBridge?: string | Uint8Array; ed25519PrivateKey?: CryptoKey | Uint8Array }): Promise<EdgeHints> {
   const { addressRelease, local, retainReleases } = addresses
+  // A pre-rendered root (a cluster-less release's home) is served as written; otherwise `/` is the shell.
+  const root = await Deno.readTextFile(path.join(out, 'index.html')).catch(() => null)
+  const rootDocument = root !== null && root !== await Deno.readTextFile(path.join(out, 'shell/index.html'))
   const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers, frames: await edgeFrames(out, domain), ...(nativeBridge !== undefined ? { nativeBridge } : {}), ...(ed25519PrivateKey !== undefined ? { ed25519PrivateKey } : {}) })
   const { imports, screens, cfg } = release
-  await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
+  if (!rootDocument) await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
   if (previous) await retainReleases(out, previous)
-  // The document's policy as a header too, as the container door sends it:
-  // the Worker answers every navigation with `/`, so the rule covers them all.
+  // Each document's policy as a header too, as the container door sends it:
+  // the Worker answers every other navigation with `/shell`.
+  const policyOf = async (file: string) => {
+    const policy = parseHTML(await Deno.readTextFile(path.join(out, file))).document
+      .querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')
+    if (!policy) throw new Error(`${file} carries no Content-Security-Policy`)
+    return policy
+  }
   const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'shell/index.html')))
-  const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')
-  if (!policy) throw new Error('the document carries no Content-Security-Policy')
+  const policy = await policyOf('shell/index.html')
+  const rootPolicy = rootDocument ? await policyOf('index.html') : policy
   // A presenter's worker takes its policy from its script's own response.
   // Cache-Control headers are omitted here because Cloudflare's _headers applies
   // to 404 responses unconditionally; immutable caching is attached on 200 responses
@@ -90,7 +99,8 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   const realms = Object.values(cfg.units ?? {})
     .filter((unit) => unit.isolation === 'realm').flatMap((unit) => unit.files)
   await Deno.writeTextFile(path.join(out, '_headers'), [
-    `/\n  Content-Security-Policy: ${policy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`,
+    `/\n  Content-Security-Policy: ${rootPolicy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`,
+    ...(rootDocument ? [`/shell\n  Content-Security-Policy: ${policy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`] : []),
     ...(cfg.presenter ? [`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${cfg.presenter.policy}\n`] : []),
     // Both a document's addresses: the Worker serves its .html one from the bare.
     ...realms.flatMap((file) => [...new Set([file, extensionless(file)])])

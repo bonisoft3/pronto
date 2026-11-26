@@ -26,5 +26,5 @@ export async function writeEdgeAssets(app: string, terminal: string, out: string
       await Deno.writeTextFile(destination, prepareEdgeTemplate(await Deno.readTextFile(source)))
     } else await Deno.copyFile(source, destination)
   }
-  await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
+  if (!held.has('index.html')) await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
 }

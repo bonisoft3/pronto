@@ -156,6 +156,25 @@ Deno.test("a realm subdomain is framed at its label under the release's domain, 
   await assert.rejects(fixture(false, undefined, undefined, units, { domain: 'staging.example', extra: { ...extra, 'shell/index.html': document('') } }), /shell\/index.html: its Content-Security-Policy has no frame-src/)
 })
 
+// Regression: addressing copied the shell over a pre-rendered root and sent
+// the shell's policy for `/`, so a cluster-less release's home page was the
+// empty shell under a policy that refused the home page's own inline script.
+Deno.test("a pre-rendered root keeps its document and its own policy, and /shell carries the shell's", async () => {
+  const home = `<html><head><meta http-equiv="Content-Security-Policy" content="script-src 'self' 'sha256-home'"><base href="/shell/"></head><body><h1>Home</h1><script type="module" src="./boot.js"></script></body></html>`
+  const f = await fixture(false, undefined, undefined, undefined, { extra: { 'index.html': home } })
+  try {
+    assert.equal(f.document.querySelector('h1')?.textContent, 'Home')
+    const policyOf = async (file: string) => parseHTML(await Deno.readTextFile(path.join(f.out, file))).document
+      .querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute('content')!
+    const [rootPolicy, shellPolicy] = [await policyOf('index.html'), await policyOf('shell/index.html')]
+    assert.ok(rootPolicy.includes("'sha256-home'"))
+    assert.notEqual(rootPolicy, shellPolicy)
+    const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
+    assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${rootPolicy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`))
+    assert.ok(headers.includes(`\n/shell\n  Content-Security-Policy: ${shellPolicy}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`))
+  } finally { await Deno.remove(f.out, { recursive: true }) }
+})
+
 Deno.test('changing a module keeps unrelated asset URLs and its importing module reusable', async () => {
   const before = await fixture(), after = await fixture(true)
   try {

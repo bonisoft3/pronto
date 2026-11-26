@@ -3257,6 +3257,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app: S.code.meta.name
+		if S.code.meta.title != S.code.meta.name {title: S.code.meta.title}
 		if S.code.surface.design.shell.nav == "none" {
 			nav: "none"
 		}
@@ -3290,7 +3291,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}).terminal
 		}
 		if S.code.meta.googleTag != _|_ if S.code.meta.googleTag.conversions != _|_ {
-			conversions: {for name, label in S.code.meta.googleTag.conversions {(name): "\(S.code.meta.googleTag.id)/\(label)"}}
+			let T = S.code.meta.googleTag
+			conversions: {
+				if T.conversions.signup != _|_ {signup: "\(T.id)/\(T.conversions.signup)"}
+				if T.conversions.links != _|_ {links: {for name, label in T.conversions.links {(name): "\(T.id)/\(label)"}}}
+			}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the

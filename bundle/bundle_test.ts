@@ -36,6 +36,15 @@ Deno.test('edge assets preserve lazy module and route delivery without bundling 
     assert.equal(await Deno.readTextFile(path.join(out, 'shell/index.html')), html)
     assert.equal(await Deno.readTextFile(path.join(out, 'shell/screens/second.html')), '<h1>Another route</h1>')
     assert.equal(await Deno.readTextFile(path.join(out, 'omnishell/interpreter/shell.js')), 'export const runtime = true;')
+    // A cluster-less release serves its pre-rendered root as is: copying the shell over it
+    // served crawlers "Loading…" in place of pronto.bonisoft3.com's page.
+    const document = '<!doctype html><title>Home</title><h1>Pre-rendered</h1>'
+    await Deno.writeTextFile(path.join(app, 'home.html'), document)
+    await writeEdgeAssets(app, terminal, out, [
+      { file: 'shell/index.html', target: '/srv/shell/index.html' },
+      { file: 'home.html', target: '/srv/index.html' },
+    ])
+    assert.equal(await Deno.readTextFile(path.join(out, 'index.html')), document)
     await assert.rejects(() => writeEdgeAssets(app, terminal, out, [{ file: 'shell/index.html', target: '/srv/../escape.html' }]), /invalid static asset target/)
   } finally { await Deno.remove(scratch, { recursive: true }) }
 })

@@ -190,6 +190,35 @@ Deno.test("custom manifest and themeColor configure display and colors", async (
   assertEquals(iconStat?.file, "custom-icon.png");
 });
 
+Deno.test("meta.title is the name a reader sees, and meta.name stays the identifier", async () => {
+  const titled = (title: string) => exportCue(`
+    meta: {
+      name: "pronto-site"
+      ${title}
+      description: "a landing page"
+      manifest: true
+      social: description: "a landing page"
+      ir: sha256: ""
+      targets: []
+      clocks: []
+      decisions: {}
+      tests: {}
+    }
+  `);
+  const res = await titled(`title: "Pronto"`);
+  const shell = res.files["shell/shell.json"]?.data as { app: string; title?: string };
+  assertEquals([shell.app, shell.title], ["pronto-site", "Pronto"]);
+  const manifest = JSON.parse(res.files["shell/manifest.webmanifest"]?.text ?? "");
+  assertEquals([manifest.name, manifest.short_name], ["Pronto", "Pronto"]);
+  const indexHtml = res.files["shell/index.html"]?.text ?? "";
+  assertStringIncludes(indexHtml, '<meta property="og:title" content="Pronto">');
+  assertStringIncludes(indexHtml, '<meta name="apple-mobile-web-app-title" content="Pronto">');
+  // Unset, it is the name, and the shell carries no second copy of it: every
+  // app that names no title emits what it emitted before.
+  const plain = (await titled("")).files["shell/shell.json"]?.data as object;
+  assertEquals("title" in plain, false);
+});
+
 Deno.test("social cards emit OpenGraph, Twitter, and canonical metadata", async () => {
   const res = await exportCue(`
     meta: {

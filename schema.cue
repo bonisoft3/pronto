@@ -1877,8 +1877,12 @@ import (
 	// Conversion actions of this account the terminal reports, by the label
 	// that follows the id in their `send_to`, at moments only it sees:
 	// `signup` when a guest becomes a person, its account's id the
-	// transaction Google de-duplicates on.
-	conversions?: signup?: =~"^[A-Za-z0-9_-]+$"
+	// transaction Google de-duplicates on; each of `links` when a reader
+	// clicks a link the markup marks `data-conversion="<name>"`, once a page.
+	conversions?: {
+		signup?: =~"^[A-Za-z0-9_-]+$"
+		links?: [=~"^[a-z][a-z0-9-]*$"]: =~"^[A-Za-z0-9_-]+$"
+	}
 }
 
 // The reader's consent to advertising: the app's tags storing and sending
@@ -2434,6 +2438,10 @@ import (
 		// Also the app's directory name, which is why a hyphen is admitted;
 		// the emission folds it where an identifier is required.
 		name: =~"^[a-z][a-z0-9-]*$"
+		// The app as a reader names it: the end of every document's title, the
+		// sign-in heading, and the manifest's and social card's defaults.
+		// `name` stays the identifier everything else is keyed on.
+		title: *name | string & !=""
 		// One line for the entry page's meta description. The hash router gives
 		// every route this same description, so it names the app, not a screen.
 		description: string
@@ -4013,8 +4021,8 @@ import (
 	][0]
 
 	_manifestData: {
-		name:             [if _isObj if M.raw.name != _|_ {M.raw.name}, M.meta.name][0]
-		short_name:       [if _isObj if M.raw.short_name != _|_ {M.raw.short_name}, [if _isObj if M.raw.name != _|_ {M.raw.name}, M.meta.name][0]][0]
+		name:             [if _isObj if M.raw.name != _|_ {M.raw.name}, if M.meta.title != _|_ {M.meta.title}, M.meta.name][0]
+		short_name:       [if _isObj if M.raw.short_name != _|_ {M.raw.short_name}, name][0]
 		description:      [if _isObj if M.raw.description != _|_ {M.raw.description}, M.meta.description][0]
 		start_url:        [if _isObj if M.raw.start_url != _|_ {M.raw.start_url}, "/"][0]
 		scope:            [if _isObj if M.raw.scope != _|_ {M.raw.scope}, "/"][0]
@@ -4100,7 +4108,7 @@ import (
 	_enabled: [if S.raw != _|_ {(S.raw & null) == _|_}, false][0]
 	_isObj:   [if _enabled {(S.raw & bool) == _|_ && (S.raw & {}) != _|_}, false][0]
 
-	_title: [if _isObj if S.raw.title != _|_ {S.raw.title}, S.meta.name][0]
+	_title: [if _isObj if S.raw.title != _|_ {S.raw.title}, if S.meta.title != _|_ {S.meta.title}, S.meta.name][0]
 	_desc:  [if _isObj if S.raw.description != _|_ {S.raw.description}, S.meta.description][0]
 	_type:  [if _isObj if S.raw.type != _|_ {S.raw.type}, "website"][0]
 	_card:  [if _isObj if S.raw.card != _|_ {S.raw.card}, if _hasImage {"summary_large_image"}, "summary"][0]
@@ -4197,7 +4205,7 @@ import (
 		false,
 	][0]
 
-	_appName: [if L.meta != _|_ if L.meta.name != _|_ {L.meta.name}, "App"][0]
+	_appName: [if L.meta != _|_ if L.meta.title != _|_ {L.meta.title}, if L.meta != _|_ if L.meta.name != _|_ {L.meta.name}, "App"][0]
 	_appDesc: [if L.meta != _|_ if L.meta.description != _|_ {L.meta.description}, ""][0]
 
 	_authSummary: [

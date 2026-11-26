@@ -1,7 +1,7 @@
 ---
 type: decision
 title: Telemetry, tags and consent
-description: Proposed, partially built (the tag frame, the consent bar and the sign-up conversion) — one first-party collection path for product events and operational telemetry, routed by Vector to stores that differ in retention (DuckLake for product events, VictoriaMetrics and Jaeger for operations) and to advertising destinations server-side; tags are declared destinations, and the few that need the vendor's cookies run in an isolated same-origin tag frame, never in the app's document; consent is a framework screen and a replicated row enforced where events fan out, and Rill reads the lake.
+description: Proposed, partially built (the tag frame, the consent bar, and the sign-up and link conversions) — one first-party collection path for product events and operational telemetry, routed by Vector to stores that differ in retention (DuckLake for product events, VictoriaMetrics and Jaeger for operations) and to advertising destinations server-side; tags are declared destinations, and the few that need the vendor's cookies run in an isolated same-origin tag frame, never in the app's document; consent is a framework screen and a replicated row enforced where events fan out, and Rill reads the lake.
 status: proposed, partially built
 ---
 
@@ -69,9 +69,15 @@ signals, Meta's Conversions API. Two delivery classes:
   ([[2026-10-03-external-effects|external effects]]), keyed by the click identifier stored
   with the user (`gclid`, `gbraid`, `wbraid`) and an idempotent transaction id. Google
   routes offline conversions and Customer Match through its Data Manager API since 2026.
-  Until that path exists, a conversion the terminal sees is reported from the tag frame,
-  keyed by the account's id: built for sign-up as `meta.googleTag.conversions`, its
-  contract in [[../component-contracts#google-ads-tag-metagoogletag|component contracts]].
+  Until that path exists, a conversion the terminal sees is reported from the tag frame.
+  Sign-up is built as `meta.googleTag.conversions.signup`, keyed by the account's id. A
+  click-through to another site is built as `conversions.links`, once per page and with
+  no key. That leaves the airlock no row to hold it to, so the link has to open in a new
+  tab: the page and its frame then outlive the click long enough to send it. The
+  alternatives were holding the navigation until the frame acknowledges, which delays
+  every reader, and a redirect through the app's door, which would add a hop to the
+  measurement. The contract is in
+  [[../component-contracts#google-ads-tag-metagoogletag|component contracts]].
 - *Signals* (page-level remarketing hits) are many and loss-tolerant: a Vector sink, the
   way server-side GTM and Zaraz fan out server to server.
 
