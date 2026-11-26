@@ -23,6 +23,23 @@ app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/mi
   assertStringIncludes(sql, "PERFORM bill(NEW.id)");
 });
 
+Deno.test("a state's entry is one action or a list of them, and an unknown key in either is refused", async () => {
+  for (const entry of ['{raise: {notify: "trace", payload: "initial"}}', '[{raise: {notify: "trace", payload: "initial"}}]']) {
+    const files = await emitFiles(paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+    assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, "initial");
+  }
+  for (const entry of ["{bogus: 1}", '[{raise: {notify: "trace", payload: "initial"}}, {bogus: 1}]']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "_entryChecked");
+    assertStringIncludes(res.stderr, "bogus: field not allowed");
+  }
+});
+
 Deno.test("state actions run on entry and in exit-transition-entry order", async () => {
   const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
 app: state: mecha: rows: PaymentMachine: states: {

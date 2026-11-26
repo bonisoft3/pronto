@@ -1114,7 +1114,15 @@ import (
 		onDone:  #OutcomeTransition
 		onError: #OutcomeTransition
 	}
-	entry?: #MechaAction | [...#MechaAction]
+	// A single action or a list of them, checked without a disjunction: a disjunction here costs cue 0.17+
+	// tens of GB on an app with many machines. `entry` is held open and `_entryChecked` unifies each action
+	// with #MechaAction, so a malformed one still refuses.
+	entry?: _
+	_entryChecked: [
+		if entry != _|_ if (entry & [...]) != _|_ {[for a in entry {a & #MechaAction}]},
+		if entry != _|_ {[entry & #MechaAction]},
+		[],
+	][0]
 	exit?:  #MechaAction | [...#MechaAction]
 }
 
