@@ -77,7 +77,7 @@ one mechanism:
 | what changed | level | what the page does |
 |---|---|---|
 | rows | data | nothing: live queries move them; never a release |
-| a catalogue | words | rewords the screen in place |
+| a catalogue | words | rewords the screen in place, taken with the map before any screen moves; one that drops a key restarts |
 | a screen's HTML or CSS | skeleton | morphs it in place (`morphScreen`), keeping focus, scroll and anything typed |
 | a shared stylesheet | style | adds the new sheet and removes the old: a new address is a new sheet |
 | a handler, renderer, validation or adapter | role | remounts the screens that use it, carrying drafts through the morph's `captureFields`/`restoreFields`; roles are text evaluated in a fresh compartment per mount (`jessie.js`), so nothing native is replaced |
@@ -141,7 +141,9 @@ The first phase is built, and its contract is the references':
 - A page asks its own address for the entry, past the worker, when it is shown
   again and every five minutes, and plans from the two maps: templates,
   screen styles and catalogues in place, anything else a restart that drops the
-  kept entries first.
+  kept entries first. The catalogues and the map are taken in one task before
+  any template moves, so no screen reads one release's markup against the
+  other's words, and a catalogue that drops a key restarts.
 - `accept-upgrade` passes on Truco: a browser whose worker kept an earlier
   deployment ends running the one served now.
 
