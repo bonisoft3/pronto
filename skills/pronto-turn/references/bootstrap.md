@@ -3,13 +3,13 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **1.17.0** through CUE module **1.17.1**, and Sayt **0.49.2**.
+Use Pronto **1.18.0** through CUE module **1.18.1**, and Sayt **0.49.2**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
-A finish CUE module (for example `v1.17.1`) pins and locks the preceding Pronto
-source distribution (`1.17.0`). Generated `.mise.toml` and `mise.lock` agree on
-every tool version; keep `"github:bonisoft3/pronto" = "1.17.0"` rather than
+A finish CUE module (for example `v1.18.1`) pins and locks the preceding Pronto
+source distribution (`1.18.0`). Generated `.mise.toml` and `mise.lock` agree on
+every tool version; keep `"github:bonisoft3/pronto" = "1.18.0"` rather than
 rewriting it to the CUE module tag.
 
 Bootstrap is the agent's to run, first, in the app's directory: everything it
@@ -32,7 +32,7 @@ replace it; copy from the checkout's idioms and bootstrap from the release.
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.17.1
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.18.1
    ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v1
    ```
 
