@@ -80,6 +80,10 @@ const scriptText = (text: string) => text.replace(/\r\n?/g, '\n').replaceAll('\0
 // locales name, agent worker units, and the shell's own three files. A file the terminal serves
 // from its own tree is named from the root, `/omnishell/...`, and read there.
 const served = new Set<string>(['shell/shell.json', 'shell/shell.css', 'shell/design.css'])
+const entryHtml = await read('shell/index.html')
+for (const [, href] of entryHtml.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)) {
+  if (!isExternal(href)) served.add(new URL(href, 'file:///shell/').pathname.slice(1))
+}
 for (const route of shell.routes) {
   for (const v of Object.values(route.files)) for (const f of typeof v === 'string' ? [v] : v) served.add(f)
 }
@@ -314,7 +318,7 @@ const replace = (html: string, from: string | RegExp, to: string) => {
   const next = html.replace(from, () => to)
   return next === html ? fail(`shell/index.html: ${String(from)} not found`) : next
 }
-let html = await read('shell/index.html')
+let html = entryHtml
 if (programs.length) html = html.replace(/trusted-types ([^";]+)/g, '$& mecha-compute').replace("connect-src 'self'", "connect-src 'self' blob:")
 html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${files['shell/shell.css']}</style>`)
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)

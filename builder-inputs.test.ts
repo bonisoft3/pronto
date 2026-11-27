@@ -52,3 +52,16 @@ Deno.test("visual integration carries authored screens outside the default direc
     if (!paths.includes(path)) throw new Error(`integration image omits ${path}`);
   }
 });
+
+// Agent runners may allocate a PTY; terminal detection must not enable a TUI.
+Deno.test("automated host and replay commands explicitly disable the process-compose TUI", async () => {
+  const got = await built(`{
+    launch: #installedWithTerminal.out.project.targets.launch.cmd.launch.do
+    integrate: #installedWithTerminal.out.project.targets.integrate.cmd.builtin.do
+    replay: #installedWithTerminal.out.project.targets["ci-replay"].cmd.builtin.do
+  }`);
+  if (!got.ok) throw new Error(got.out);
+  for (const [name, command] of Object.entries(JSON.parse(got.out) as Record<string, string>)) {
+    if (!/PC_DISABLE_TUI(?:: "true"|=true)/.test(command)) throw new Error(`${name} may start an interactive TUI`);
+  }
+});

@@ -4057,6 +4057,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}
 		}
 		surface: {
+			if D.code.surface.splash != _|_ {
+				splash: D.code.surface.splash
+			}
 			if D.boot != _|_ {
 				assets: boot: D.boot
 			}
@@ -7229,6 +7232,9 @@ _pgrollDir: "services/database/pgroll"
 		"\(E.terminal.surface.css)": {
 			format: "text"
 			text:   E.terminal.surface.assets.css
+		}
+		if E.code.surface.splash != _|_ {
+			"shell/splash.css": {format: "css", text: E.code.surface.splash.css}
 		}
 		"\(E.terminal.surface.boot)": {
 			format: "text"

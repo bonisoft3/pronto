@@ -13,6 +13,7 @@
 // cannot reach it.
 
 import type { LiveStatic } from "./live-tree.ts";
+import { writeAgentInstructions } from "./agent-instructions.ts";
 import { tokenRolesRemoval } from "./role-removal.ts";
 import { dirname, resolve } from "node:path";
 import { packageHatch, type Declaration } from "./activepieces-package.ts";
@@ -618,6 +619,7 @@ async function generate(): Promise<void> {
   await Deno.writeTextFile(`${live}/.gitignore`, "*\n");
   await Deno.writeTextFile(`${live}/caddy/release-scripts`, "");
   await Deno.writeTextFile(`${live}/sources.json`, JSON.stringify([...statics.values()]));
+  await writeAgentInstructions(appDir);
 }
 
 await generate();

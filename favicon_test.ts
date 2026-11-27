@@ -2,7 +2,7 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import * as path from "node:path";
 import { encodeBase64 } from "jsr:@std/encoding@1.0.7/base64";
 
-async function exportCue(appCue: string): Promise<{ files: Record<string, { text?: string; data?: unknown }>; statics: { file: string; target: string; watch: boolean }[] }> {
+async function exportCue(appCue: string): Promise<{ files: Record<string, { text?: string; data?: unknown }>; statics: { file: string; target: string; watch: boolean }[]; terminalStatics: { file: string; target: string; watch: boolean }[] }> {
   const cueCode = `
 package test
 
@@ -43,6 +43,7 @@ out: {
     build:    _build
   }).files
   statics: _cluster.meta.statics
+  terminalStatics: _terminal.surface.statics
 }
 `;
 
@@ -469,6 +470,7 @@ Deno.test("bundle.ts inlines local favicon and apple-touch-icon into single-file
     await Deno.writeTextFile(path.join(app, "shell/shell.json"), JSON.stringify({ routes: [], migrations: [], tables: [] }));
     await Deno.writeTextFile(path.join(app, "shell/shell.css"), "");
     await Deno.writeTextFile(path.join(app, "shell/design.css"), "");
+    await Deno.writeTextFile(path.join(app, "shell/splash.css"), "#pronto-splash { color: rebeccapurple; }");
     await Deno.writeTextFile(
       path.join(app, "shell/favicon.svg"),
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎯</text></svg>',
@@ -485,6 +487,7 @@ Deno.test("bundle.ts inlines local favicon and apple-touch-icon into single-file
         '<link rel="alternate icon" href="//cdn.example.com/icon.ico">',
         '<link rel="stylesheet" href="./shell.css">',
         '<link rel="stylesheet" href="./design.css">',
+        '<link rel="stylesheet" href="./splash.css">',
         '</head><body><div id="app"></div>',
         '<script type="module" src="./boot.js"></script>',
         "</body></html>",
@@ -506,6 +509,7 @@ Deno.test("bundle.ts inlines local favicon and apple-touch-icon into single-file
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎯</text></svg>',
     ));
     const pngData = encodeBase64(fakePng);
+    assertStringIncludes(outHtml, "<style>#pronto-splash { color: rebeccapurple; }</style>");
     assertStringIncludes(outHtml, `href="data:image/svg+xml;base64,${svgData}"`);
     assertStringIncludes(outHtml, `href="data:image/png;base64,${pngData}"`);
     assertStringIncludes(outHtml, 'href="https://example.com/remote.png"');
@@ -515,3 +519,28 @@ Deno.test("bundle.ts inlines local favicon and apple-touch-icon into single-file
   }
 });
 
+Deno.test("document splash precedes the app and ships CSS in development and release", async () => {
+  const res = await exportCue(`
+    meta: {name: "splash", description: "", ir: sha256: "", targets: [], clocks: [], decisions: {}, tests: {}}
+    surface: splash: {html: "<p>Opening…</p>", css: "#pronto-splash { position: fixed; inset: 0; background: white; }"}
+  `);
+  for (const file of ["shell/index.html", ".pronto/development/index.html"]) {
+    const html = res.files[file].text!;
+    assertStringIncludes(html, '<div id="pronto-splash" role="status"><p>Opening…</p></div>');
+    assertEquals(html.indexOf('id="pronto-splash"') < html.indexOf('id="app"'), true);
+    assertStringIncludes(html, '<link rel="stylesheet" href="./splash.css">');
+    assertEquals(html.includes("{splash"), false);
+  }
+  assertStringIncludes(res.files["shell/splash.css"].text!, "background: white");
+  assertEquals(res.terminalStatics.some((s) => s.file === "shell/splash.css" && s.watch), true);
+});
+
+Deno.test("apps without a splash emit no splash assets or markers", async () => {
+  const res = await exportCue(`
+    meta: {name: "no-splash", description: "", ir: sha256: "", targets: [], clocks: [], decisions: {}, tests: {}}
+  `);
+  assertEquals(res.files["shell/splash.css"], undefined);
+  assertEquals(res.terminalStatics.some((s) => s.file === "shell/splash.css"), false);
+  const html = res.files["shell/index.html"].text!;
+  assertEquals(html.includes("splash"), false);
+});

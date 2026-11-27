@@ -108,7 +108,7 @@ installedReplayRule:   _loop.surface.checks.replay.cmds[0] & "use integrate.nu; 
 installedReplayAfter:  _installedProject.targets.replay.entrypoint.after.database & "healthy"
 installedReplayRunner: _installedProject.targets["ci-replay"] & {
 	dockerfile: from: ref: ":database"
-	cmd: builtin: do: "process-compose --no-server -f .bayt/process-compose.yaml run replay"
+	cmd: builtin: do: "PC_DISABLE_TUI=true process-compose --no-server -f .bayt/process-compose.yaml run replay"
 }
 // Commands reach sayt through the wrapper the app commits, at its pin.
 installedBuildCmd: _loop.surface.buildCmd & "./saytw build"

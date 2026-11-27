@@ -332,6 +332,7 @@ import (
 		  BAYT_LOCAL_SERVED_DIR: $served_dir
 		  BAYT_LOCAL_MOCK_AI: ($env.BAYT_LOCAL_MOCK_AI? | default "1")
 		  SAYT_PLATFORM: "host"
+		  PC_DISABLE_TUI: "true"
 		  DENO_NO_PROMPT: "1"
 		  DENO_CERT: $cert_p
 		} | insert $path_key $val_p)
@@ -398,6 +399,7 @@ import (
 		  BAYT_LOCAL_SERVED_DIR: $served_dir
 		  BAYT_LOCAL_MOCK_AI: ($env.BAYT_LOCAL_MOCK_AI? | default "1")
 		  SAYT_PLATFORM: "host"
+		  PC_DISABLE_TUI: "true"
 		  DENO_NO_PROMPT: "1"
 		  DENO_CERT: $cert_p
 		}
@@ -920,7 +922,7 @@ import (
 					}
 					cmd: builtin: {
 						shell: "sh"
-						do:    "process-compose --no-server -f .bayt/process-compose.yaml run replay"
+						do:    "PC_DISABLE_TUI=true process-compose --no-server -f .bayt/process-compose.yaml run replay"
 					}
 				}
 			}

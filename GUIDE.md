@@ -56,6 +56,54 @@ what it derives from and run the writer. `.pronto/` is the compiler's own record
 and is committed: `manifest.json`, `identity.json` (see [Identity](#identity)),
 `cel.json`, `facts.json`, `seeds.json`.
 
+Generation also creates the app-root `AGENTS.md`, or appends Pronto’s file-discovery
+instruction once while preserving existing app-specific content. This file stays
+app-owned and outside the generated-file manifest; existing apps receive the
+instruction on their next generation after upgrading Pronto.
+
+## Document splash
+
+Declare `surface.splash` for HTML/CSS shown in the initial document, before
+JavaScript or screen data loads. Keep the authored files beside `program.cue`
+and embed their contents:
+
+```cue
+@extern(embed)
+
+_splashHtml: _ @embed(file="splash.html", type=text)
+_splashCss:  _ @embed(file="splash.css", type=text)
+
+app: pronto.#App & {
+    surface: splash: {html: _splashHtml, css: _splashCss}
+}
+```
+
+`splash.html` is a static body fragment, for example `<p>Opening…</p>`.
+The shell wraps it in `<div id="pronto-splash" role="status">` outside `#app`.
+Scope its CSS to `#pronto-splash`; for a full-page cover:
+
+```css
+#pronto-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #111;
+}
+```
+
+Generation includes the fragment in the entry document and emits its stylesheet
+as `shell/splash.css`. Edit the embedded sources, not those generated files.
+The shell removes the splash when it presents the first screen, opens the
+sign-in gate, or displays a startup error. Navigation and screen revalidation
+never recreate it. This surface supports static HTML/CSS only: no scripts,
+handlers, data bindings, or application-controlled dismissal. Generation rejects
+active markup using the terminal’s markup rules; frames, embedded sheets, and
+shell-owned ids are also refused. Its stylesheet
+remains loaded after dismissal, so keep all rules scoped to the splash.
+
 ## The build loop
 
 ```bash

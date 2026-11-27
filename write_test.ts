@@ -6,6 +6,7 @@ import {
 } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { AGENT_INSTRUCTIONS, writeAgentInstructions } from "./agent-instructions.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const writer = join(repo, "plugins/pronto/write.ts");
@@ -760,3 +761,61 @@ async function runGeneratedActivepieces(context: string): Promise<void> {
     await child.status;
   }
 }
+
+Deno.test("document splash embeds owned sources and refuses executable markup before emission", async () => {
+  const app = await Deno.makeTempDir({dir: join(repo, "apps"), prefix: ".write-splash-"});
+  try {
+    await copyJsfb(app);
+    await Deno.writeTextFile(join(app, "splash.cue"), `@extern(embed)
+package jsfb
+_splashHtml: _ @embed(file="splash.html", type=text)
+_splashCss: _ @embed(file="splash.css", type=text)
+code: surface: splash: {html: _splashHtml, css: _splashCss}
+`);
+    await Deno.writeTextFile(join(app, "splash.html"), "<p>Opening…</p>");
+    await Deno.writeTextFile(join(app, "splash.css"), "#pronto-splash { background: white; }");
+    const build = () => new Deno.Command(Deno.execPath(), {
+      args: ["run", "--no-check", "--config", join(repo, "plugins/pronto/deno.json"), "--allow-read", "--allow-write=.", "--allow-run", "--allow-env", writer, "."],
+      cwd: app,
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo },
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const first = await build();
+    assert(first.success, new TextDecoder().decode(first.stderr));
+    assertStringIncludes(await Deno.readTextFile(join(app, "AGENTS.md")), AGENT_INSTRUCTIONS);
+    const entry = await Deno.readTextFile(join(app, "shell/index.html"));
+    assertStringIncludes(entry, '<div id="pronto-splash" role="status"><p>Opening…</p></div>');
+    assertStringIncludes(await Deno.readTextFile(join(app, "shell/splash.css")), "background: white");
+    assertEquals(await Deno.readTextFile(join(app, "splash.html")), "<p>Opening…</p>");
+    await Deno.writeTextFile(join(app, "splash.html"), '<script src="/escape.js"></script>');
+    const invalid = await build();
+    assertEquals(invalid.success, false);
+    assertStringIncludes(new TextDecoder().decode(invalid.stderr), "surface.splash.html");
+    assertEquals(await Deno.readTextFile(join(app, "shell/index.html")), entry);
+  } finally {
+    await Deno.remove(app, {recursive: true});
+  }
+});
+
+Deno.test("app-root agent instructions create, preserve, and avoid repeated appends", async () => {
+  const app = await Deno.makeTempDir({prefix: "pronto-agents-"});
+  try {
+    const path = join(app, "AGENTS.md");
+    await writeAgentInstructions(app);
+    assertEquals(await Deno.readTextFile(path), `${AGENT_INSTRUCTIONS}\n`);
+    for (const authored of ["", "# App rules\n\nKeep app-specific instructions.", "# App rules\r\n\r\nKeep app-specific instructions.\r\n"]) {
+      await Deno.writeTextFile(path, authored);
+      await writeAgentInstructions(app);
+      const first = await Deno.readTextFile(path);
+      assert(first.startsWith(authored), "generation rewrote app-owned instructions");
+      assertStringIncludes(first, AGENT_INSTRUCTIONS);
+      await Deno.utime(path, 1, 1);
+      await writeAgentInstructions(app);
+      assertEquals(await Deno.readTextFile(path), first);
+      assertEquals((await Deno.stat(path)).mtime?.getTime(), 1000);
+    }
+  } finally {
+    await Deno.remove(app, {recursive: true});
+  }
+});

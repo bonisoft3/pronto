@@ -501,6 +501,7 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
   // read off it rather than added to the expression above.
   const { surface, state, meta: appMeta } = exp.program as unknown as {
     surface: {
+      splash?: { html: string; css: string };
       screens: Record<string, { ir: string; route: string; markup?: string; forms?: { id: string; entity: string }[]; files: { html: string; css: string; renderers?: string[] } }>;
       handlers?: Record<string, { ir: string; src: string }>;
       endowments?: Record<string, string[]>;
@@ -671,7 +672,7 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
   // What the screens say, as the terminal reads them. Spawned like the export
   // above and from the same directory, so the path the program's terminal
   // declares is the path that resolves; --no-config because every module the
-  // reader loads is a static import of its own.
+  // reader loads is a static import with its own pinned dependencies.
   const markupReader = await terminalPath(exp.markupReader, appDir);
   const readMarkup = async (): Promise<Record<string, ScreenProjection>> => {
     const child = new Deno.Command("deno", {
@@ -685,13 +686,14 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
     await input.write(new TextEncoder().encode(JSON.stringify({
       actors: exp.actors,
       screens: screenPaths,
+      splash: surface.splash?.html,
     })));
     await input.close();
     const read = await child.output();
     if (!read.success) throw new Error(`${exp.markupReader} refused this app's markup`);
     return JSON.parse(new TextDecoder().decode(read.stdout)).screens;
   };
-  const projected = Object.keys(screenPaths).length > 0 ? await readMarkup() : {};
+  const projected = Object.keys(screenPaths).length > 0 || surface.splash !== undefined ? await readMarkup() : {};
 
 
   const screens: DerivedScreen[] = [];

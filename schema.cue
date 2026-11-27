@@ -2373,6 +2373,7 @@ import (
 	}
 
 	surface: {
+		splash?: {html: string, css: string}
 		screens: [string]~(Name,_): {
 			let S = self
 			#Screen & {
