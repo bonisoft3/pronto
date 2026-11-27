@@ -793,7 +793,7 @@ _sqlType: {
 		_exitActions: [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {
 			(#mechaActionSql & {action: a, op: "UPDATE"}).out
 		}]
-		_entryActions: [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {
+		_entryActions: [for a in [if ST.states[t.target]._entryChecked != _|_ {ST.states[t.target]._entryChecked}, if ST.states[t.target].entry != _|_ {[if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0]}, []][0] {
 			(#mechaActionSql & {action: a, op: "UPDATE"}).out
 		}]
 		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk, field: ST.field, signalled: ST.signalled[t.target] != _|_}).out}]
@@ -852,7 +852,7 @@ _sqlType: {
 		_guard:   [if t.guard != _|_ {" AND (\(t.guard)) IS TRUE"}, ""][0]
 		_actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		_exit:    [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
-		_entry:   [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_entry:   [for a in [if ST.states[t.target]._entryChecked != _|_ {ST.states[t.target]._entryChecked}, if ST.states[t.target].entry != _|_ {[if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0]}, []][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		_enter:   [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk, field: ST.field, signalled: ST.signalled[t.target] != _|_}).out}]
 		"""
 			      IF NEW."\(ST.field)" = '\(t.delivery)' AND \(_kind)\(_guard) THEN
@@ -993,8 +993,7 @@ _sqlType: {
 		_entityName:    [if S.entities[S.machine.entity] != _|_ {S.machine.entity}, for en, e in S.entities if e.table == S.machine.entity {en}][0]
 		_pk:            [for f in S.entities[_entityName].fields if f.pk != _|_ if f.pk {f.name}]
 		_initialEnter:  [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk, field: _field, signalled: _signalled[S.machine.initial] != _|_}).out + "\n"}, ""][0]
-		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
-		for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
+		_initialActions: [for a in [if S.machine.states[S.machine.initial]._entryChecked != _|_ {S.machine.states[S.machine.initial]._entryChecked}, if S.machine.states[S.machine.initial].entry != _|_ {[if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0]}, []][0] {
 			(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
 		}]
 		// A row in an invoking state is the ledger's instance until its outcome
@@ -1083,7 +1082,7 @@ _sqlType: {
 			(name): {
 				if state.type != _|_ {type: state.type}
 				entry: list.Concat([
-					[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
+					[for a in [if state._entryChecked != _|_ {state._entryChecked}, if state.entry != _|_ {[if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0]}, []][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
 					[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk, field: _field, signalled: _signalled[name] != _|_}).out}],
 				])
 				exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]

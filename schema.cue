@@ -1114,8 +1114,20 @@ import (
 		onDone:  #OutcomeTransition
 		onError: #OutcomeTransition
 	}
-	entry?: #MechaAction | [...#MechaAction]
-	exit?:  #MechaAction | [...#MechaAction]
+	// A single action or a list of them, checked without a disjunction: a disjunction here costs cue 0.17+
+	// tens of GB on an app with many machines. `entry` is held open, `_entryChecked` unifies each action
+	// with #MechaAction, and `_entryConcrete` refuses concrete entries that omit required fields while
+	// leaving abstract #MechaState definitions valid under `cue vet -c=false`.
+	entry?: _
+	_entryChecked: [
+		if entry != _|_ if (entry & [...]) != _|_ {[for a in entry {a & #MechaAction}]},
+		if entry != _|_ if (entry & [...]) == _|_ {[entry & #MechaAction]},
+		[],
+	][0]
+	if entry != _|_ if json.Marshal(entry) != _|_ {
+		_entryConcrete: [if json.Marshal(_entryChecked) != _|_ {true}, "entry: every action's required fields must be concrete"][0] & true
+	}
+	exit?: #MechaAction | [...#MechaAction]
 }
 
 #LifecycleTransition: {
@@ -1135,7 +1147,7 @@ import (
 	level: #EffectLevel
 	_actions: list.Concat([
 		[for _, tr in M._on for act in tr.actions {act}],
-		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
+		[if M.states != _|_ for _, st in M.states for a in st._entryChecked {a}],
 		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
 		// A lone arrow's actions are asked of the arrow itself: wrapped in a
 		// list first, a missing `actions` stalls CUE 0.18 without end
@@ -3316,7 +3328,7 @@ import (
 		[for i in _invokes let m = A.state.mecha.rows[i.machine]
 		for actions in list.Concat([
 			[if m.states[i.state].exit != _|_ {m.states[i.state].exit}],
-			[for ar in i.arrows if m.states[ar.target] != _|_ if m.states[ar.target].entry != _|_ {m.states[ar.target].entry}],
+			[for ar in i.arrows if m.states[ar.target] != _|_ {m.states[ar.target]._entryChecked}],
 		]) for a in [if (actions & [...]) != _|_ {actions}, [actions]][0] if a.reject != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's entry or exit actions reject, which would refuse the recorded outcome's delivery"
 		}],

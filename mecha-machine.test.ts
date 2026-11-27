@@ -23,6 +23,63 @@ app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/mi
   assertStringIncludes(sql, "PERFORM bill(NEW.id)");
 });
 
+Deno.test("a state's entry is one action or a list of them, and invalid or incomplete entries are refused", async () => {
+  for (const entry of ['{raise: {notify: "trace", payload: "initial"}}', '[{raise: {notify: "trace", payload: "initial"}}]']) {
+    const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
+app: state: mecha: rows: PaymentMachine: states: {
+  pending: entry: ${entry}
+  charging: entry: [{raise: {notify: "trace", payload: "entered"}}]
+}
+`);
+    const sql = files["services/database/migrations/010_machines.sql"].text;
+    assertStringIncludes(sql, "pg_notify('trace', 'initial')");
+    assertStringIncludes(sql, "pg_notify('trace', 'entered')");
+  }
+  for (const entry of ["{}", "[]"]) {
+    const files = await emitFiles(paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+    assertEquals(files["services/database/migrations/010_machines.sql"].text.includes("pg_notify"), false);
+  }
+  const reusable = paymentProgram() + `
+#PendingState: pronto.#MechaState & {entry: {reject: string}}
+reusable: #PendingState & {entry: {reject: "blocked"}}
+`;
+  for (const args of [["vet", "-c=false", "-"], ["vet", "-c", "-"]]) {
+    const res = await cue(args, reusable);
+    assertEquals(res.success, true, res.stderr);
+  }
+  for (const entry of ["{bogus: 1}", '[{raise: {notify: "trace", payload: "initial"}}, {bogus: 1}]']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "states.pending");
+    assertStringIncludes(res.stderr, "bogus: field not allowed");
+  }
+  const typoOut = await cue(["export", "-", "-e", "out"], paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: {rasie: {notify: "x", payload: "y"}}
+`);
+  assertEquals(typoOut.success, false);
+  assertStringIncludes(typoOut.stderr, "states.pending");
+  for (const entry of ['{raise: {notify: "trace"}}', '[{raise: {notify: "trace"}}]']) {
+    for (const args of [["export", "-", "-e", "app"], ["vet", "-c", "-"], ["export", "-", "-e", "out"]]) {
+      const res = await cue(args, paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+      assertEquals(res.success, false);
+      assertStringIncludes(res.stderr, "states.pending");
+    }
+  }
+  for (const entry of ["42", "null", '[[{reject: "x"}]]']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `
+app: state: mecha: rows: PaymentMachine: states: pending: entry: ${entry}
+`);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "states.pending");
+  }
+});
+
 Deno.test("state actions run on entry and in exit-transition-entry order", async () => {
   const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
 app: state: mecha: rows: PaymentMachine: states: {
