@@ -45,7 +45,7 @@ import (
 	"github:denoland/deno":    "v2.9.7"
 	"github:go-task/task":     "v3.54.0"
 	"github:nushell/nushell":  "0.116.1"
-	"github:bonisoft3/pronto": #Version
+	"github:bonisoft3/pronto": *#Version | string
 	"github:bonisoft3/sayt":   #SaytVersion
 	// Compares every proto the app does not withhold against its own git
 	// history (check-proto.ts).
