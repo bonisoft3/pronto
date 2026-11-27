@@ -5,12 +5,11 @@
 //
 // The build graph reaches bayt the way .say.yaml reaches sayt: the
 // program's `build:` seat is authored here as #Build, `cue export` lands
-// the resolved value as concrete bayt.json, and the app's bayt.cue is a
-// thin stub that embeds that file and unifies it back through
-// bayt.#project — bayt's schema stays live at generate time, and stack
-// staleness is bounded by one build cycle (the writer re-exports on every
-// loop turn). Ownership: bayt.json is the do-not-edit artifact; the stub
-// is the human seam — escape-hatch overrides unify there, after the embed.
+// the resolved value directly as concrete bayt.json, and `bayt generate`
+// reads that sibling bayt.json directly and validates it through bayt.#render.
+// The emitted bayt.cue stub declares `_baytJson: true` and redeclares only
+// the escape-hatch seams (`cluster`, `terminal`, `loop`). Ownership: both
+// bayt.json and bayt.cue are do-not-edit artifacts authored from program.cue.
 package bayt
 
 import (
@@ -1075,8 +1074,8 @@ import (
 					kind:       "Subscription"
 					metadata: name: "\(p.group)-retry"
 					spec: {
-						pubsubname:      "redis-streams"
-						topic:           "\(p.group)-retry"
+						pubsubname: "redis-streams"
+						topic:      "\(p.group)-retry"
 						routes: default: "/\(p.name)/replay"
 						deadLetterTopic: "\(p.group)-dead"
 					}

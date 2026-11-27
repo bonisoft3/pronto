@@ -276,12 +276,14 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       await deno(join(scratch, "pronto/write.ts"), ["."]);
       const build = JSON.parse(await Deno.readTextFile(join(app, "bayt.json")));
       assert(build.name === "jsfb", "standalone build has an invalid project name");
-      // bayt.cue declares no render (bayt generate renders from its own
-      // driver), so the probe declares one beside it for this export alone.
-      const baytImport = (await Deno.readTextFile(join(app, "bayt.cue"))).match(/^\tbayt "([^"]+)"$/m)?.[1];
-      assert(baytImport, "bayt.cue imports no bayt core");
+      // bayt.cue carries only the escape-hatch seams; the build graph lives in
+      // bayt.json (which bayt.#render validates), so the probe embeds it for
+      // this export alone.
       const probe = join(app, "render_probe.cue");
-      await Deno.writeTextFile(probe, `package jsfb\n\nimport bayt "${baytImport}"\n\n_render: bayt.#render & {project: _jsfb, depManifests: {}}\n`);
+      await Deno.writeTextFile(
+        probe,
+        '@extern(embed)\npackage jsfb\n\nimport bayt "github.com/bonisoft3/bayt/core:bayt"\n\n_probeBaytJson: _ @embed(file="bayt.json")\n_render: bayt.#render & {project: _probeBaytJson, depManifests: {}}\n',
+      );
       let dockerfile: string;
       try {
         dockerfile = await cue(app, ["export", ".", "-e", "_render.docker.dockerfiles.build", "--out", "text"]);

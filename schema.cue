@@ -1103,7 +1103,7 @@ import (
 
 #MechaState: {
 	type?: "final" | "normal"
-	on?: [string]~(Event,_):              #MechaTransitionValue
+	on?: [string]~(Event,_): #MechaTransitionValue
 	// XState's after: a key is milliseconds, or a name the machine's delays
 	// gives.
 	after?: [=~"^(0|[1-9][0-9]{0,11}|[a-z][a-zA-Z0-9_]*)$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
@@ -2707,7 +2707,7 @@ import (
 						[if actor.via == "sync" if m.ports == _|_ || m.ports.join == _|_ {"\(cName).\(sName): a sync child joins \(m.name), which declares no join"}],
 						[if actor.via == "sync" if !strings.HasPrefix(instance, "{param.") {"\(cName).\(sName): a sync child's input.instance names its route's parameter"}],
 						[if actor.via == "sync" if strings.HasPrefix(instance, "{param.") if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_
-						if !list.Contains(strings.Split(A.surface.screens[st.meta.screen].route, "/"), ":" + strings.TrimSuffix(strings.TrimPrefix(instance, "{param."), "}")) {"\(cName).\(sName): \(st.meta.screen)'s route has no \(instance)"}],
+						if !list.Contains(strings.Split(A.surface.screens[st.meta.screen].route, "/"), ":"+strings.TrimSuffix(strings.TrimPrefix(instance, "{param."), "}")) {"\(cName).\(sName): \(st.meta.screen)'s route has no \(instance)"}],
 					])
 				},
 			])
@@ -2782,7 +2782,7 @@ import (
 		[if st.type != _|_ if st.type == "parallel" {"mecha \(hName).\(sName): a Mecha machine has no parallel states"}],
 	]) {v}], [if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.setup.ports != _|_ if h.machine.setup.ports.wake != _|_ {
 		"mecha \(hName).setup.ports.wake: a timer is a state's after, its delay a number of milliseconds or a name in setup.delays"
-	}],[if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
+	}], [if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
 		"mecha \(hName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"
 	}]])
 	_mechaRefusal: [if len(_mechaViolations) == 0 {true}, _mechaViolations[0]][0] & true
@@ -3028,20 +3028,20 @@ import (
 	_rewriteViolations: [
 		for n, r in _rewrites
 		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[A-Za-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
-		if t =~ "^:[A-Za-z]" if !strings.Contains(r.source + "/", "/" + t + "/") if !list.Contains(_rewriteHas[n], strings.TrimPrefix(t, ":")) {
+		if t =~ "^:[A-Za-z]" if !strings.Contains(r.source+"/", "/"+t+"/") if !list.Contains(_rewriteHas[n], strings.TrimPrefix(t, ":")) {
 			"rewrite \(n): the destination names \(t), where the source and `has` give \(strings.Join(list.Concat([[for p in regexp.FindAll("(:[a-z][A-Za-z0-9_]*|$)", r.source, -1) if p != "" {p}], [for p in _rewriteHas[n] {":" + p}], [if !strings.Contains(r.source, ":") if len(_rewriteHas[n]) == 0 {"no parameter"}]]), ", "))"
 		},
 		// Next.js lets a name given twice be the later's, `has` after the
 		// source: a key's letters make that easy to do unseen (`page1` and
 		// `page2` are both `:page`), so here each name is given once.
-		for n, r in _rewrites for p in _rewriteHas[n] if strings.Contains(r.source + "/", "/:" + p + "/") {
+		for n, r in _rewrites for p in _rewriteHas[n] if strings.Contains(r.source+"/", "/:"+p+"/") {
 			"rewrite \(n): `has` and the source both give :\(p), where Next.js would have the one of `has` replace the source's: name one of them by a group of its value, (?<name>…)"
 		},
-		for n, r in _rewrites for i, p in _rewriteHas[n] if list.Contains(list.Drop(_rewriteHas[n], i + 1), p) if !list.Contains(list.Take(_rewriteHas[n], i), p) {
+		for n, r in _rewrites for i, p in _rewriteHas[n] if list.Contains(list.Drop(_rewriteHas[n], i+1), p) if !list.Contains(list.Take(_rewriteHas[n], i), p) {
 			"rewrite \(n): `has` gives :\(p) twice, where Next.js would have the later replace the earlier: name one of them by a group of its value, (?<name>…)"
 		},
 		// The door reads a key's one value, so one item states all of it.
-		for n, r in _rewrites if r.has != _|_ for i, h in r.has if list.Contains([for o in list.Drop(r.has, i + 1) {o.key}], h.key) if !list.Contains([for o in list.Take(r.has, i) {o.key}], h.key) {
+		for n, r in _rewrites if r.has != _|_ for i, h in r.has if list.Contains([for o in list.Drop(r.has, i+1) {o.key}], h.key) if !list.Contains([for o in list.Take(r.has, i) {o.key}], h.key) {
 			"rewrite \(n): two `has` items name the key \(h.key), and one item states all a key's value meets"
 		},
 		// Go's expression takes a name declared twice, and the door gives
@@ -3074,7 +3074,7 @@ import (
 		// PostgREST reads it: an escape would hide one named twice.
 		for n, r in _rewrites if r.destination =~ "^/crud/rpc/[^?]*\\?."
 		let keys = [for pair in strings.Split(strings.SplitN(r.destination, "?", 2)[1], "&") {strings.SplitN(pair, "=", 2)[0]}]
-		for i, k in keys if strings.Contains(k, "%") || (list.Contains(list.Drop(keys, i + 1), k) && !list.Contains(list.Take(keys, i), k)) {
+		for i, k in keys if strings.Contains(k, "%") || (list.Contains(list.Drop(keys, i+1), k) && !list.Contains(list.Take(keys, i), k)) {
 			[
 				if strings.Contains(k, "%") {"rewrite \(n): a function's destination writes the key \(k) with an escape, and a key is written as PostgREST reads it, so that one named twice is seen"},
 				"rewrite \(n): a function's destination names \(k) twice, and PostgREST takes the last, so the one before it is never the argument",
@@ -3487,7 +3487,7 @@ import (
 	// write, immutable or not. A form is a client's write: it names no
 	// output-only field, and an update form no immutable one.
 	_behaviorFields: [for en, e in A.state.entities for f in e.fields
-		for b in ["outputOnly", "immutable"] if f[b] != _|_ if f[b] {entity: en, field: f, behavior: b}]
+	for b in ["outputOnly", "immutable"] if f[b] != _|_ if f[b] {entity: en, field: f, behavior: b}]
 	_behaviorViolations: list.Concat([
 		[for s in _behaviorFields for k in ["pk", "retired"] if s.field[k] {
 			"entity \(s.entity) field \(s.field.name) is \(s.behavior), and is \([if k == "pk" {"a primary key: a client names the key it creates its row by"}, "retired: nothing writes it"][0])"
@@ -3537,7 +3537,7 @@ import (
 		// directory, where a shim is found by its name.
 		[for hn, h in A.capabilities.hatches if h.kind == "isolate"
 		let names = [for f in h.files if strings.HasSuffix(f, ".wasm") || strings.HasSuffix(f, ".wasm.js") {path.Base(f, path.Unix)}]
-		for i, n in names if list.Contains(list.Drop(names, i + 1), n) {
+		for i, n in names if list.Contains(list.Drop(names, i+1), n) {
 			"isolate hatch \(hn) has two files named \(n): its WebAssembly and shims share one directory beside the bundle"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.port != 8080 {
@@ -3678,9 +3678,9 @@ import (
 
 	_envelope: #envelopePlan & {
 		meta:         A.meta
-		surface:      A.surface
-		state:        A.state
 		capabilities: A.capabilities
+		if A.meta.llms != _|_ || A.meta.manifest != _|_ {surface: A.surface}
+		if A.meta.llms != _|_ {state: A.state}
 	}
 	_envelopeRefusal: [if len(_envelope._errors) == 0 {true}, _envelope._errors[0]][0] & true
 }
@@ -4716,12 +4716,14 @@ import (
 	manifest: #manifestPlan & {
 		meta:    P.meta
 		favicon: P.favicon
-		if P.capabilities != _|_ {capabilities: P.capabilities}
-		if P.surface != _|_ {
-			if P.surface.screens != _|_ {screens: P.surface.screens}
-			if P.surface.design != _|_ {design: P.surface.design}
+		if P.meta.manifest != _|_ {
+			raw: P.meta.manifest
+			if P.capabilities != _|_ {capabilities: P.capabilities}
+			if P.surface != _|_ {
+				if P.surface.screens != _|_ {screens: P.surface.screens}
+				if P.surface.design != _|_ {design: P.surface.design}
+			}
 		}
-		if P.meta.manifest != _|_ {raw: P.meta.manifest}
 	}
 
 	social: #socialPlan & {
@@ -4731,10 +4733,12 @@ import (
 
 	llms: #llmsPlan & {
 		meta: P.meta
-		if P.surface != _|_ {surface: P.surface}
-		if P.state != _|_ {state: P.state}
-		if P.capabilities != _|_ {capabilities: P.capabilities}
-		if P.meta.llms != _|_ {raw: P.meta.llms}
+		if P.meta.llms != _|_ {
+			raw: P.meta.llms
+			if P.surface != _|_ {surface: P.surface}
+			if P.state != _|_ {state: P.state}
+			if P.capabilities != _|_ {capabilities: P.capabilities}
+		}
 	}
 
 	wellKnown: #wellKnownPlan & {

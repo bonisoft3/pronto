@@ -94,6 +94,67 @@ type Write = { table: string; op: string; filter?: string };
 type Chart = { table: string; field: string; writes: Write[] };
 type DerivedScreen = { name: string; reads: Read[]; writes: Write[]; charts: Chart[]; handlers: string[]; adapters: string[] };
 
+function uniqueNums(nums: number[]): number[] {
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const n of nums) {
+    if (!seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+/** Deduplicates identical derived reads while remapping enclosing `lists` indices. */
+export function dedupReads(reads: Read[]): Read[] {
+  for (const r of reads) {
+    for (const ref of r.lists) {
+      if (ref < 0 || ref >= reads.length) {
+        throw new Error(`dedupReads: ${r.table} lists references read index ${ref} out of ${reads.length}`);
+      }
+    }
+  }
+  let current = reads;
+  while (true) {
+    const oldToNew = new Array<number>(current.length);
+    const seen = new Map<string, number>();
+    const unique: Read[] = [];
+    for (let idx = 0; idx < current.length; idx++) {
+      const r = current[idx];
+      const lists = uniqueNums(r.lists);
+      const normalized = lists.length === r.lists.length ? r : { ...r, lists };
+      const key = JSON.stringify(normalized);
+      const existing = seen.get(key);
+      if (existing !== undefined) {
+        oldToNew[idx] = existing;
+      } else {
+        const next = unique.length;
+        seen.set(key, next);
+        oldToNew[idx] = next;
+        unique.push(normalized);
+      }
+    }
+    if (unique.length === current.length) return unique;
+    current = unique.map((r) => ({ ...r, lists: uniqueNums(r.lists.map((ref) => oldToNew[ref])) }));
+  }
+}
+
+/** Deduplicates identical derived writes in first-seen order. */
+export function dedupWrites(writes: Write[]): Write[] {
+  const seen = new Set<string>();
+  const out: Write[] = [];
+  for (const w of writes) {
+    const key = JSON.stringify(w);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(w);
+    }
+  }
+  return out;
+}
+
 /**
  * The markup projection, as the terminal's reader prints it — read-markup.ts's
  * header is the contract, and this is the half of it this pass reads.
@@ -346,8 +407,8 @@ async function readModuleName(root: string): Promise<string> {
   return mod;
 }
 
-/** Importing the app leaves unreferenced deployment roots unevaluated. */
-export async function readDerivation(appDir: string, pkg: string, lifting: boolean): Promise<unknown> {
+/** Resolve the CUE import path for an app's package within its enclosing module. */
+export async function packageImportPath(appDir: string, pkg: string): Promise<string> {
   const app = await Deno.realPath(appDir);
   let root = app;
   while (await ifMissing(Deno.stat(join(root, "cue.mod/module.cue")), null) === null) {
@@ -360,7 +421,12 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
   const modulePath = versionAt < 0 ? module : module.slice(0, versionAt);
   const version = versionAt < 0 ? "" : module.slice(versionAt);
   const subdir = relative(root, app).split(sep).join("/");
-  const importPath = `${modulePath}${subdir ? `/${subdir}` : ""}${version}:${pkg}`;
+  return `${modulePath}${subdir ? `/${subdir}` : ""}${version}:${pkg}`;
+}
+
+/** Importing the app leaves unreferenced deployment roots unevaluated. */
+export async function readDerivation(appDir: string, pkg: string, lifting: boolean): Promise<unknown> {
+  const importPath = await packageImportPath(appDir, pkg);
   // Write permissions are scoped to the caller's spelling, including Windows short paths.
   const observer = await Deno.makeTempDir({ dir: appDir, prefix: ".pronto-derive-" });
   try {
@@ -722,9 +788,9 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
     }
     screens.push({
       name,
-      reads: screen.reads,
-      writes: screen.writes,
-      charts: screen.machines.map((r) => ({ table: r.table, field: (JSON.parse(r.machine) as { field: string }).field, writes: r.writes })),
+      reads: dedupReads(screen.reads),
+      writes: dedupWrites(screen.writes),
+      charts: screen.machines.map((r) => ({ table: r.table, field: (JSON.parse(r.machine) as { field: string }).field, writes: dedupWrites(r.writes) })),
       handlers: [...new Set([...screen.handlers, ...machineNames])].sort(),
       adapters: [...new Set(screen.adapters)].sort(),
     });

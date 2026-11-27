@@ -1,0 +1,1 @@
+Before editing, use targeted searches to identify the smallest likely set of source files and relevant checks. Read those files to confirm ownership, follow references when needed, and revise the set when evidence changes.

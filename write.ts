@@ -634,12 +634,12 @@ async function drawIr(drawn: Drawing | undefined): Promise<boolean> {
 // Strict, as the emission's export is, so a reused drawing and a fresh one
 // are the same read of the program.
 async function exportDrawing(): Promise<Drawing> {
-  const out = await new Deno.Command("cue", {
+  const exported = await new Deno.Command("cue", {
     args: ["export", ".", "-e", `{${DRAWING}}`, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
-    stderr: "piped",
+    stderr: "inherit",
   }).output();
-  if (!out.success) fail(new TextDecoder().decode(out.stderr));
-  return JSON.parse(new TextDecoder().decode(out.stdout)) as Drawing;
+  if (!exported.success) fail("cue export failed");
+  return JSON.parse(new TextDecoder().decode(exported.stdout)) as Drawing;
 }

@@ -31,9 +31,9 @@ implementation fills. `cluster: mecha` in a brief resolves through the file
 under `clusters/`, which re-exports one implementation from its home. Pronto
 owns the roster and each implementation owns itself, so adding an
 implementation is one roster file, and pinning or forking its module is how a
-program versions it. The emitted `bayt.cue` redeclares `cluster`, `terminal`
-and `loop` unchanged, and that redeclaration is where a human overrides one by
-unification.
+program versions it. The emitted `bayt.cue` redeclares the `cluster`, `terminal`
+and `loop` escape-hatch seams, while the resolved build graph is emitted to
+`bayt.json`.
 
 ## What each part declares
 

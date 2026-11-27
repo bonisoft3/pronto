@@ -15,7 +15,7 @@
     {"path":"acceptance.md","sha256":"37c3de8f47e18855d72001b9f14668952600b341a84277d41fc5fce0278c9bae","derived":false},
     {"path":".pronto/cel.json","sha256":"8e3f3ea654983cbd7d3ec0db953d0d17db3a71de0b32cd7ed7eda582c8198d85","derived":true},
     {"path":"program_cel.cue","sha256":"0564e862d3446d73b2bc29a2f301b427dfb8d786d7352ec20589d600c60b8c4e","derived":true},
-    {"path":"program_derived.cue","sha256":"010c0ece5b0d081dc7909ec56b19ec257a6b3511241e7409750338c399cc3166","derived":true},
+    {"path":"program_derived.cue","sha256":"416bd6ea41552345597673b55d2d9ed733cd703a2e5f3ff1e79945b41b7fe4ec","derived":true},
     {"path":"shell/screens/counter.css","sha256":"8d03b57574d7db7120048a394c764c0d62134ee2b08f11715769c97e65683441","derived":false},
     {"path":"shell/screens/grid.css","sha256":"0a0a8faea9e085a84b0e62484b3fc5d456057d622610178d11bd1c2f727ea260","derived":false},
     {"path":"shell/screens/timer.css","sha256":"cc2b8115dbcb569c8a3bbb50ef23a1a52d7bfd4794d862c69362b416ee160a85","derived":false},

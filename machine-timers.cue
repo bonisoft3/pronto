@@ -24,14 +24,17 @@ import (
 
 #MachineTimerState: {
 	let C = self
-	code:      _
-	_timed:    (#TimedMachines & {code: C.code}).out
-	_reducers: (#TimedReducers & {code: C.code}).out
+	code:        _
+	_timedNames: [if C.code.state.mecha.rows != _|_ for mn, m in C.code.state.mecha.rows if m._timed {mn}]
+	_reducers:   (#TimedReducers & {code: C.code}).out
 	out: {
-		timers: list.Concat([[for m in C._timed {m.name}], [for m in C._reducers {m.name}]])
+		timers: list.Concat([[for mn in C._timedNames {C.code.state.mecha.rows[mn].name}], [for m in C._reducers {m.name}]])
 		if len(timers) > 0 {
-			timerCheck: strings.Join(list.Concat([[for m in C._timed {
-				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0], signals: [if C.code.state.signals != _|_ {C.code.state.signals}, {}][0], step: (#steps & {code: C.code}).machines})._timerCheck
+			let _step = (#steps & {code: C.code}).machines
+			let _effects = [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0]
+			let _signals = [if C.code.state.signals != _|_ {C.code.state.signals}, {}][0]
+			timerCheck: strings.Join(list.Concat([[for mn in C._timedNames {
+				(#mechaMachineSql & {machine: C.code.state.mecha.rows[mn], entities: C.code.state.entities, effects: _effects, signals: _signals, step: _step})._timerCheck
 			}], [for m in C._reducers for sn, st in m.states if st.after != _|_ for delay, _ in st.after {
 				"""
 					DO $$ BEGIN
@@ -89,13 +92,13 @@ import (
 	machine: _
 	state:   string
 	delay:   string
-	_value: [if (D.delay & =~"^[0-9]+$") != _|_ {D.delay}, D.machine.delays[D.delay]][0]
-	_field: [if (D._value & string) != _|_ if (D._value & =~"^[0-9]+$") == _|_ {D._value}, null][0]
+	_value:  [if (D.delay & =~"^[0-9]+$") != _|_ {D.delay}, D.machine.delays[D.delay]][0]
+	_field:  [if (D._value & string) != _|_ if (D._value & =~"^[0-9]+$") == _|_ {D._value}, null][0]
 	guard: [if D._field != null {"""
-			    IF NEW."\(D._field)" IS NULL THEN
-			      RAISE EXCEPTION 'machine % state % waits after %, whose duration % is null', \((#sqlLit & {v: D.machine.name}).out), '\(D.state)', '\(D.delay)', '\(D._field)';
-			    END IF;
-			"""}, ""][0]
+		    IF NEW."\(D._field)" IS NULL THEN
+		      RAISE EXCEPTION 'machine % state % waits after %, whose duration % is null', \((#sqlLit & {v: D.machine.name}).out), '\(D.state)', '\(D.delay)', '\(D._field)';
+		    END IF;
+		"""}, ""][0]
 	// The ticker names an instant in milliseconds, so a duration finer than
 	// one is due at the next: never earlier than it asks, and an instant a
 	// tick can name exactly.
@@ -127,11 +130,12 @@ import (
 			\(strings.Join([for delay, _ in delays {
 				let due = #TimerDueSql & {machine: _m, "state": state, "delay": delay}
 				"""
-				\(due.guard)
-				    INSERT INTO public.schedule (name, due_at, max_lateness_seconds, emits_entity, emits_values)
-				      VALUES ('machine:' || gen_random_uuid()::text, \(due.out),
-				        2147483647, 'machine_timer_tick', jsonb_build_object('machine', \(_name), 'row', \(_newKey), 'state', '\(state)', 'delay', '\(delay)'));
-				"""}], "\n"))
+					\(due.guard)
+					    INSERT INTO public.schedule (name, due_at, max_lateness_seconds, emits_entity, emits_values)
+					      VALUES ('machine:' || gen_random_uuid()::text, \(due.out),
+					        2147483647, 'machine_timer_tick', jsonb_build_object('machine', \(_name), 'row', \(_newKey), 'state', '\(state)', 'delay', '\(delay)'));
+					"""
+			}], "\n"))
 			  END IF;
 			"""
 	}]

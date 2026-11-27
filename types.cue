@@ -148,20 +148,39 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 // leaves the seed row's optional fields incomplete instead of absent, and an
 // entity whose seed omits an optional type column then fails to export.
 #TypeConstraint: {
-	string:    {#types.string, valid: #TypeString & !~#types.string.refuse}
-	bool:      {#types.bool, valid: #TypeBool}
-	int32:     {#types.int32, valid: (int & >=#types.int32.min & <=#types.int32.max)}
-	int64:     {#types.int64, valid: #TypeString & =~#types.int64.pattern}
-	double:    {#types.double, valid: number}
-	bytes:     {#types.bytes, valid: #TypeString & =~#types.bytes.pattern}
-	uuid:      {#types.uuid, valid: #TypeString & =~#types.uuid.pattern}
-	timestamp: {#types.timestamp, valid: #TypeString & =~#types.timestamp.pattern}
-	duration:  {#types.duration, valid: #TypeString & =~#types.duration.pattern}
-	decimal:   {#types.decimal, valid: #TypeString & =~#types.decimal.pattern}
-	date:      {#types.date, valid: #TypeString & =~#types.date.pattern}
-	time:      {#types.time, valid: #TypeString & =~#types.time.pattern}
-	timezone:  {#types.timezone, valid: #TypeString & =~#types.timezone.pattern}
-	json:      {#types.json, valid: _}
+	string:    {#types.string, valid: #ScalarTypeValid.string}
+	bool:      {#types.bool, valid: #ScalarTypeValid.bool}
+	int32:     {#types.int32, valid: #ScalarTypeValid.int32}
+	int64:     {#types.int64, valid: #ScalarTypeValid.int64}
+	double:    {#types.double, valid: #ScalarTypeValid.double}
+	bytes:     {#types.bytes, valid: #ScalarTypeValid.bytes}
+	uuid:      {#types.uuid, valid: #ScalarTypeValid.uuid}
+	timestamp: {#types.timestamp, valid: #ScalarTypeValid.timestamp}
+	duration:  {#types.duration, valid: #ScalarTypeValid.duration}
+	decimal:   {#types.decimal, valid: #ScalarTypeValid.decimal}
+	date:      {#types.date, valid: #ScalarTypeValid.date}
+	time:      {#types.time, valid: #ScalarTypeValid.time}
+	timezone:  {#types.timezone, valid: #ScalarTypeValid.timezone}
+	json:      {#types.json, valid: #ScalarTypeValid.json}
 	geojson:   {#types.geojson, valid: #GeoJSON}
 }
 #Carrier: #TypeConstraint
+
+// Non-GeoJSON validity constraints kept separate from #TypeConstraint so
+// #literalDefault can validate scalar defaults without evaluating recursive #GeoJSON.
+#ScalarTypeValid: {
+	string:    #TypeString & !~#types.string.refuse
+	bool:      #TypeBool
+	int32:     int & >=#types.int32.min & <=#types.int32.max
+	int64:     #TypeString & =~#types.int64.pattern
+	double:    number
+	bytes:     #TypeString & =~#types.bytes.pattern
+	uuid:      #TypeString & =~#types.uuid.pattern
+	timestamp: #TypeString & =~#types.timestamp.pattern
+	duration:  #TypeString & =~#types.duration.pattern
+	decimal:   #TypeString & =~#types.decimal.pattern
+	date:      #TypeString & =~#types.date.pattern
+	time:      #TypeString & =~#types.time.pattern
+	timezone:  #TypeString & =~#types.timezone.pattern
+	json:      _
+}

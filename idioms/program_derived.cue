@@ -28,7 +28,6 @@ code: surface: screens: {
 	timer: {
 		reads: [
 			{table: "clock", kind: "live", nested: false, lists: [], route: "view", clauses: [{"col":"id","op":"eq"}], embeds: [], orders: []},
-			{table: "clock", kind: "live", nested: false, lists: [], route: "view", clauses: [{"col":"id","op":"eq"}], embeds: [], orders: []},
 		]
 		writes: [
 			{table: "clock", op: "reduce"},
